@@ -1,0 +1,10 @@
+# build outputs
+src/dinput8.dll
+src/attfix_lua.h
+*.o
+
+# game-side files that may end up here while testing
+*.log
+*.dmp
+*.csv
+AttTFix.ini
