@@ -10,7 +10,7 @@
 #include <math.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
-#define ATTFIX_VERSION "1.0"
+#define ATTFIX_VERSION "1.0.1"
 
 // ---------------------------------------------------------------- log
 static FILE* g_log = nullptr;
@@ -38,7 +38,7 @@ static void TraceFrame(DWORD frame, double nowMs, double ft, const char* sceneCl
 static void __fastcall h_UpdaterUpdate(BYTE* self, void* edx, float dt);
 static float g_lastDt = 0;
 static int g_traceSec = 60;
-static int g_renderer = 0;
+static int g_renderer = 0; static int g_dxvkActive = 0;
 static int g_listenerHz = 60;
 static DWORD g_listenerSkipped = 0, g_listenerDone = 0;
 static int L_GetVideo(void* L);
@@ -217,7 +217,7 @@ static void* __stdcall h_D3DCreate(UINT sdk) {
         char p[MAX_PATH]; snprintf(p, sizeof p, "%sdxvk\\d3d9.dll", g_dir);
         HMODULE m = LoadLibraryA(p);
         auto f = m ? (D3DCreate_t)GetProcAddress(m, "Direct3DCreate9") : nullptr;
-        if (f) { d3d = f(sdk); LOG("renderer: DXVK (%s) -> %p", p, d3d); }
+        if (f) { d3d = f(sdk); g_dxvkActive = d3d != nullptr; LOG("renderer: DXVK (%s) -> %p", p, d3d); }
         else LOG("renderer: DXVK requested but %s could not be loaded (error %lu), using system d3d9", p, GetLastError());
     }
     if (!d3d) d3d = o_D3DCreate(sdk);
@@ -921,8 +921,8 @@ static void DrawOverlay(void* dev) {
     }
     char line[400]; int n = 0; line[0] = 0;
     if (g_showFps)
-        n += snprintf(line + n, sizeof line - n, "%.0f FPS  %.2f ms (max %.1f)   [F11 hide]\nupdate %.2f  render %.2f  present %.2f\nsmooth: move %s  anim %s  (F10/F9)%s\n",
-                      g_ovFps, g_ovMs, g_ovMax, g_ovUpd, g_ovRen, g_ovPres, g_interp ? "on" : "off", g_animBlend ? "on" : "off",
+        n += snprintf(line + n, sizeof line - n, "%.0f FPS  %.2f ms (max %.1f)  %s  [F11 hide]\nupdate %.2f  render %.2f  present %.2f\nsmooth: move %s  anim %s  (F10/F9)%s\n",
+                      g_ovFps, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9", g_ovUpd, g_ovRen, g_ovPres, g_interp ? "on" : "off", g_animBlend ? "on" : "off",
                       g_windowed && g_vsync && g_fpsLimit <= 0 ? (!g_dwmOk ? "  sync: timer" : g_dwmSync == 2 ? "  sync: flush" : g_gridOk == 1 ? "  sync: vblank" : "  sync: timer") : "");
     if (toast) snprintf(line + n, sizeof line - n, "%s", g_toast);
     typedef INT (__stdcall *DT_t)(void*, void*, LPCSTR, INT, RECT*, DWORD, DWORD);
