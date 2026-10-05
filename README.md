@@ -31,7 +31,15 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - Optional: start from Steam without the Fulqrum launcher (`launcher.ini` with `skip=true`).
 - On-screen FPS / frame-time overlay (F11), optional performance log and sampling profiler.
 
-**Hotkeys:** F11 — FPS overlay, F10 — movement/camera smoothing on/off, F9 — animation smoothing on/off.
+**Performance**
+- Sun / lens flare visibility test without a GPU stall. The original locked the whole back buffer twice per frame
+  whenever the sun was on screen (33 MB copied per lock at 4K); now one pixel is copied and read 2-3 frames later.
+  Looking towards the sun on the world map: about 86 → 160+ FPS (D3D9), 200+ FPS with DXVK.
+- Forest trees: no per-tree render state save/restore (exact emulation through an effect state manager).
+- Optional Large Address Aware tool (`AttTFix_LAA.exe`, from `tools/laa.cpp`): 4 GB of address space instead of 2 GB.
+  Required for the optional DXVK renderer (`[Video] Renderer=dxvk` loads `dxvk\d3d9.dll` from the game folder).
+
+**Hotkeys:** F11 — FPS overlay, F10 — movement/camera smoothing on/off, F9 — animation smoothing on/off, F7 — render optimizations on/off.
 
 ## Installing a release
 
@@ -67,7 +75,8 @@ The result is `src/dinput8.dll`. Copy it next to `ATThrone.exe`.
 
 - Logs: `AttTFix.log` (always), `AttTFix_perf.log` with `[Perf] Log=1` (+ `Sampler=1` for the profiler, `TraceSeconds=N` for a per-frame trace, F8 for an animation trace).
 - Every patch checks the original bytes first; on a different game build it is skipped and noted in the log.
-- Ideas that are not done yet: smoothing for trees / town animations, LAA flag, render optimizations (trees and effect switching dominate the frame), optional DXVK renderer (`[Video] Renderer=dxvk` loads `dxvk\d3d9.dll` from the game folder).
+- `src/renderopt.inc` holds the render optimizations (included by `attfix.cpp`); `[Perf] AsyncSunCheck` / `TreeBatch` switch them off individually.
+- Ideas that are not done yet: smoothing for trees / town animations, instanced drawing of trees, fewer effect switches.
 
 ## How it works (short)
 
@@ -107,7 +116,14 @@ No game code or assets are included in this repository.
 - Необязательно: запуск из Steam без лаунчера (`launcher.ini` со строкой `skip=true`).
 - Счётчик FPS (F11), журнал производительности и профайлер по желанию.
 
-**Клавиши:** F11 — счётчик FPS, F10 — сглаживание движения и камеры, F9 — сглаживание анимаций.
+**Производительность**
+- Проверка видимости солнца для бликов без остановки видеокарты. Оригинал, когда солнце в кадре, дважды за кадр
+  блокировал весь экранный буфер (на 4K — копия 33 МБ); теперь копируется один пиксель и читается через 2–3 кадра.
+  Взгляд в сторону солнца на карте мира: примерно 86 → 160+ FPS (D3D9), 200+ FPS с DXVK.
+- Деревья леса рисуются без сохранения и восстановления состояний рендера для каждого дерева (точная эмуляция).
+- Утилита `AttTFix_LAA.exe` (`tools/laa.cpp`): 4 ГБ адресного пространства вместо 2 ГБ. Нужна для DXVK (`[Video] Renderer=dxvk`).
+
+**Клавиши:** F11 — счётчик FPS, F10 — сглаживание движения и камеры, F9 — сглаживание анимаций, F7 — оптимизации рендера.
 
 ### Установка
 
@@ -143,6 +159,6 @@ CXX=g++ sh build.sh
 
 - Журналы: `AttTFix.log` (всегда), `AttTFix_perf.log` при `[Perf] Log=1` (`Sampler=1` — профайлер, `TraceSeconds=N` — покадровый след, F8 — запись анимации).
 - Каждая правка сначала сверяет исходные байты игры; на другой сборке игры она пропускается с записью в журнал.
-- Не сделано: сглаживание деревьев и городских анимаций, флаг LAA, оптимизация рендера, DXVK как опция (`[Video] Renderer=dxvk` загружает `dxvk\d3d9.dll` из папки игры).
+- Не сделано: сглаживание деревьев и городских анимаций, отрисовка деревьев инстансингом, меньше переключений эффектов.
 
 Код и ресурсы игры в репозитории не содержатся.

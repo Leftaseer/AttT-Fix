@@ -10,7 +10,7 @@
 #include <math.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
-#define ATTFIX_VERSION "1.0.2"
+#define ATTFIX_VERSION "1.0.3"
 
 // ---------------------------------------------------------------- log
 static FILE* g_log = nullptr;
@@ -56,6 +56,7 @@ static void FrameEvent(const char* fmt, ...);
 static int L_SetInput(void* L);
 static void SubclassWindow(HWND h);
 static void* g_d3d = nullptr;
+static void SunRelease(); static void RenderOptStats();
 
 // ---------------------------------------------------------------- IAT patch
 static void** FindIAT(HMODULE mod, const char* dll, const char* func) {
@@ -172,6 +173,7 @@ static HRESULT __stdcall h_Reset(void* dev, D3DPP* p) {
     if (!p->Windowed && p->Refresh == 0) { UINT hz = MaxRefresh(p->W, p->H); if (hz > 60) p->Refresh = hz; }
     p->Interval = g_vsync ? 1 : 0x80000000;
     LogPP("Device::Reset", p);
+    SunRelease();
     HRESULT hr = o_Reset(dev, p);
     LOG("Device::Reset -> %08lX", hr);
     return hr;
@@ -785,6 +787,7 @@ static void FlushStats(double nowMs) {
     unsigned vaMB = (unsigned)((mem.ullTotalVirtual - mem.ullAvailVirtual) >> 20), vaTotal = (unsigned)(mem.ullTotalVirtual >> 20);
     PLOG("STATS %4.1fs frames=%d fps=%.1f 1%%low=%.1f | frame ms avg=%.2f p50=%.2f p99=%.2f max=%.2f | VA %u/%u MB | avg ms:%s",
          (nowMs - g_winStartMs) / 1000.0, g_nft, g_nft * 1000.0 / (nowMs - g_winStartMs), 1000.0 * nw / ws, avg, p50, p99, mx, vaMB, vaTotal, secs);
+    RenderOptStats();
     g_nft = 0; for (int i = 0; i < S_COUNT; ++i) g_secSum[i] = 0; g_winStartMs = nowMs;
 }
 static inline LONGLONG Now() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
@@ -900,6 +903,7 @@ typedef HRESULT (__stdcall *Clear_t)(void*, DWORD, const void*, DWORD, DWORD, fl
 typedef HRESULT (__stdcall *Dev0_t)(void*);
 typedef HRESULT (__stdcall *Present_t2)(void*, const void*, const void*, HWND, const void*);
 typedef void (__fastcall *VM0_t)(void* self, void* edx);
+#include "renderopt.inc"
 static void* g_font = nullptr;
 static double g_ovFps = 0, g_ovMs = 0, g_ovUpd = 0, g_ovRen = 0, g_ovPres = 0, g_ovMax = 0;
 static void FontRelease() { if (g_font) { ((ULONG (__stdcall*)(void*))(*(void***)g_font)[2])(g_font); g_font = nullptr; } }
@@ -915,6 +919,11 @@ static void DrawOverlay(void* dev) {
     if (KeyPressed(VK_F9, d9)) { g_animBlend = !g_animBlend; Toast(g_animBlend ? "F9  animation blending: ON" : "F9  animation blending: OFF (original 30 fps)"); }
     static bool d8 = false;
     if (KeyPressed(VK_F8, d8)) { if (g_atr) { fclose(g_atr); g_atr = nullptr; } g_atrArmed = true; g_atrLeft = 1200; Toast("F8  animation trace: recording 1200 hero draws"); }
+    static bool d7 = false;
+    if (KeyPressed(VK_F7, d7)) {
+        int on = !(g_optSun || g_optTrees); g_optSun = g_optTrees = on;
+        Toast(on ? "F7  render optimizations (sun test, trees): ON" : "F7  render optimizations: OFF (original)");
+    }
     if (KeyPressed(VK_F10, d10)) { g_interp = !g_interp; Toast(g_interp ? "F10 movement/camera smoothing: ON" : "F10 movement/camera smoothing: OFF (original)"); }
     bool toast = g_toastUntil && GetTickCount() < g_toastUntil;
     if (!g_showFps && !toast) return;
@@ -928,8 +937,9 @@ static void DrawOverlay(void* dev) {
     }
     char line[400]; int n = 0; line[0] = 0;
     if (g_showFps)
-        n += snprintf(line + n, sizeof line - n, "%.0f FPS  %.2f ms (max %.1f)  %s  [F11 hide]\nupdate %.2f  render %.2f  present %.2f\nsmooth: move %s  anim %s  (F10/F9)%s\n",
-                      g_ovFps, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9", g_ovUpd, g_ovRen, g_ovPres, g_interp ? "on" : "off", g_animBlend ? "on" : "off",
+        n += snprintf(line + n, sizeof line - n, "%.0f FPS  %.2f ms (max %.1f)  %s  [F11 hide]\nupdate %.2f  render %.2f  present %.2f\ntrees %.0f  %.2f ms  sun %.2f ms  opt %s (F7)\nsmooth: move %s  anim %s  (F10/F9)%s\n",
+                      g_ovFps, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9", g_ovUpd, g_ovRen, g_ovPres,
+                      g_ovTreeN, g_ovTrees, g_ovSun, (g_optSun || g_optTrees) ? "on" : "off", g_interp ? "on" : "off", g_animBlend ? "on" : "off",
                       g_windowed && g_vsync && g_fpsLimit <= 0 ? (!g_dwmOk ? "  sync: timer" : g_dwmSync == 2 ? "  sync: flush" : g_gridOk == 1 ? "  sync: vblank" : "  sync: timer") : "");
     if (toast) snprintf(line + n, sizeof line - n, "%s", g_toast);
     typedef INT (__stdcall *DT_t)(void*, void*, LPCSTR, INT, RECT*, DWORD, DWORD);
@@ -939,14 +949,16 @@ static void DrawOverlay(void* dev) {
     dt(g_font, nullptr, line, -1, &r2, DT_NOCLIP, 0xFFFFE070);
 }
 static void UpdateOverlayStats() {   // every 0.5 s from the per-frame sections
-    static double acc[4] = {0}; static int n = 0; static double mx = 0; static LONGLONG t0 = 0;
+    static double acc[7] = {0}; static int n = 0; static double mx = 0; static LONGLONG t0 = 0;
     LONGLONG now = Now(); if (!t0) t0 = now;
     double upd = 0; for (int i = S_TIMER; i <= S_OBJ8C; ++i) upd += g_sec[i];
     double ren = g_sec[S_CLEAR] + g_sec[S_RSCENE] + g_sec[S_RCURSOR] + g_sec[S_ENDSCENE];
+    acc[4] += g_frTrees; acc[5] += g_frTreeN; acc[6] += g_frSun; g_frTrees = g_frSun = 0; g_frTreeN = 0;
     acc[0] += g_lastFt; acc[1] += upd; acc[2] += ren; acc[3] += g_sec[S_PRESENT]; if (g_lastFt > mx) mx = g_lastFt; ++n;
     double el = (now - t0) * g_tickMs;
     if (el >= 500.0 && n > 0) {
         g_ovFps = n * 1000.0 / el; g_ovMs = acc[0] / n; g_ovUpd = acc[1] / n; g_ovRen = acc[2] / n; g_ovPres = acc[3] / n; g_ovMax = mx;
+        g_ovTrees = acc[4] / n; g_ovTreeN = acc[5] / n; g_ovSun = acc[6] / n; acc[4] = acc[5] = acc[6] = 0;
         acc[0] = acc[1] = acc[2] = acc[3] = 0; n = 0; mx = 0; t0 = now;
     }
 }
@@ -1799,6 +1811,13 @@ static void Init() {
     AddVectoredExceptionHandler(1, VectoredAV);
     o_SPAM = (SPAM_t)PatchIAT("KERNEL32.dll", "SetProcessAffinityMask", (void*)h_SPAM);
     InstallPerfPatches();
+    if (!GetPrivateProfileStringA("Perf", "AsyncSunCheck", "", tmp, sizeof tmp, path)) {
+        WritePrivateProfileStringA("Perf", "AsyncSunCheck", "1  ; 1 = sun/lens flare visibility read without stalling the GPU, 0 = original (F7 toggles)", path);
+        WritePrivateProfileStringA("Perf", "TreeBatch", "1  ; 1 = forest trees without per-tree render state save/restore, 0 = original (F7 toggles)", path);
+    }
+    g_optSun = GetPrivateProfileIntA("Perf", "AsyncSunCheck", 1, path) != 0;
+    g_optTrees = GetPrivateProfileIntA("Perf", "TreeBatch", 1, path) != 0;
+    InstallRenderOpt();
     {   // Sound: stopping a 3D sound after the sound manager [0x6CA4B4] is gone (return to main menu) -> null this
         static const BYTE p[7] = { 0x83, 0xEC, 0x0C, 0x8B, 0x54, 0x24, 0x10 };
         GuardNullThis("Sound3D.Stop(0x4C53A0)", (BYTE*)0x004C53A0, p, 7, 0x0C);
