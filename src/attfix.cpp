@@ -10,7 +10,7 @@
 #include <math.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
-#define ATTFIX_VERSION "1.0.1"
+#define ATTFIX_VERSION "1.0.2"
 
 // ---------------------------------------------------------------- log
 static FILE* g_log = nullptr;
@@ -213,6 +213,13 @@ static HRESULT __stdcall h_CreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd
 }
 static void* __stdcall h_D3DCreate(UINT sdk) {
     void* d3d = nullptr;
+    if (g_renderer == 1) {   // DXVK needs more address space than 2 GB at high resolutions -> only with LAA
+        auto nt = (IMAGE_NT_HEADERS*)((BYTE*)GetModuleHandleA(nullptr) + ((IMAGE_DOS_HEADER*)GetModuleHandleA(nullptr))->e_lfanew);
+        if (!(nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE)) {
+            g_renderer = 0;
+            LOG("renderer: DXVK skipped - ATThrone.exe is not Large Address Aware (2 GB limit, run AttTFix_LAA.exe); using system d3d9");
+        }
+    }
     if (g_renderer == 1) {
         char p[MAX_PATH]; snprintf(p, sizeof p, "%sdxvk\\d3d9.dll", g_dir);
         HMODULE m = LoadLibraryA(p);
