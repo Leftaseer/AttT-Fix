@@ -10,7 +10,7 @@
 #include <math.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
-#define ATTFIX_VERSION "1.0.3"
+#define ATTFIX_VERSION "1.0.4"
 
 // ---------------------------------------------------------------- log
 static FILE* g_log = nullptr;
@@ -56,7 +56,7 @@ static void FrameEvent(const char* fmt, ...);
 static int L_SetInput(void* L);
 static void SubclassWindow(HWND h);
 static void* g_d3d = nullptr;
-static void SunRelease(); static void RenderOptStats();
+static void SunRelease(); static void RenderOptStats(); static void MeshSmoothStats(); static void ParticleStats(); static bool Writable(void* p);
 
 // ---------------------------------------------------------------- IAT patch
 static void** FindIAT(HMODULE mod, const char* dll, const char* func) {
@@ -787,7 +787,7 @@ static void FlushStats(double nowMs) {
     unsigned vaMB = (unsigned)((mem.ullTotalVirtual - mem.ullAvailVirtual) >> 20), vaTotal = (unsigned)(mem.ullTotalVirtual >> 20);
     PLOG("STATS %4.1fs frames=%d fps=%.1f 1%%low=%.1f | frame ms avg=%.2f p50=%.2f p99=%.2f max=%.2f | VA %u/%u MB | avg ms:%s",
          (nowMs - g_winStartMs) / 1000.0, g_nft, g_nft * 1000.0 / (nowMs - g_winStartMs), 1000.0 * nw / ws, avg, p50, p99, mx, vaMB, vaTotal, secs);
-    RenderOptStats();
+    RenderOptStats(); MeshSmoothStats(); ParticleStats();
     g_nft = 0; for (int i = 0; i < S_COUNT; ++i) g_secSum[i] = 0; g_winStartMs = nowMs;
 }
 static inline LONGLONG Now() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
@@ -903,6 +903,7 @@ typedef HRESULT (__stdcall *Clear_t)(void*, DWORD, const void*, DWORD, DWORD, fl
 typedef HRESULT (__stdcall *Dev0_t)(void*);
 typedef HRESULT (__stdcall *Present_t2)(void*, const void*, const void*, HWND, const void*);
 typedef void (__fastcall *VM0_t)(void* self, void* edx);
+#include "smoothanim.inc"
 #include "renderopt.inc"
 static void* g_font = nullptr;
 static double g_ovFps = 0, g_ovMs = 0, g_ovUpd = 0, g_ovRen = 0, g_ovPres = 0, g_ovMax = 0;
@@ -919,12 +920,18 @@ static void DrawOverlay(void* dev) {
     if (KeyPressed(VK_F9, d9)) { g_animBlend = !g_animBlend; Toast(g_animBlend ? "F9  animation blending: ON" : "F9  animation blending: OFF (original 30 fps)"); }
     static bool d8 = false;
     if (KeyPressed(VK_F8, d8)) { if (g_atr) { fclose(g_atr); g_atr = nullptr; } g_atrArmed = true; g_atrLeft = 1200; Toast("F8  animation trace: recording 1200 hero draws"); }
-    static bool d7 = false;
-    if (KeyPressed(VK_F7, d7)) {
-        int on = !(g_optSun || g_optTrees); g_optSun = g_optTrees = on;
-        Toast(on ? "F7  render optimizations (sun test, trees): ON" : "F7  render optimizations: OFF (original)");
+    // Ctrl+1..5 while the overlay is shown (F10 / F9 / F7 still work as before)
+    static bool d7 = false, c1 = false, c2 = false, c3 = false, c4 = false, c5 = false;
+    bool ctrl = g_showFps && (GetAsyncKeyState(VK_CONTROL) & 0x8000);
+    bool k1 = KeyPressed('1', c1) && ctrl, k2 = KeyPressed('2', c2) && ctrl, k3 = KeyPressed('3', c3) && ctrl, k4 = KeyPressed('4', c4) && ctrl, k5 = KeyPressed('5', c5) && ctrl;
+    if (KeyPressed(VK_F10, d10) || k1) { g_interp = !g_interp; Toast(g_interp ? "movement/camera smoothing: ON" : "movement/camera smoothing: OFF (original)"); }
+    if (k2) { g_animBlend = !g_animBlend; Toast(g_animBlend ? "character animation blending: ON" : "character animation blending: OFF (original 30 fps)"); }
+    if (k3) { g_meshSmooth = !g_meshSmooth; Toast(g_meshSmooth ? "object animation smoothing (trees, water, flags): ON" : "object animation smoothing: OFF (original 30 fps)"); }
+    if (k5) { g_partSmooth = !g_partSmooth; Toast(g_partSmooth ? "particle smoothing: ON" : "particle smoothing: OFF (original tick rate)"); }
+    if (KeyPressed(VK_F7, d7) || k4) {
+        int on = !(g_optSun || g_optTrees || g_optPoly); g_optSun = g_optTrees = g_optPoly = on;
+        Toast(on ? "optimizations (sun test, trees, polygon test): ON" : "optimizations: OFF (original)");
     }
-    if (KeyPressed(VK_F10, d10)) { g_interp = !g_interp; Toast(g_interp ? "F10 movement/camera smoothing: ON" : "F10 movement/camera smoothing: OFF (original)"); }
     bool toast = g_toastUntil && GetTickCount() < g_toastUntil;
     if (!g_showFps && !toast) return;
     if (!g_font) {
@@ -937,10 +944,12 @@ static void DrawOverlay(void* dev) {
     }
     char line[400]; int n = 0; line[0] = 0;
     if (g_showFps)
-        n += snprintf(line + n, sizeof line - n, "%.0f FPS  %.2f ms (max %.1f)  %s  [F11 hide]\nupdate %.2f  render %.2f  present %.2f\ntrees %.0f  %.2f ms  sun %.2f ms  opt %s (F7)\nsmooth: move %s  anim %s  (F10/F9)%s\n",
-                      g_ovFps, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9", g_ovUpd, g_ovRen, g_ovPres,
-                      g_ovTreeN, g_ovTrees, g_ovSun, (g_optSun || g_optTrees) ? "on" : "off", g_interp ? "on" : "off", g_animBlend ? "on" : "off",
-                      g_windowed && g_vsync && g_fpsLimit <= 0 ? (!g_dwmOk ? "  sync: timer" : g_dwmSync == 2 ? "  sync: flush" : g_gridOk == 1 ? "  sync: vblank" : "  sync: timer") : "");
+        n += snprintf(line + n, sizeof line - n, "%.0f FPS  %.2f ms (max %.1f)  %s%s\nupdate %.2f  render %.2f  present %.2f  |  trees %.0f %.2f ms  sun %.2f ms\n"
+                      "Ctrl+1 movement: %s   Ctrl+2 characters: %s   Ctrl+3 objects: %s   Ctrl+4 optimizations: %s   Ctrl+5 particles: %s   F11 hide\n",
+                      g_ovFps, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9",
+                      g_windowed && g_vsync && g_fpsLimit <= 0 ? (!g_dwmOk ? "  sync: timer" : g_dwmSync == 2 ? "  sync: flush" : g_gridOk == 1 ? "  sync: vblank" : "  sync: timer") : "",
+                      g_ovUpd, g_ovRen, g_ovPres, g_ovTreeN, g_ovTrees, g_ovSun,
+                      g_interp ? "on" : "off", g_animBlend ? "on" : "off", g_meshSmooth ? "on" : "off", (g_optSun || g_optTrees || g_optPoly) ? "on" : "off", g_partSmooth ? "on" : "off");
     if (toast) snprintf(line + n, sizeof line - n, "%s", g_toast);
     typedef INT (__stdcall *DT_t)(void*, void*, LPCSTR, INT, RECT*, DWORD, DWORD);
     DT_t dt = (DT_t)(*(void***)g_font)[14];
@@ -1432,7 +1441,9 @@ static void __fastcall h_UpdaterUpdate(BYTE* self, void* /*edx*/, float dt) {
     if (*(float*)(self + 0x24) <= acc) {
         int n = 0; float step;
         do {
+            BYTE* prevUpd = g_tickUpd; g_tickUpd = self;
             ((VTick_t)(*(void***)self)[5])(self, nullptr);
+            g_tickUpd = prevUpd;
             step = *(float*)(self + 0x24);
             ++n;
             acc = *(float*)(self + 0x28) - step;
@@ -1684,6 +1695,50 @@ static LONG CALLBACK VectoredAV(EXCEPTION_POINTERS* ep) {
 // ---------------------------------------------------------------- dinput8 proxy
 typedef HRESULT (WINAPI *DI8Create_t)(HINSTANCE, DWORD, REFIID, LPVOID*, void*);
 static DI8Create_t o_DI8Create;
+// ---------------------------------------------------------------- DirectInput: Ctrl+1..5 are AttTFix toggles
+// The game binds 1/2/3 to camera presets. While Ctrl is held (and the overlay is shown) the digit keys are
+// removed from the keyboard state and the buffered key events the game reads.
+typedef HRESULT (__stdcall *DICreateDev_t)(void*, const GUID*, void**, void*);
+typedef HRESULT (__stdcall *DIGetState_t)(void*, DWORD, void*);
+typedef HRESULT (__stdcall *DIGetData_t)(void*, DWORD, void*, DWORD*, DWORD);
+static DICreateDev_t o_DICreateDev = nullptr; static DIGetState_t o_DIGetState = nullptr; static DIGetData_t o_DIGetData = nullptr;
+static void* g_kbdDev = nullptr;
+static bool DigitsBlocked() { return g_showFps && (GetAsyncKeyState(VK_CONTROL) & 0x8000); }
+static HRESULT __stdcall h_DIGetState(void* dev, DWORD cb, void* buf) {
+    HRESULT hr = o_DIGetState(dev, cb, buf);
+    if (hr >= 0 && dev == g_kbdDev && cb >= 256 && buf && DigitsBlocked())
+        for (int k = 0x02; k <= 0x06; ++k) ((BYTE*)buf)[k] = 0;          // DIK_1 .. DIK_5
+    return hr;
+}
+static HRESULT __stdcall h_DIGetData(void* dev, DWORD cbObj, void* rg, DWORD* inout, DWORD flags) {
+    HRESULT hr = o_DIGetData(dev, cbObj, rg, inout, flags);
+    if (hr >= 0 && dev == g_kbdDev && rg && inout && cbObj >= 8 && DigitsBlocked()) {
+        BYTE* p = (BYTE*)rg; DWORD n = *inout, w = 0;
+        for (DWORD i = 0; i < n; ++i) {
+            DWORD ofs = *(DWORD*)(p + i * cbObj);
+            if (ofs >= 0x02 && ofs <= 0x06) continue;
+            if (w != i) memmove(p + w * cbObj, p + i * cbObj, cbObj);
+            ++w;
+        }
+        *inout = w;
+    }
+    return hr;
+}
+static HRESULT __stdcall h_DICreateDev(void* di, const GUID* g, void** out, void* outer) {
+    HRESULT hr = o_DICreateDev(di, g, out, outer);
+    static const GUID kbd = { 0x6F1D2B61, 0xD5A0, 0x11CF, { 0xBF, 0xC7, 0x44, 0x45, 0x53, 0x54, 0x00, 0x00 } };
+    if (hr >= 0 && out && *out && g && !memcmp(g, &kbd, sizeof kbd)) {
+        g_kbdDev = *out;
+        void** vt = *(void***)*out;
+        if (!o_DIGetState) { o_DIGetState = (DIGetState_t)PatchVtbl(vt, 9, (void*)h_DIGetState); o_DIGetData = (DIGetData_t)PatchVtbl(vt, 10, (void*)h_DIGetData); }
+        LOG("DirectInput keyboard %p: Ctrl+1..5 reserved for AttTFix while the overlay is shown", *out);
+    }
+    return hr;
+}
+static void HookDirectInput(void* di) {
+    if (o_DICreateDev) return;
+    o_DICreateDev = (DICreateDev_t)PatchVtbl(*(void***)di, 3, (void*)h_DICreateDev);
+}
 extern "C" __declspec(dllexport) HRESULT WINAPI DirectInput8Create(HINSTANCE h, DWORD v, REFIID r, LPVOID* o, void* u) {
     if (!o_DI8Create) {
         char p[MAX_PATH]; GetSystemDirectoryA(p, MAX_PATH); strcat(p, "\\dinput8.dll");
@@ -1691,7 +1746,9 @@ extern "C" __declspec(dllexport) HRESULT WINAPI DirectInput8Create(HINSTANCE h, 
         o_DI8Create = m ? (DI8Create_t)GetProcAddress(m, "DirectInput8Create") : nullptr;
         if (!o_DI8Create) { LOG("FATAL: system dinput8 not loaded"); return E_FAIL; }
     }
-    return o_DI8Create(h, v, r, o, u);
+    HRESULT hr = o_DI8Create(h, v, r, o, u);
+    if (hr >= 0 && o && *o) HookDirectInput(*o);
+    return hr;
 }
 
 // ---------------------------------------------------------------- init
@@ -1818,6 +1875,18 @@ static void Init() {
     g_optSun = GetPrivateProfileIntA("Perf", "AsyncSunCheck", 1, path) != 0;
     g_optTrees = GetPrivateProfileIntA("Perf", "TreeBatch", 1, path) != 0;
     InstallRenderOpt();
+    if (!GetPrivateProfileStringA("Perf", "FastPolygonTest", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Perf", "FastPolygonTest", "1  ; 1 = point-in-polygon test of obstacles without per-edge atan2 (same result), 0 = original", path);
+    g_optPoly = GetPrivateProfileIntA("Perf", "FastPolygonTest", 1, path) != 0;
+    InstallPolyOpt();
+    if (!GetPrivateProfileStringA("Smooth", "Objects", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Smooth", "Objects", "1  ; 1 = smooth 30 fps vertex animation of trees, water, flags etc., 0 = original", path);
+    g_meshSmooth = GetPrivateProfileIntA("Smooth", "Objects", 1, path) != 0;
+    InstallMeshSmooth();
+    if (!GetPrivateProfileStringA("Smooth", "Particles", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Smooth", "Particles", "1  ; 1 = particles (smoke, fire, magic) evaluated at the rendered moment, 0 = original tick rate", path);
+    g_partSmooth = GetPrivateProfileIntA("Smooth", "Particles", 1, path) != 0;
+    InstallParticleSmooth();
     {   // Sound: stopping a 3D sound after the sound manager [0x6CA4B4] is gone (return to main menu) -> null this
         static const BYTE p[7] = { 0x83, 0xEC, 0x0C, 0x8B, 0x54, 0x24, 0x10 };
         GuardNullThis("Sound3D.Stop(0x4C53A0)", (BYTE*)0x004C53A0, p, 7, 0x0C);

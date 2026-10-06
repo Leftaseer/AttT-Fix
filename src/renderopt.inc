@@ -252,6 +252,7 @@ static void __fastcall h_TreeTrunk(BYTE* T, void* edx, void* mat, DWORD z) {
     TreePart(T, mat, *(DWORD*)(T + 0x22C), *(void**)(*(BYTE**)(T + 0x1C4) + 0x34), 0);
 }
 static void __fastcall h_TreeFoliage(BYTE* T, void* edx, void* mat, DWORD z) {
+    CtxGuard g((int*)(T + 0x1D8));                                      // foliage sway smoothing (smoothanim.inc)
     if (!g_treeLoop) { ((TreePart_t)0x00455960)(T, edx, mat, z); return; }
     TreePart(T, mat, *(DWORD*)(T + 0x230), *(void**)(*(BYTE**)(*(BYTE**)(T + 0x1C4) + 0x34) + 0x40), *(DWORD*)(T + 0x1D8));
 }
@@ -285,8 +286,57 @@ static void InstallRenderOpt() {
     } else { g_optTrees = 0; LOG("render opt: forest tree code differs, TreeBatch unavailable"); }
     LOG("render opt: async sun test %s (AsyncSunCheck=%d)", o_SunTest ? "installed" : "unavailable", g_optSun);
 }
+
+// ---------------------------------------------------------------- 3) point-in-polygon test (0x43F2F0)
+// Used by movement / collision code against obstacle outlines. The original sums the angle between consecutive
+// vertex vectors with two atan2 calls per edge (over count-1 edges of a circular list) and reports "inside" when
+// |sum| >= pi. Next to a big obstacle (a large rock) it runs thousands of times per frame: ~15 ms of atan2.
+// Same result here: the open-chain sum equals 2*pi*windingNumber - angle(closing edge), the winding number is
+// counted with cross products and only one atan2 is needed. The iterator side effect (count-1 steps) is kept.
+static int g_optPoly = 1;                            // [Perf] FastPolygonTest; Ctrl+4 with the other optimizations
+static DWORD g_polyCalls = 0;
+static int __cdecl h_PointInPoly(const float* A, const float* B, BYTE* it, float dx, float dy) {
+    ++g_polyCalls;
+    int n = *(int*)(it + 4);
+    if (n - 1 <= 0) return 0;
+    BYTE* nd = *(BYTE**)it;
+    float px = B[0] + dx, py = dy + B[1];
+    BYTE* first = nd; BYTE* last = nd;
+    int wn = 0;
+    float ax = 0, ay = 0;
+    for (int i = 0; i < n; ++i) {                                       // vertices start .. start+n-1
+        const float* v = (const float*)(nd + 0x0C);
+        float wx = (A[0] + v[0]) - px, wy = (v[1] + A[1]) - py;
+        if (i > 0) {
+            float c = ax * wy - ay * wx;
+            if (ay <= 0) { if (wy > 0 && c > 0) ++wn; } else { if (wy <= 0 && c < 0) --wn; }
+        }
+        ax = wx; ay = wy; last = nd;
+        if (i < n - 1) nd = *(BYTE**)(nd + 4);
+    }
+    *(BYTE**)it = last;                                                 // iterator advanced n-1 times, as in the original
+    const float* f = (const float*)(first + 0x0C);
+    float bx = (A[0] + f[0]) - px, by = (f[1] + A[1]) - py;             // closing edge last -> first
+    float c = ax * by - ay * bx;
+    if (ay <= 0) { if (by > 0 && c > 0) ++wn; } else { if (by <= 0 && c < 0) --wn; }
+    float th = atan2f(c, ax * bx + ay * by);
+    float s = 6.2831855f * wn - th;
+    return fabsf(s) >= 3.1415927f ? 1 : 0;
+}
+static int __cdecl h_PointInPolyGate(const float* A, const float* B, BYTE* it, float dx, float dy);
+typedef int (__cdecl *PIP_t)(const float*, const float*, BYTE*, float, float);
+static PIP_t o_PointInPoly = nullptr;
+static int __cdecl h_PointInPolyGate(const float* A, const float* B, BYTE* it, float dx, float dy) {
+    return g_optPoly ? h_PointInPoly(A, B, it, dx, dy) : o_PointInPoly(A, B, it, dx, dy);
+}
+static void InstallPolyOpt() {
+    static const BYTE p[5] = { 0x83, 0xEC, 0x14, 0xD9, 0xEE };          // sub esp,14h / fldz
+    o_PointInPoly = (PIP_t)Detour((BYTE*)0x0043F2F0, p, 5, (void*)h_PointInPolyGate);
+    LOG("point-in-polygon test %s (FastPolygonTest=%d)", o_PointInPoly ? "replaced" : "unavailable", g_optPoly);
+}
+
 static void RenderOptStats() {
-    PLOG("RENDEROPT sun(async=%d): copies=%lu reads=%lu busy=%lu sync=%lu | trees(batch=%d): loops=%lu parts=%lu",
-         g_optSun, g_sunCopies, g_sunReads, g_sunBusy, g_sunSync, g_optTrees, g_treeLoops, g_treeDraws);
-    g_sunCopies = g_sunReads = g_sunBusy = g_sunSync = g_treeLoops = g_treeDraws = 0;
+    PLOG("RENDEROPT sun(async=%d): copies=%lu reads=%lu busy=%lu sync=%lu | trees(batch=%d): loops=%lu parts=%lu | polygon tests(fast=%d)=%lu",
+         g_optSun, g_sunCopies, g_sunReads, g_sunBusy, g_sunSync, g_optTrees, g_treeLoops, g_treeDraws, g_optPoly, g_polyCalls);
+    g_sunCopies = g_sunReads = g_sunBusy = g_sunSync = g_treeLoops = g_treeDraws = g_polyCalls = 0;
 }
