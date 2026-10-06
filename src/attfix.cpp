@@ -10,7 +10,7 @@
 #include <math.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
-#define ATTFIX_VERSION "1.0.4"
+#define ATTFIX_VERSION "1.1"
 
 // ---------------------------------------------------------------- log
 static FILE* g_log = nullptr;
@@ -56,7 +56,7 @@ static void FrameEvent(const char* fmt, ...);
 static int L_SetInput(void* L);
 static void SubclassWindow(HWND h);
 static void* g_d3d = nullptr;
-static void SunRelease(); static void RenderOptStats(); static void MeshSmoothStats(); static void ParticleStats(); static bool Writable(void* p);
+static void PLOG(const char* fmt, ...); static void SunRelease(); static void RenderOptStats(); static void MsaaStats(); static void MeshSmoothStats(); static void ParticleStats(); static bool Writable(void* p);
 
 // ---------------------------------------------------------------- IAT patch
 static void** FindIAT(HMODULE mod, const char* dll, const char* func) {
@@ -169,13 +169,54 @@ static void LogPP(const char* tag, D3DPP* p) {
     LOG("%s: %ux%u fmt=%lu bb=%u ms=%lu swap=%lu windowed=%d autods=%d dsfmt=%lu flags=%lx refresh=%u interval=%lx hwnd=%p",
         tag, p->W, p->H, p->Fmt, p->BBCount, p->MS, p->Swap, p->Windowed, p->AutoDS, p->DSFmt, p->Flags, p->Refresh, p->Interval, p->hwnd);
 }
+// ---------------------------------------------------------------- anisotropic filtering
+// The game uses bilinear/trilinear minification only. Every MINFILTER=LINEAR the game (or D3DX effects) sets is
+// turned into ANISOTROPIC with MAXANISOTROPY=[Video] Anisotropy (default 16, 0/1 = off). Ctrl+6 toggles.
+static int g_aniso = 16, g_anisoOn = 1, g_anisoMax = 16;
+typedef HRESULT (__stdcall *SetSS_t)(void*, DWORD, DWORD, DWORD);
+static SetSS_t o_SetSS = nullptr;
+static DWORD g_sampMin[16];
+static inline int AnisoLevel() { int a = g_aniso < g_anisoMax ? g_aniso : g_anisoMax; return (g_anisoOn && a > 1) ? a : 0; }
+static HRESULT __stdcall h_SetSS(void* dev, DWORD smp, DWORD type, DWORD v) {
+    if (smp < 16) {
+        int a = AnisoLevel();
+        if (type == 6 /*D3DSAMP_MINFILTER*/) { g_sampMin[smp] = v; if (a && v == 2 /*LINEAR*/) v = 3 /*ANISOTROPIC*/; }
+        else if (type == 10 /*D3DSAMP_MAXANISOTROPY*/ && a) v = a;
+    }
+    return o_SetSS(dev, smp, type, v);
+}
+static void AnisoApply(void* dev) {
+    if (!o_SetSS) return;
+    int a = AnisoLevel();
+    for (DWORD smp = 0; smp < 16; ++smp) {
+        o_SetSS(dev, smp, 10, a ? a : 1);
+        if (g_sampMin[smp] == 2 || g_sampMin[smp] == 3) o_SetSS(dev, smp, 6, a ? 3 : 2);
+    }
+}
+static void AnisoInit(void* dev) {
+    BYTE caps[512]; memset(caps, 0, sizeof caps);
+    if (((HRESULT (__stdcall*)(void*, void*))(*(void***)dev)[7])(dev, caps) >= 0) {
+        DWORD filt = *(DWORD*)(caps + 0x40), mx = *(DWORD*)(caps + 0x6C);
+        g_anisoMax = (filt & 0x400 /*MINFANISOTROPIC*/) ? (int)mx : 0;
+    }
+    if (!o_SetSS) o_SetSS = (SetSS_t)PatchVtbl(*(void***)dev, 69, (void*)h_SetSS);
+    LOG("anisotropic filtering: requested %d, device max %d -> %d", g_aniso, g_anisoMax, AnisoLevel());
+    AnisoApply(dev);
+}
+#include "msaa.inc"
 static HRESULT __stdcall h_Reset(void* dev, D3DPP* p) {
     if (!p->Windowed && p->Refresh == 0) { UINT hz = MaxRefresh(p->W, p->H); if (hz > 60) p->Refresh = hz; }
     p->Interval = g_vsync ? 1 : 0x80000000;
-    LogPP("Device::Reset", p);
     SunRelease();
+    MsaaReleaseResources();
+    {   void* d3d = nullptr; struct { UINT ad; DWORD type; HWND w; DWORD fl; } cp = { 0, 1, nullptr, 0 };
+        ((HRESULT (__stdcall*)(void*, void*))(*(void***)dev)[9])(dev, &cp);
+        if (((HRESULT (__stdcall*)(void*, void**))(*(void***)dev)[6])(dev, &d3d) >= 0 && d3d) { MsaaParams(d3d, cp.ad, cp.type, p); Rel(d3d); } }
+    LogPP("Device::Reset", p);
     HRESULT hr = o_Reset(dev, p);
+    if (hr < 0 && p->MS) { LOG("Device::Reset with MSAA failed %08lX, retrying without", hr); p->MS = 0; p->MSQ = 0; p->Flags |= 1; hr = o_Reset(dev, p); }
     LOG("Device::Reset -> %08lX", hr);
+    if (hr >= 0) { AnisoApply(dev); MsaaDeviceReady(dev, p); }
     return hr;
 }
 static LONG g_lastTCL = 0;
@@ -200,7 +241,10 @@ static HRESULT __stdcall h_CreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd
     g_windowed = p->Windowed;
     UINT hz = (!p->Windowed && p->Refresh == 0) ? MaxRefresh(p->W, p->H) : 0;
     if (hz > 60) { p->Refresh = hz; LOG("  fullscreen refresh rate -> %u Hz", hz); }
+    DWORD flags0 = p->Flags;
+    MsaaParams(d3d, ad, type, p);
     HRESULT hr = o_CreateDevice(d3d, ad, type, wnd, flags, p, out);
+    if (hr < 0 && p->MS) { LOG("  failed with MSAA %lux (%08lX), retrying without", p->MS, hr); p->MS = 0; p->MSQ = 0; p->Flags = flags0; hr = o_CreateDevice(d3d, ad, type, wnd, flags, p, out); }
     if (hr < 0 && hz > 60) { p->Refresh = 0; LOG("  failed with %u Hz (%08lX), retrying at default", hz, hr); hr = o_CreateDevice(d3d, ad, type, wnd, flags, p, out); }
     LOG("CreateDevice -> %08lX", hr);
     if (hr >= 0 && out && *out) {
@@ -210,6 +254,8 @@ static HRESULT __stdcall h_CreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd
             o_Reset = (Reset_t)PatchVtbl(vt, 16, (void*)h_Reset);
             o_Present = (Present_t)PatchVtbl(vt, 17, (void*)h_Present);
         }
+        AnisoInit(*out);
+        MsaaDeviceReady(*out, p);
     }
     return hr;
 }
@@ -787,7 +833,7 @@ static void FlushStats(double nowMs) {
     unsigned vaMB = (unsigned)((mem.ullTotalVirtual - mem.ullAvailVirtual) >> 20), vaTotal = (unsigned)(mem.ullTotalVirtual >> 20);
     PLOG("STATS %4.1fs frames=%d fps=%.1f 1%%low=%.1f | frame ms avg=%.2f p50=%.2f p99=%.2f max=%.2f | VA %u/%u MB | avg ms:%s",
          (nowMs - g_winStartMs) / 1000.0, g_nft, g_nft * 1000.0 / (nowMs - g_winStartMs), 1000.0 * nw / ws, avg, p50, p99, mx, vaMB, vaTotal, secs);
-    RenderOptStats(); MeshSmoothStats(); ParticleStats();
+    RenderOptStats(); MeshSmoothStats(); ParticleStats(); MsaaStats();
     g_nft = 0; for (int i = 0; i < S_COUNT; ++i) g_secSum[i] = 0; g_winStartMs = nowMs;
 }
 static inline LONGLONG Now() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
@@ -920,13 +966,17 @@ static void DrawOverlay(void* dev) {
     if (KeyPressed(VK_F9, d9)) { g_animBlend = !g_animBlend; Toast(g_animBlend ? "F9  animation blending: ON" : "F9  animation blending: OFF (original 30 fps)"); }
     static bool d8 = false;
     if (KeyPressed(VK_F8, d8)) { if (g_atr) { fclose(g_atr); g_atr = nullptr; } g_atrArmed = true; g_atrLeft = 1200; Toast("F8  animation trace: recording 1200 hero draws"); }
-    // Ctrl+1..5 while the overlay is shown (F10 / F9 / F7 still work as before)
-    static bool d7 = false, c1 = false, c2 = false, c3 = false, c4 = false, c5 = false;
+    // Ctrl+1..8, Ctrl+0 while the overlay is shown (F10 / F9 / F7 still work as before)
+    static bool d7 = false, c1 = false, c2 = false, c3 = false, c4 = false, c5 = false, c6 = false, c7 = false, c9 = false, c0 = false;
     bool ctrl = g_showFps && (GetAsyncKeyState(VK_CONTROL) & 0x8000);
-    bool k1 = KeyPressed('1', c1) && ctrl, k2 = KeyPressed('2', c2) && ctrl, k3 = KeyPressed('3', c3) && ctrl, k4 = KeyPressed('4', c4) && ctrl, k5 = KeyPressed('5', c5) && ctrl;
+    bool k1 = KeyPressed('1', c1) && ctrl, k2 = KeyPressed('2', c2) && ctrl, k3 = KeyPressed('3', c3) && ctrl, k4 = KeyPressed('4', c4) && ctrl, k5 = KeyPressed('5', c5) && ctrl, k6 = KeyPressed('6', c6) && ctrl, k7 = KeyPressed('7', c7) && ctrl, k9 = KeyPressed('9', c9) && ctrl, k0 = KeyPressed('0', c0) && ctrl;
     if (KeyPressed(VK_F10, d10) || k1) { g_interp = !g_interp; Toast(g_interp ? "movement/camera smoothing: ON" : "movement/camera smoothing: OFF (original)"); }
     if (k2) { g_animBlend = !g_animBlend; Toast(g_animBlend ? "character animation blending: ON" : "character animation blending: OFF (original 30 fps)"); }
     if (k3) { g_meshSmooth = !g_meshSmooth; Toast(g_meshSmooth ? "object animation smoothing (trees, water, flags): ON" : "object animation smoothing: OFF (original 30 fps)"); }
+    if (k9 && g_objDist != 1.0f) { g_objDistOn = !g_objDistOn; ObjDistApplyShadows(); char t[96]; snprintf(t, sizeof t, "object view distance: %s", g_objDistOn ? "extended (props and shadows)" : "original"); Toast(t); }
+    if (k0) { g_rtTraceArm = 2; Toast("frame trace written to AttTFix.log"); }
+    if (k7) { g_msaaOn = !g_msaaOn; g_msaaResetPending = true; Toast(g_msaaOn ? "MSAA + foliage AA: switching ON..." : "MSAA: switching OFF..."); }
+    if (k6) { g_anisoOn = !g_anisoOn; AnisoApply(dev); char t[64]; snprintf(t, sizeof t, "anisotropic filtering: %s", AnisoLevel() ? "ON" : "OFF (original)"); Toast(t); }
     if (k5) { g_partSmooth = !g_partSmooth; Toast(g_partSmooth ? "particle smoothing: ON" : "particle smoothing: OFF (original tick rate)"); }
     if (KeyPressed(VK_F7, d7) || k4) {
         int on = !(g_optSun || g_optTrees || g_optPoly); g_optSun = g_optTrees = g_optPoly = on;
@@ -945,11 +995,13 @@ static void DrawOverlay(void* dev) {
     char line[400]; int n = 0; line[0] = 0;
     if (g_showFps)
         n += snprintf(line + n, sizeof line - n, "%.0f FPS  %.2f ms (max %.1f)  %s%s\nupdate %.2f  render %.2f  present %.2f  |  trees %.0f %.2f ms  sun %.2f ms\n"
-                      "Ctrl+1 movement: %s   Ctrl+2 characters: %s   Ctrl+3 objects: %s   Ctrl+4 optimizations: %s   Ctrl+5 particles: %s   F11 hide\n",
+                      "Ctrl+1 movement: %s   Ctrl+2 characters: %s   Ctrl+3 objects: %s   Ctrl+4 optimizations: %s   Ctrl+5 particles: %s   Ctrl+6 aniso: %s   Ctrl+7 MSAA: %s\nCtrl+9 view distance: %s   F11 hide\n",
                       g_ovFps, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9",
                       g_windowed && g_vsync && g_fpsLimit <= 0 ? (!g_dwmOk ? "  sync: timer" : g_dwmSync == 2 ? "  sync: flush" : g_gridOk == 1 ? "  sync: vblank" : "  sync: timer") : "",
                       g_ovUpd, g_ovRen, g_ovPres, g_ovTreeN, g_ovTrees, g_ovSun,
-                      g_interp ? "on" : "off", g_animBlend ? "on" : "off", g_meshSmooth ? "on" : "off", (g_optSun || g_optTrees || g_optPoly) ? "on" : "off", g_partSmooth ? "on" : "off");
+                      g_interp ? "on" : "off", g_animBlend ? "on" : "off", g_meshSmooth ? "on" : "off", (g_optSun || g_optTrees || g_optPoly) ? "on" : "off", g_partSmooth ? "on" : "off", AnisoLevel() ? (AnisoLevel() >= 16 ? "16x" : AnisoLevel() >= 8 ? "8x" : AnisoLevel() >= 4 ? "4x" : "2x") : "off",
+                      g_msaaActive == 8 ? "8x" : g_msaaActive == 4 ? "4x" : g_msaaActive == 2 ? "2x" : g_msaaActive ? "on" : "off",
+                      ObjDist() > 1.0f ? "extended" : "original");
     if (toast) snprintf(line + n, sizeof line - n, "%s", g_toast);
     typedef INT (__stdcall *DT_t)(void*, void*, LPCSTR, INT, RECT*, DWORD, DWORD);
     DT_t dt = (DT_t)(*(void***)g_font)[14];
@@ -974,6 +1026,13 @@ static void UpdateOverlayStats() {   // every 0.5 s from the per-frame sections
 static void __fastcall h_Render(BYTE* e, void* /*edx*/) {
     void* dev = *pDevice; void** vt = *(void***)dev;
     LONGLONG a = Now(), b;
+    if (g_msaaResetPending) {                                // Ctrl+7: re-create the back buffer through the engine's restore path
+        g_msaaResetPending = false;
+        FontRelease();
+        LOG("msaa: switching %s via engine device restore", g_msaaOn ? "on" : "off");
+        ((VM0_t)0x0044DD20)(e, nullptr);
+        FrameEvent("msaa switched");
+    }
     *(DWORD*)(e + 0xAC) = 1;
     *(DWORD*)(*(BYTE**)(e + 0x8C) + 0x208) = 0;
     ((Clear_t)vt[43])(dev, 0, nullptr, 3, *(DWORD*)(e + 0xA0), 1.0f, 0);
@@ -991,6 +1050,7 @@ static void __fastcall h_Render(BYTE* e, void* /*edx*/) {
     b = Now(); g_sec[S_ENDSCENE] = (b - a) * g_tickMs; a = b;
     HRESULT hr = ((Present_t2)vt[17])(dev, nullptr, nullptr, nullptr, nullptr);
     ++g_frames;
+    RTTraceFrame(dev);
     if (g_dwmOk && g_dwmSync == 2 && g_windowed && g_vsync && g_fpsLimit <= 0 && hr >= 0) {   // WindowedSync=flush: wait for the compositor
         if (g_DwmFlush() < 0) { g_dwmOk = 0; LOG("DwmFlush failed, falling back to timer pacing"); }
     }
@@ -1695,7 +1755,7 @@ static LONG CALLBACK VectoredAV(EXCEPTION_POINTERS* ep) {
 // ---------------------------------------------------------------- dinput8 proxy
 typedef HRESULT (WINAPI *DI8Create_t)(HINSTANCE, DWORD, REFIID, LPVOID*, void*);
 static DI8Create_t o_DI8Create;
-// ---------------------------------------------------------------- DirectInput: Ctrl+1..5 are AttTFix toggles
+// ---------------------------------------------------------------- DirectInput: Ctrl+digits are AttTFix toggles
 // The game binds 1/2/3 to camera presets. While Ctrl is held (and the overlay is shown) the digit keys are
 // removed from the keyboard state and the buffered key events the game reads.
 typedef HRESULT (__stdcall *DICreateDev_t)(void*, const GUID*, void**, void*);
@@ -1707,7 +1767,7 @@ static bool DigitsBlocked() { return g_showFps && (GetAsyncKeyState(VK_CONTROL) 
 static HRESULT __stdcall h_DIGetState(void* dev, DWORD cb, void* buf) {
     HRESULT hr = o_DIGetState(dev, cb, buf);
     if (hr >= 0 && dev == g_kbdDev && cb >= 256 && buf && DigitsBlocked())
-        for (int k = 0x02; k <= 0x06; ++k) ((BYTE*)buf)[k] = 0;          // DIK_1 .. DIK_5
+        for (int k = 0x02; k <= 0x0B; ++k) ((BYTE*)buf)[k] = 0;          // DIK_1 .. DIK_0
     return hr;
 }
 static HRESULT __stdcall h_DIGetData(void* dev, DWORD cbObj, void* rg, DWORD* inout, DWORD flags) {
@@ -1716,7 +1776,7 @@ static HRESULT __stdcall h_DIGetData(void* dev, DWORD cbObj, void* rg, DWORD* in
         BYTE* p = (BYTE*)rg; DWORD n = *inout, w = 0;
         for (DWORD i = 0; i < n; ++i) {
             DWORD ofs = *(DWORD*)(p + i * cbObj);
-            if (ofs >= 0x02 && ofs <= 0x06) continue;
+            if (ofs >= 0x02 && ofs <= 0x0B) continue;
             if (w != i) memmove(p + w * cbObj, p + i * cbObj, cbObj);
             ++w;
         }
@@ -1731,7 +1791,7 @@ static HRESULT __stdcall h_DICreateDev(void* di, const GUID* g, void** out, void
         g_kbdDev = *out;
         void** vt = *(void***)*out;
         if (!o_DIGetState) { o_DIGetState = (DIGetState_t)PatchVtbl(vt, 9, (void*)h_DIGetState); o_DIGetData = (DIGetData_t)PatchVtbl(vt, 10, (void*)h_DIGetData); }
-        LOG("DirectInput keyboard %p: Ctrl+1..5 reserved for AttTFix while the overlay is shown", *out);
+        LOG("DirectInput keyboard %p: Ctrl+digits reserved for AttTFix while the overlay is shown", *out);
     }
     return hr;
 }
@@ -1786,6 +1846,16 @@ static void Init() {
         WritePrivateProfileStringA("Mouse", "CameraSpeed", "1.00", path);
     }
     g_vsync = GetPrivateProfileIntA("Video", "VSync", 1, path);
+    if (!GetPrivateProfileStringA("Video", "Anisotropy", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Video", "Anisotropy", "16  ; anisotropic texture filtering 2/4/8/16 (0 = off, original)", path);
+    g_aniso = GetPrivateProfileIntA("Video", "Anisotropy", 16, path);
+    if (!GetPrivateProfileStringA("Video", "MSAA", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Video", "MSAA", "0  ; multisample anti-aliasing at start: 2/4/8 or 0 = off; Ctrl+7 toggles in game (4x when 0)", path);
+    {   int m = GetPrivateProfileIntA("Video", "MSAA", 0, path);
+        g_msaaOn = m >= 2; g_msaa = m >= 2 ? m : 4; }
+    if (!GetPrivateProfileStringA("Video", "AlphaToCoverage", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Video", "AlphaToCoverage", "1  ; with MSAA: also smooth edges of alpha-tested foliage (follows Ctrl+7)", path);
+    g_atoc = GetPrivateProfileIntA("Video", "AlphaToCoverage", 1, path) != 0;
     g_fpsLimit = GetPrivateProfileIntA("Video", "FpsLimit", 0, path);
     g_allCores = GetPrivateProfileIntA("Video", "AllCores", 1, path);
     if (!GetPrivateProfileStringA("Perf", "Log", "", tmp, sizeof tmp, path)) {
@@ -1879,10 +1949,16 @@ static void Init() {
         WritePrivateProfileStringA("Perf", "FastPolygonTest", "1  ; 1 = point-in-polygon test of obstacles without per-edge atan2 (same result), 0 = original", path);
     g_optPoly = GetPrivateProfileIntA("Perf", "FastPolygonTest", 1, path) != 0;
     InstallPolyOpt();
+    if (!GetPrivateProfileStringA("Video", "ObjectDistance", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Video", "ObjectDistance", "2.0  ; view distance of props (boxes, wheels, rocks), NPCs and their shadows: 1.0 = original; Ctrl+9 toggles", path);
+    g_objDist = ReadIniFloat("Video", "ObjectDistance", 2.0f);
+    if (!(g_objDist >= 0.5f && g_objDist <= 10.0f)) g_objDist = 2.0f;
+    InstallObjDistance();
     if (!GetPrivateProfileStringA("Smooth", "Objects", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Smooth", "Objects", "1  ; 1 = smooth 30 fps vertex animation of trees, water, flags etc., 0 = original", path);
     g_meshSmooth = GetPrivateProfileIntA("Smooth", "Objects", 1, path) != 0;
     InstallMeshSmooth();
+    InstallSunLockCtx();
     if (!GetPrivateProfileStringA("Smooth", "Particles", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Smooth", "Particles", "1  ; 1 = particles (smoke, fire, magic) evaluated at the rendered moment, 0 = original tick rate", path);
     g_partSmooth = GetPrivateProfileIntA("Smooth", "Particles", 1, path) != 0;

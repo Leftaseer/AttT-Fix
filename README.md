@@ -1,7 +1,7 @@
 # AttT-Fix
 
 Unofficial technical update for **Ascension to the Throne / Восхождение на Трон** (Steam version 1.1.128):
-native modern resolutions, widescreen menus, smooth movement and animation, crash fixes, a language switch and more.
+native modern resolutions, widescreen menus, smooth movement, animation and particles, anisotropic filtering and MSAA, large performance fixes, crash fixes, a language switch and more.
 
 The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No game files are modified.
 
@@ -15,6 +15,11 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - Any resolution the monitor supports (Full HD, 1440p, 4K, …) without stretching; the Options list comes from the monitor and the choice no longer resets.
 - Menus are laid out on a centered 4:3 canvas with black bars; the in-game HUD keeps the original full-screen layout.
 - Fix for an original layout bug in the (Russian) battle victory window.
+
+**Graphics**
+- 16x anisotropic filtering (every bilinear/trilinear minification becomes anisotropic).
+- Optional MSAA 2x/4x/8x (`[Video] MSAA`, Ctrl+7 at runtime) with alpha-to-coverage for foliage. Render-to-texture passes get a matching non-multisampled depth buffer; back buffer reads are resolved.
+- Longer draw distance of small props (boxes, wheels, rocks), NPCs and their shadows (`[Video] ObjectDistance`, default 2.0, Ctrl+9). The original size-based culling was tuned for 800x600..1280x1024.
 
 **Smoothness**
 - The game updates the world at 30 Hz and never interpolated rendering. The mod blends positions of the hero, armies, battle units and the camera between logic steps (also removes the hero jitter while the camera turns).
@@ -42,11 +47,11 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - Optional Large Address Aware tool (`AttTFix_LAA.exe`, from `tools/laa.cpp`): 4 GB of address space instead of 2 GB.
   Required for the optional DXVK renderer (`[Video] Renderer=dxvk` loads `dxvk\d3d9.dll` from the game folder).
 
-**Hotkeys:** F11 — overlay. While it is shown: Ctrl+1 movement/camera smoothing, Ctrl+2 character animation, Ctrl+3 object animation, Ctrl+4 optimizations, Ctrl+5 particles (the digits are hidden from the game while Ctrl is held). F10 / F9 / F7 still work.
+**Hotkeys:** F11 — overlay. While it is shown: Ctrl+1 movement/camera smoothing, Ctrl+2 character animation, Ctrl+3 object animation, Ctrl+4 optimizations, Ctrl+5 particles, Ctrl+6 anisotropic filtering, Ctrl+7 MSAA, Ctrl+9 view distance, Ctrl+0 one-frame render target trace to the log (the digits are hidden from the game while Ctrl is held). F10 / F9 / F7 still work.
 
 ## Installing a release
 
-1. Download `AttTFix-1.0.zip` from [Releases](../../releases).
+1. Download `AttTFix-1.1.zip` from [Releases](../../releases).
 2. Copy `dinput8.dll` into the game folder (Steam → right click the game → Manage → Browse local files).
 3. Optional: back up your `launcher.ini` and replace it with the one from the archive to skip the launcher.
 4. Start the game. Settings are created in `AttTFix.ini`; details are in `dist/README_EN.txt`.
@@ -78,7 +83,7 @@ The result is `src/dinput8.dll`. Copy it next to `ATThrone.exe`.
 
 - Logs: `AttTFix.log` (always), `AttTFix_perf.log` with `[Perf] Log=1` (+ `Sampler=1` for the profiler, `TraceSeconds=N` for a per-frame trace, F8 for an animation trace).
 - Every patch checks the original bytes first; on a different game build it is skipped and noted in the log.
-- `src/renderopt.inc` holds the optimizations, `src/smoothanim.inc` object/particle smoothing (both included by `attfix.cpp`); `[Perf] AsyncSunCheck` / `TreeBatch` / `FastPolygonTest`, `[Smooth] Objects` / `Particles` switch them off individually.
+- `src/renderopt.inc` holds the optimizations, `src/smoothanim.inc` object/particle smoothing, `src/msaa.inc` MSAA (all included by `attfix.cpp`); `[Perf] AsyncSunCheck` / `TreeBatch` / `FastPolygonTest`, `[Smooth] Objects` / `Particles` switch them off individually.
 - Ideas that are not done yet: smoothing for trees / town animations, instanced drawing of trees, fewer effect switches.
 
 ## How it works (short)
@@ -120,6 +125,11 @@ No game code or assets are included in this repository.
 - Необязательно: запуск из Steam без лаунчера (`launcher.ini` со строкой `skip=true`).
 - Счётчик FPS (F11), журнал производительности и профайлер по желанию.
 
+**Графика**
+- Анизотропная фильтрация 16x.
+- MSAA 2x/4x/8x по желанию (`[Video] MSAA`, Ctrl+7 в игре) вместе со сглаживанием краёв листвы.
+- Увеличенная дальность прорисовки мелких предметов, NPC и их теней (`[Video] ObjectDistance`, по умолчанию 2.0, Ctrl+9).
+
 **Производительность**
 - Проверка видимости солнца для бликов без остановки видеокарты. Оригинал, когда солнце в кадре, дважды за кадр
   блокировал весь экранный буфер (на 4K — копия 33 МБ); теперь копируется один пиксель и читается через 2–3 кадра.
@@ -128,11 +138,11 @@ No game code or assets are included in this repository.
 - Проверка «точка внутри препятствия» без двух atan2 на каждое ребро (тот же результат): у большого камня FPS падал до ~45, теперь нет.
 - Утилита `AttTFix_LAA.exe` (`tools/laa.cpp`): 4 ГБ адресного пространства вместо 2 ГБ. Нужна для DXVK (`[Video] Renderer=dxvk`).
 
-**Клавиши:** F11 — оверлей. Пока он открыт: Ctrl+1 движение и камера, Ctrl+2 анимации персонажей, Ctrl+3 анимации объектов, Ctrl+4 оптимизации, Ctrl+5 частицы (цифры с Ctrl игре не передаются). F10 / F9 / F7 тоже работают.
+**Клавиши:** F11 — оверлей. Пока он открыт: Ctrl+1 движение и камера, Ctrl+2 анимации персонажей, Ctrl+3 анимации объектов, Ctrl+4 оптимизации, Ctrl+5 частицы, Ctrl+6 анизотропная фильтрация, Ctrl+7 MSAA, Ctrl+9 дальность прорисовки (цифры с Ctrl игре не передаются). F10 / F9 / F7 тоже работают.
 
 ### Установка
 
-1. Скачайте `AttTFix-1.0.zip` в разделе [Releases](../../releases).
+1. Скачайте `AttTFix-1.1.zip` в разделе [Releases](../../releases).
 2. Скопируйте `dinput8.dll` в папку игры (Steam → правой кнопкой по игре → «Управление» → «Просмотреть локальные файлы»).
 3. Необязательно: сохраните свой `launcher.ini` и замените его файлом из архива, чтобы игра запускалась без лаунчера.
 4. Запустите игру. Настройки появятся в `AttTFix.ini`, подробности — в `dist/README_RU.txt`.

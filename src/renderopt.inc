@@ -76,12 +76,12 @@ static void SunSample(BYTE* sun) {
 }
 static int __fastcall h_SunTest(BYTE* sun, void* edx) {
     LONGLONG t0 = Now(); int r;
-    if (!g_optSun || g_sunBroken) { ++g_sunSync; r = o_SunTest(sun, edx); }
+    if (!g_optSun || g_sunBroken) { ++g_sunSync; g_sunLockCtx = sun; r = o_SunTest(sun, edx); g_sunLockCtx = nullptr; }
     else if (*(int*)(sun + 0xB0) == 2) {                               // sun off screen
         r = 2; g_sunHave = false; for (int i = 0; i < SUN_SLOTS; ++i) g_sunSlotValid[i] = false;
     } else {
         if (g_sunFrame != g_frames) { g_sunFrame = g_frames; ++g_sunSeq; SunSample(sun); }   // called twice per frame: sample once
-        if (g_sunBroken) { ++g_sunSync; r = o_SunTest(sun, edx); }
+        if (g_sunBroken) { ++g_sunSync; g_sunLockCtx = sun; r = o_SunTest(sun, edx); g_sunLockCtx = nullptr; }
         else if (!g_sunHave) r = 1;                                    // no result yet: treat as occluded (flare stays faded)
         else {
             r = 0; int tol = *(int*)(sun + 0xB4); BYTE tb = (BYTE)tol;
@@ -339,4 +339,47 @@ static void RenderOptStats() {
     PLOG("RENDEROPT sun(async=%d): copies=%lu reads=%lu busy=%lu sync=%lu | trees(batch=%d): loops=%lu parts=%lu | polygon tests(fast=%d)=%lu",
          g_optSun, g_sunCopies, g_sunReads, g_sunBusy, g_sunSync, g_optTrees, g_treeLoops, g_treeDraws, g_optPoly, g_polyCalls);
     g_sunCopies = g_sunReads = g_sunBusy = g_sunSync = g_treeLoops = g_treeDraws = g_polyCalls = 0;
+}
+
+// ---------------------------------------------------------------- 4) object view distance
+// World props ("gizmos") are hidden beyond a distance computed from their size, the camera field of view and a
+// range class (GizmoRanges: closest 2 ... farest 32) at load time (0x45C3E0); visible = dist^2 < range^2 (0x45CB40).
+// The thresholds were tuned for 800x600..1280x1024, so at modern resolutions props pop in while still large on
+// screen. [Video] ObjectDistance multiplies the range (1.0 = original); applied when a location is loaded.
+static float g_objDist = 2.0f; static int g_objDistOn = 1;
+static inline float ObjDist() { return g_objDistOn ? g_objDist : 1.0f; }
+typedef float (__fastcall *GizmoRange_t)(BYTE* obj, void* edx, float cls);
+static GizmoRange_t o_GizmoRange = nullptr;
+static float __fastcall h_GizmoRange(BYTE* obj, void* edx, float cls) {
+    float r = o_GizmoRange(obj, edx, cls);
+    return r * ObjDist();
+}
+// Most other objects (SAO props: boxes, wheels, ropes; NPCs; town animations; units) pick a LOD level from their
+// size and distance (0x463E20, ~distance / (size * tan(fov/2))) and are not drawn at all beyond level 10..11.
+// The level is divided by ObjectDistance (also selects the more detailed mesh LOD further away).
+// Their shadows are drawn only within 500 units (dist^2 < 250000, double at 0x615808; float 0x615B28 for town
+// animations): scaled by ObjectDistance^2.
+static bool g_shadowDistOk = false;
+static void ObjDistApplyShadows() {
+    if (!g_shadowDistOk) return;
+    double nd = 250000.0 * ObjDist() * ObjDist(); float nf = (float)nd;
+    PatchBytes((void*)0x00615808, &nd, 8); PatchBytes((void*)0x00615B28, &nf, 4);
+}
+typedef int (__cdecl *LodLevel_t)(void* a, float* b, float* c);
+static LodLevel_t o_LodLevel = nullptr;
+static int __cdecl h_LodLevel(void* a, float* b, float* c) {
+    int lv = o_LodLevel(a, b, c);
+    float f = ObjDist();
+    return f > 1.0f ? (int)(lv / f) : lv;
+}
+static void InstallObjDistance() {
+    if (g_objDist == 1.0f) { LOG("object view distance: original"); return; }
+    static const BYTE p[5] = { 0x83, 0xEC, 0x70, 0x8B, 0xC1 };
+    o_GizmoRange = (GizmoRange_t)Detour((BYTE*)0x0045C3E0, p, 5, (void*)h_GizmoRange);
+    static const BYTE pl[7] = { 0x83, 0xEC, 0x18, 0x8B, 0x44, 0x24, 0x20 };
+    o_LodLevel = (LodLevel_t)Detour((BYTE*)0x00463E20, pl, 7, (void*)h_LodLevel);
+    double* sd = (double*)0x00615808; float* sf = (float*)0x00615B28;
+    if (*sd == 250000.0 && *sf == 250000.0f) { g_shadowDistOk = true; ObjDistApplyShadows(); }
+    else LOG("object shadow distance: unexpected constants, unchanged");
+    LOG("object view distance x%.2f (gizmo %s, LOD %s, shadows %.0f units)", g_objDist, o_GizmoRange ? "ok" : "n/a", o_LodLevel ? "ok" : "n/a", 500.0 * g_objDist);
 }
