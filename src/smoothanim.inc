@@ -156,32 +156,46 @@ static DWORD g_psSystems = 0, g_psParticles = 0;
 typedef void (__fastcall *PSFill_t)(BYTE* sys, void* edx);
 typedef void (__fastcall *PUpd_t)(BYTE* p, void* edx, float t);
 static PSFill_t o_PSFill = nullptr;
-static BYTE* g_psSave = nullptr; static size_t g_psSaveCap = 0;
+static BYTE* g_psSave = nullptr; static BYTE** g_psNodes = nullptr; static size_t g_psCap = 0;
 enum { PART_SIZE = 0xD0 };
+// CParticle::Update (0x54AF30) writes only these fields (from its code): +04..+18, +28..+38 (alive), +68, +74,
+// +88, +8C. Only they are saved and restored (60 bytes instead of the whole 208-byte particle).
+enum { PS_SAVE = 15 * 4 };
+static inline void PSSave(DWORD* d, const BYTE* p) {
+    memcpy(d, p + 0x04, 24); memcpy(d + 6, p + 0x28, 20); d[11] = *(const DWORD*)(p + 0x68); d[12] = *(const DWORD*)(p + 0x74);
+    d[13] = *(const DWORD*)(p + 0x88); d[14] = *(const DWORD*)(p + 0x8C);
+}
+static inline void PSLoad(BYTE* p, const DWORD* d) {
+    memcpy(p + 0x04, d, 24); memcpy(p + 0x28, d + 6, 20); *(DWORD*)(p + 0x68) = d[11]; *(DWORD*)(p + 0x74) = d[12];
+    *(DWORD*)(p + 0x88) = d[13]; *(DWORD*)(p + 0x8C) = d[14];
+}
+// one walk of the particle list collects the live particles; only those are saved, re-evaluated and restored
 static void __fastcall h_PSFill(BYTE* sys, void* edx) {
     float step = *(float*)(sys + 0x24), acc = *(float*)(sys + 0x28);
     BYTE* head = *(BYTE**)(sys + 0x5C8);
     if (!g_partSmooth || !head || !(step > 1.0f && step < 1000.0f) || !(acc > 0.0f && acc < step)) { o_PSFill(sys, edx); return; }
-    size_t n = 0;
-    for (BYTE* nd = *(BYTE**)head; nd != head && n < 100000; nd = *(BYTE**)nd) ++n;
-    if (n * PART_SIZE > g_psSaveCap) {
-        size_t cap = n * PART_SIZE * 2; BYTE* b = (BYTE*)realloc(g_psSave, cap);
-        if (!b) { o_PSFill(sys, edx); return; }
-        g_psSave = b; g_psSaveCap = cap;
+    size_t n = 0, total = 0;
+    for (BYTE* nd = *(BYTE**)head; nd != head && total < 100000; nd = *(BYTE**)nd, ++total) {
+        if (!nd[8 + 0x38]) continue;                                    // not alive: not touched
+        if (n >= g_psCap) {
+            size_t cap = g_psCap ? g_psCap * 2 : 1024;
+            BYTE* sv = (BYTE*)realloc(g_psSave, cap * PS_SAVE); if (sv) g_psSave = sv;
+            BYTE** nv = (BYTE**)realloc(g_psNodes, cap * sizeof(BYTE*)); if (nv) g_psNodes = nv;
+            if (!sv || !nv) { o_PSFill(sys, edx); return; }
+            g_psCap = cap;
+        }
+        g_psNodes[n++] = nd + 8;
     }
     float t = *(float*)(sys + 0x5E4) + acc / 1000.0f;
-    size_t i = 0;
-    for (BYTE* nd = *(BYTE**)head; nd != head && i < n; nd = *(BYTE**)nd, ++i) {
-        BYTE* p = nd + 8; BYTE* s = g_psSave + i * PART_SIZE;
-        memcpy(s, p, PART_SIZE);
-        if (!p[0x38]) continue;                                         // not alive
+    for (size_t i = 0; i < n; ++i) {
+        BYTE* p = g_psNodes[i]; DWORD* s = (DWORD*)(g_psSave + i * PS_SAVE);
+        PSSave(s, p);
         ((PUpd_t)0x0054AF30)(p, nullptr, t);
-        if (!p[0x38]) memcpy(p, s, PART_SIZE);                          // would expire before this moment: keep tick state
+        if (!p[0x38]) PSLoad(p, s);                                     // would expire before this moment: keep tick state
     }
     ++g_psSystems; g_psParticles += (DWORD)n;
     o_PSFill(sys, edx);
-    i = 0;
-    for (BYTE* nd = *(BYTE**)head; nd != head && i < n; nd = *(BYTE**)nd, ++i) memcpy(nd + 8, g_psSave + i * PART_SIZE, PART_SIZE);
+    for (size_t i = 0; i < n; ++i) PSLoad(g_psNodes[i], (DWORD*)(g_psSave + i * PS_SAVE));
 }
 static void InstallParticleSmooth() {
     static const BYTE p[6] = { 0x81, 0xEC, 0x38, 0x01, 0x00, 0x00 };

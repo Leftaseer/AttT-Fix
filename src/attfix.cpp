@@ -10,7 +10,7 @@
 #include <math.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
-#define ATTFIX_VERSION "1.1"
+#define ATTFIX_VERSION "1.2"
 
 // ---------------------------------------------------------------- log
 static FILE* g_log = nullptr;
@@ -56,7 +56,8 @@ static void FrameEvent(const char* fmt, ...);
 static int L_SetInput(void* L);
 static void SubclassWindow(HWND h);
 static void* g_d3d = nullptr;
-static void PLOG(const char* fmt, ...); static void SunRelease(); static void RenderOptStats(); static void MsaaStats(); static void MeshSmoothStats(); static void ParticleStats(); static bool Writable(void* p);
+static int g_bgRun = 0, g_bgFps = 30; static volatile bool g_bgInactive = false;   // [Game] Background, BackgroundFps
+static void PLOG(const char* fmt, ...); static void FontRelease(); static void SunRelease(); static void RenderOptStats(); static void MsaaStats(); static void MeshSmoothStats(); static void ParticleStats(); static void EffectStats(); static void FxReleaseAll(); static void FxDeviceHooks(void* dev); static void TreeSortStats(); static void SoundStats(); static void SkinStats(); static void BillboardStats(); static void InstanceStats(); static void InstRelease(); static int L_GetQuality(void* L); static int L_SetQuality(void* L); static int L_GetRenderer(void* L); static int L_SetRenderer(void* L); static int L_TreeDistUp(void*); static int L_TreeDistDown(void*); static int L_TreeDistCoef(void*); static int L_TreeDistSave(void*); static int L_TreeDistCancel(void*); static int L_GetTreeView(void*); static void SndStop(); static bool Writable(void* p);
 
 // ---------------------------------------------------------------- IAT patch
 static void** FindIAT(HMODULE mod, const char* dll, const char* func) {
@@ -208,6 +209,8 @@ static HRESULT __stdcall h_Reset(void* dev, D3DPP* p) {
     if (!p->Windowed && p->Refresh == 0) { UINT hz = MaxRefresh(p->W, p->H); if (hz > 60) p->Refresh = hz; }
     p->Interval = g_vsync ? 1 : 0x80000000;
     SunRelease();
+    FxReleaseAll(); InstRelease();
+    FontRelease();
     MsaaReleaseResources();
     {   void* d3d = nullptr; struct { UINT ad; DWORD type; HWND w; DWORD fl; } cp = { 0, 1, nullptr, 0 };
         ((HRESULT (__stdcall*)(void*, void*))(*(void***)dev)[9])(dev, &cp);
@@ -256,6 +259,7 @@ static HRESULT __stdcall h_CreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd
         }
         AnisoInit(*out);
         MsaaDeviceReady(*out, p);
+        FxDeviceHooks(*out);
     }
     return hr;
 }
@@ -348,10 +352,10 @@ typedef void (__cdecl *exit_t)(int);
 static exit_t o_exit;
 static void LogGuardHits();
 static void DumpProfile(const char*);
-static void __cdecl h_exit(int code) { FlushLuaOut(); LogGuardHits(); DumpProfile("final"); LOG("sound listener: %lu updates, %lu skipped", g_listenerDone, g_listenerSkipped); LOG("exit(%d) called from %p", code, __builtin_return_address(0)); LogCallerStack("exit"); o_exit(code); }
+static void __cdecl h_exit(int code) { SndStop(); FlushLuaOut(); LogGuardHits(); DumpProfile("final"); LOG("sound listener: %lu updates, %lu skipped", g_listenerDone, g_listenerSkipped); LOG("exit(%d) called from %p", code, __builtin_return_address(0)); LogCallerStack("exit"); o_exit(code); }
 typedef void (WINAPI *ExitProcess_t)(UINT);
 static ExitProcess_t o_ExitProcess;
-static void WINAPI h_ExitProcess(UINT code) { FlushLuaOut(); LOG("ExitProcess(%u) called from %p", code, __builtin_return_address(0)); LogCallerStack("ExitProcess"); o_ExitProcess(code); }
+static void WINAPI h_ExitProcess(UINT code) { SndStop(); FlushLuaOut(); LOG("ExitProcess(%u) called from %p", code, __builtin_return_address(0)); LogCallerStack("ExitProcess"); o_ExitProcess(code); }
 // message boxes
 typedef int (WINAPI *MBA_t)(HWND, LPCSTR, LPCSTR, UINT);
 typedef int (WINAPI *MBW_t)(HWND, LPCWSTR, LPCWSTR, UINT);
@@ -367,15 +371,87 @@ static int WINAPI h_MBW(HWND h, LPCWSTR t, LPCWSTR c, UINT f) {
 static WNDPROC o_WndProc = nullptr; static HWND g_hwnd = nullptr;
 static LRESULT CALLBACK h_WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
-    case WM_ACTIVATEAPP: LOG("wnd: WM_ACTIVATEAPP %s", w ? "activated" : "deactivated"); g_skipHitch = true; break;
+    case WM_ACTIVATEAPP: {
+        LOG("wnd: WM_ACTIVATEAPP %s", w ? "activated" : "deactivated"); g_skipHitch = true;
+        if (!g_bgRun || w) { g_bgInactive = false; break; }
+        // Background=1: let the game handle the deactivation (frees the cursor clip, input), then undo the pause:
+        // main loop "active" flag [0x6BF6E0] stays set, sound volume and game timer are resumed (0x449F80(true)).
+        LRESULT r = CallWindowProcW(o_WndProc, h, m, w, l);
+        *(volatile BYTE*)0x006BF6E0 = 1; g_bgInactive = true;
+        void* eng = *(void**)0x006C88A8;
+        if (eng) ((void (__fastcall*)(void*, void*, int))0x00449F80)(eng, nullptr, 1);
+        ClipCursor(nullptr);
+        LOG("background: game keeps running (limit %d fps)", g_bgFps);
+        return r; }
     case WM_ACTIVATE:    LOG("wnd: WM_ACTIVATE state=%u minimized=%u", LOWORD(w), HIWORD(w)); break;
     case WM_SIZE:        LOG("wnd: WM_SIZE type=%u %ux%u", (UINT)w, LOWORD(l), HIWORD(l)); break;
     case WM_SYSCOMMAND:  if ((w & 0xFFF0) == SC_MINIMIZE || (w & 0xFFF0) == SC_RESTORE || (w & 0xFFF0) == SC_MAXIMIZE) LOG("wnd: WM_SYSCOMMAND %04X", (UINT)(w & 0xFFF0)); break;
     case WM_DISPLAYCHANGE: LOG("wnd: WM_DISPLAYCHANGE %ux%u bpp=%u", LOWORD(l), HIWORD(l), (UINT)w); break;
+    case WM_SETCURSOR:   // the game hides the Windows cursor only on activation; keep it hidden over the game area
+        if (LOWORD(l) == HTCLIENT && *(volatile BYTE*)0x006BF6E0 && GetForegroundWindow() == h) {
+            SetCursor(nullptr);
+            static bool clipped = false;                                // first activation can be missed at start-up
+            if (!clipped) { clipped = true; RECT r; if (GetWindowRect(h, &r)) ClipCursor(&r); }
+            return TRUE;
+        }
+        break;
     case WM_CLOSE:       LOG("wnd: WM_CLOSE"); break;
     case WM_DESTROY:     LOG("wnd: WM_DESTROY"); break;
     }
     return CallWindowProcW(o_WndProc, h, m, w, l);
+}
+// Background=1: DirectSound mutes buffers of an application without focus unless they have DSBCAPS_GLOBALFOCUS.
+// CreateSoundBuffer of both interfaces (game: DirectSoundCreate8, Miles: DirectSoundCreate) adds the flag.
+typedef HRESULT (__stdcall *DSCreateBuf_t)(void*, void*, void**, void*);
+static DSCreateBuf_t o_DSCreateBuf[2] = { nullptr, nullptr };
+static HRESULT DSCreateBufCommon(int i, void* ds, void* desc, void** out, void* outer) {
+    DWORD* d = (DWORD*)desc;
+    if (d && d[0] >= 20 && !(d[1] & 0x1 /*PRIMARYBUFFER*/)) d[1] |= 0x8000 /*DSBCAPS_GLOBALFOCUS*/;
+    return o_DSCreateBuf[i](ds, desc, out, outer);
+}
+static HRESULT __stdcall h_DSCreateBuf0(void* ds, void* desc, void** out, void* outer) { return DSCreateBufCommon(0, ds, desc, out, outer); }
+static HRESULT __stdcall h_DSCreateBuf1(void* ds, void* desc, void** out, void* outer) { return DSCreateBufCommon(1, ds, desc, out, outer); }
+// Hooked outside the loader lock (creating a DirectSound object from DllMain deadlocks): the game's import of
+// DirectSoundCreate8 (DSOUND ordinal 11) and Miles' GetProcAddress("DirectSoundCreate") get wrappers that patch
+// the vtable of the first object they return, before any buffer is created on it.
+typedef HRESULT (WINAPI *DSC_t)(const GUID*, void**, void*);
+static DSC_t o_DSC8 = nullptr, o_DSC = nullptr;
+static void DSPatchObject(void* ds, int i) {
+    if (!ds) return;
+    void** vt = *(void***)ds;
+    if (vt[3] == (void*)h_DSCreateBuf0 || vt[3] == (void*)h_DSCreateBuf1) return;
+    o_DSCreateBuf[i] = (DSCreateBuf_t)PatchVtbl(vt, 3, i ? (void*)h_DSCreateBuf1 : (void*)h_DSCreateBuf0);
+    LOG("background: sound buffers of DirectSound%s object %p created with global focus", i ? "" : "8", ds);
+}
+static HRESULT WINAPI h_DSC8(const GUID* g, void** out, void* u) { HRESULT hr = o_DSC8(g, out, u); if (hr >= 0 && out) DSPatchObject(*out, 0); return hr; }
+static HRESULT WINAPI h_DSC(const GUID* g, void** out, void* u) { HRESULT hr = o_DSC(g, out, u); if (hr >= 0 && out) DSPatchObject(*out, 1); return hr; }
+typedef FARPROC (WINAPI *GPA_t)(HMODULE, LPCSTR);
+static GPA_t o_MssGPA = nullptr;
+static FARPROC WINAPI h_MssGPA(HMODULE m, LPCSTR name) {
+    FARPROC f = o_MssGPA(m, name);
+    if (f && (DWORD)name > 0xFFFF && !strcmp(name, "DirectSoundCreate")) { o_DSC = (DSC_t)f; return (FARPROC)h_DSC; }
+    return f;
+}
+static void** FindIATOrd(HMODULE mod, const char* dll, WORD ord) {
+    BYTE* base = (BYTE*)mod;
+    auto nt = (IMAGE_NT_HEADERS*)(base + ((IMAGE_DOS_HEADER*)base)->e_lfanew);
+    auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (!dir.VirtualAddress) return nullptr;
+    for (auto imp = (IMAGE_IMPORT_DESCRIPTOR*)(base + dir.VirtualAddress); imp->Name; ++imp) {
+        if (_stricmp((char*)(base + imp->Name), dll) || !imp->OriginalFirstThunk) continue;
+        auto oft = (IMAGE_THUNK_DATA*)(base + imp->OriginalFirstThunk); auto ft = (IMAGE_THUNK_DATA*)(base + imp->FirstThunk);
+        for (; oft->u1.AddressOfData; ++oft, ++ft) if (IMAGE_SNAP_BY_ORDINAL(oft->u1.Ordinal) && IMAGE_ORDINAL(oft->u1.Ordinal) == ord) return (void**)&ft->u1.Function;
+    }
+    return nullptr;
+}
+static void* SwapSlot(void** slot, void* hook) { DWORD old; VirtualProtect(slot, 4, PAGE_READWRITE, &old); void* o = *slot; *slot = hook; VirtualProtect(slot, 4, old, &old); return o; }
+static void InstallSoundGlobalFocus() {
+    void** s8 = FindIATOrd(GetModuleHandleA(nullptr), "DSOUND.dll", 11);
+    if (s8) o_DSC8 = (DSC_t)SwapSlot(s8, (void*)h_DSC8);
+    HMODULE mss = GetModuleHandleA("mss32.dll");
+    void** sg = mss ? FindIAT(mss, "KERNEL32.dll", "GetProcAddress") : nullptr;
+    if (sg) o_MssGPA = (GPA_t)SwapSlot(sg, (void*)h_MssGPA);
+    LOG("background: DirectSound hooks game=%s miles=%s", s8 ? "ok" : "not found", sg ? "ok" : "not found");
 }
 static void SubclassWindow(HWND h) {
     if (!h || g_hwnd == h) return;
@@ -627,6 +703,16 @@ static void __fastcall h_DoFile(void* vm, void* edx, const char* name) {
         Register("AttTFix_SetIntro", L_SetIntro);
         Register("AttTFix_GetLang", L_GetLang);
         Register("AttTFix_SetLang", L_SetLang);
+        Register("AttTFix_GetQuality", L_GetQuality);
+        Register("AttTFix_SetQuality", L_SetQuality);
+        Register("AttTFix_GetRenderer", L_GetRenderer);
+        Register("AttTFix_GetTreeView", L_GetTreeView);
+        Register("TreeDistanceUp", (lua_CFunction)L_TreeDistUp);      // the game's own, wrapped (renderopt.inc)
+        Register("TreeDistanceDown", (lua_CFunction)L_TreeDistDown);
+        Register("GetTreeDistCoef", (lua_CFunction)L_TreeDistCoef);
+        Register("SaveTreeDist", (lua_CFunction)L_TreeDistSave);
+        Register("CancelTreeDist", (lua_CFunction)L_TreeDistCancel);
+        Register("AttTFix_SetRenderer", L_SetRenderer);
         { const char v[] = "AttTFix_Version = \"" ATTFIX_VERSION "\""; e_RunBuf(vm, nullptr, v, (int)sizeof(v) - 1, "=AttTFixVer"); }
         e_RunBuf(vm, nullptr, g_script, (int)sizeof(g_script) - 1, "=AttTFix");
     }
@@ -695,7 +781,7 @@ static int WindowMonitorHz() {   // refresh rate of the monitor the game window 
 extern "C" void __cdecl FrameLimiter() {
     // windowed VSync: start each frame right after a vblank (timing from the compositor), one frame per refresh.
     // A plain timer at the refresh rate drifts in phase against the real vblank (frame shown twice / skipped).
-    if (g_fpsLimit <= 0 && g_vsync && g_windowed && g_dwmOk && g_dwmSync == 1 && g_DwmTiming) {
+    if (!g_bgInactive && g_fpsLimit <= 0 && g_vsync && g_windowed && g_dwmOk && g_dwmSync == 1 && g_DwmTiming) {
         DWM_TIMING_INFO ti; memset(&ti, 0, sizeof ti); ti.cbSize = sizeof ti;
         int hz = WindowMonitorHz();
         bool okT = g_DwmTiming(nullptr, &ti) >= 0 && ti.qpcRefreshPeriod > 0 && ti.qpcVBlank > 0;
@@ -723,6 +809,7 @@ extern "C" void __cdecl FrameLimiter() {
     }
     int lim = g_fpsLimit;
     if (lim <= 0 && g_vsync && g_windowed && (!g_dwmOk || g_dwmSync == 1)) lim = WindowMonitorHz();   // windowed: Present doesn't wait for vblank
+    if (g_bgInactive && g_bgFps > 0 && (lim <= 0 || lim > g_bgFps)) lim = g_bgFps;                      // running in the background
     if (lim <= 0) return;
     LARGE_INTEGER now; QueryPerformanceCounter(&now);
     LONGLONG period = g_qpf.QuadPart / lim;
@@ -833,7 +920,7 @@ static void FlushStats(double nowMs) {
     unsigned vaMB = (unsigned)((mem.ullTotalVirtual - mem.ullAvailVirtual) >> 20), vaTotal = (unsigned)(mem.ullTotalVirtual >> 20);
     PLOG("STATS %4.1fs frames=%d fps=%.1f 1%%low=%.1f | frame ms avg=%.2f p50=%.2f p99=%.2f max=%.2f | VA %u/%u MB | avg ms:%s",
          (nowMs - g_winStartMs) / 1000.0, g_nft, g_nft * 1000.0 / (nowMs - g_winStartMs), 1000.0 * nw / ws, avg, p50, p99, mx, vaMB, vaTotal, secs);
-    RenderOptStats(); MeshSmoothStats(); ParticleStats(); MsaaStats();
+    RenderOptStats(); MeshSmoothStats(); ParticleStats(); MsaaStats(); EffectStats(); TreeSortStats(); SoundStats(); SkinStats(); BillboardStats(); InstanceStats();
     g_nft = 0; for (int i = 0; i < S_COUNT; ++i) g_secSum[i] = 0; g_winStartMs = nowMs;
 }
 static inline LONGLONG Now() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
@@ -951,9 +1038,42 @@ typedef HRESULT (__stdcall *Present_t2)(void*, const void*, const void*, HWND, c
 typedef void (__fastcall *VM0_t)(void* self, void* edx);
 #include "smoothanim.inc"
 #include "renderopt.inc"
+#include "effectsm.inc"
+#include "billboard.inc"
+#include "cpuopt.inc"
+#include "sound.inc"
+#include "skin.inc"
+#include "instance.inc"
 static void* g_font = nullptr;
 static double g_ovFps = 0, g_ovMs = 0, g_ovUpd = 0, g_ovRen = 0, g_ovPres = 0, g_ovMax = 0;
-static void FontRelease() { if (g_font) { ((ULONG (__stdcall*)(void*))(*(void***)g_font)[2])(g_font); g_font = nullptr; } }
+// The overlay text is rendered into a texture only when it changes (about twice per second) and drawn as one
+// sprite every frame: ID3DXFont::DrawText re-shapes the whole text on every call (~1.5 ms per frame at 4K).
+static void* g_ovSprite = nullptr; static void* g_ovTex = nullptr; static UINT g_ovTexW = 0, g_ovTexH = 0;
+static char g_ovLast[512] = "";
+static void ComRel(void*& p) { if (p) { ((ULONG (__stdcall*)(void*))(*(void***)p)[2])(p); p = nullptr; } }
+static void FontRelease() { ComRel(g_font); ComRel(g_ovSprite); ComRel(g_ovTex); g_ovLast[0] = 0; }
+static bool OverlayRenderTexture(void* dev, const char* text) {
+    void** vt = *(void***)dev;
+    struct VP { DWORD X, Y, W, H; float MinZ, MaxZ; } vp;
+    void* rt = nullptr; void* ds = nullptr; void* surf = nullptr;
+    if (((HRESULT (__stdcall*)(void*, UINT, void**))(*(void***)g_ovTex)[18])(g_ovTex, 0, &surf) < 0 || !surf) return false;
+    ((HRESULT (__stdcall*)(void*, VP*))vt[48])(dev, &vp);
+    ((HRESULT (__stdcall*)(void*, DWORD, void**))vt[38])(dev, 0, &rt);
+    ((HRESULT (__stdcall*)(void*, void**))vt[40])(dev, &ds);
+    ((HRESULT (__stdcall*)(void*, DWORD, void*))vt[37])(dev, 0, surf);
+    ((HRESULT (__stdcall*)(void*, void*))vt[39])(dev, nullptr);
+    ((Clear_t)vt[43])(dev, 0, nullptr, 1 /*TARGET*/, 0x00000000, 1.0f, 0);
+    typedef INT (__stdcall *DT_t)(void*, void*, LPCSTR, INT, RECT*, DWORD, DWORD);
+    DT_t dtx = (DT_t)(*(void***)g_font)[14];
+    RECT r1 = { 4, 4, (LONG)g_ovTexW, (LONG)g_ovTexH }, r2 = { 2, 2, (LONG)g_ovTexW, (LONG)g_ovTexH };
+    dtx(g_font, nullptr, text, -1, &r1, DT_NOCLIP, 0xC0000000);
+    dtx(g_font, nullptr, text, -1, &r2, DT_NOCLIP, 0xFFFFE070);
+    ((HRESULT (__stdcall*)(void*, DWORD, void*))vt[37])(dev, 0, rt);
+    ((HRESULT (__stdcall*)(void*, void*))vt[39])(dev, ds);
+    ((HRESULT (__stdcall*)(void*, VP*))vt[47])(dev, &vp);
+    void* t1 = surf; ComRel(t1); t1 = rt; ComRel(t1); t1 = ds; ComRel(t1);
+    return true;
+}
 static DWORD g_toastUntil = 0; static char g_toast[96] = "";
 static void Toast(const char* t) { snprintf(g_toast, sizeof g_toast, "%s", t); g_toastUntil = GetTickCount() + 2500; LOG("toggle: %s", t); }
 static bool KeyPressed(int vk, bool& down) {
@@ -967,20 +1087,24 @@ static void DrawOverlay(void* dev) {
     static bool d8 = false;
     if (KeyPressed(VK_F8, d8)) { if (g_atr) { fclose(g_atr); g_atr = nullptr; } g_atrArmed = true; g_atrLeft = 1200; Toast("F8  animation trace: recording 1200 hero draws"); }
     // Ctrl+1..8, Ctrl+0 while the overlay is shown (F10 / F9 / F7 still work as before)
-    static bool d7 = false, c1 = false, c2 = false, c3 = false, c4 = false, c5 = false, c6 = false, c7 = false, c9 = false, c0 = false;
+    static bool d7 = false, c1 = false, c2 = false, c3 = false, c4 = false, c5 = false, c6 = false, c7 = false, c8 = false, c9 = false, c0 = false;
     bool ctrl = g_showFps && (GetAsyncKeyState(VK_CONTROL) & 0x8000);
-    bool k1 = KeyPressed('1', c1) && ctrl, k2 = KeyPressed('2', c2) && ctrl, k3 = KeyPressed('3', c3) && ctrl, k4 = KeyPressed('4', c4) && ctrl, k5 = KeyPressed('5', c5) && ctrl, k6 = KeyPressed('6', c6) && ctrl, k7 = KeyPressed('7', c7) && ctrl, k9 = KeyPressed('9', c9) && ctrl, k0 = KeyPressed('0', c0) && ctrl;
+    bool k1 = KeyPressed('1', c1) && ctrl, k2 = KeyPressed('2', c2) && ctrl, k3 = KeyPressed('3', c3) && ctrl, k4 = KeyPressed('4', c4) && ctrl, k5 = KeyPressed('5', c5) && ctrl, k6 = KeyPressed('6', c6) && ctrl, k7 = KeyPressed('7', c7) && ctrl, k8 = KeyPressed('8', c8) && ctrl, k9 = KeyPressed('9', c9) && ctrl, k0 = KeyPressed('0', c0) && ctrl;
     if (KeyPressed(VK_F10, d10) || k1) { g_interp = !g_interp; Toast(g_interp ? "movement/camera smoothing: ON" : "movement/camera smoothing: OFF (original)"); }
     if (k2) { g_animBlend = !g_animBlend; Toast(g_animBlend ? "character animation blending: ON" : "character animation blending: OFF (original 30 fps)"); }
     if (k3) { g_meshSmooth = !g_meshSmooth; Toast(g_meshSmooth ? "object animation smoothing (trees, water, flags): ON" : "object animation smoothing: OFF (original 30 fps)"); }
-    if (k9 && g_objDist != 1.0f) { g_objDistOn = !g_objDistOn; ObjDistApplyShadows(); char t[96]; snprintf(t, sizeof t, "object view distance: %s", g_objDistOn ? "extended (props and shadows)" : "original"); Toast(t); }
+    if (k8) { g_dissolve = (g_dissolve + 1) % 3; Toast(g_dissolve == 1 ? "distant trees: dissolve (no see-through)" : g_dissolve == 2 ? "distant trees: dissolve, 4x shorter transition" : "distant trees: original transparency"); }
+    if (k9) { g_objDistOn = !g_objDistOn; ObjDistApplyShadows(); char t[96]; snprintf(t, sizeof t, "view distance: %s", g_objDistOn ? "extended (props, shadows, trees)" : "original"); Toast(t); }
     if (k0) { g_rtTraceArm = 2; Toast("frame trace written to AttTFix.log"); }
-    if (k7) { g_msaaOn = !g_msaaOn; g_msaaResetPending = true; Toast(g_msaaOn ? "MSAA + foliage AA: switching ON..." : "MSAA: switching OFF..."); }
+    if (k7) { g_msaaOn = !g_msaaOn;
+        if (g_dxvkActive) { g_msaaResetPending = true; Toast(g_msaaOn ? "MSAA + foliage AA: switching ON..." : "MSAA: switching OFF..."); }
+        else { char b[8]; snprintf(b, sizeof b, "%d", g_msaaOn ? g_msaa : 0); WritePrivateProfileStringA("Video", "MSAA", b, g_iniPath);
+               Toast(g_msaaOn ? "MSAA: ON after restart (system d3d9)" : "MSAA: OFF after restart (system d3d9)"); } }
     if (k6) { g_anisoOn = !g_anisoOn; AnisoApply(dev); char t[64]; snprintf(t, sizeof t, "anisotropic filtering: %s", AnisoLevel() ? "ON" : "OFF (original)"); Toast(t); }
     if (k5) { g_partSmooth = !g_partSmooth; Toast(g_partSmooth ? "particle smoothing: ON" : "particle smoothing: OFF (original tick rate)"); }
     if (KeyPressed(VK_F7, d7) || k4) {
-        int on = !(g_optSun || g_optTrees || g_optPoly); g_optSun = g_optTrees = g_optPoly = on;
-        Toast(on ? "optimizations (sun test, trees, polygon test): ON" : "optimizations: OFF (original)");
+        int on = !(g_optSun || g_optTrees || g_optPoly || g_optFx || g_optSort || g_asyncSnd || g_optSkin); g_optSun = g_optTrees = g_optPoly = g_optFx = g_optSort = on; if (g_sndRun) g_asyncSnd = on; if (o_Skin) SkinToggle(on);
+        Toast(on ? "optimizations (sun test, trees, polygon test, effect states, sound, skinning): ON" : "optimizations: OFF (original)");
     }
     bool toast = g_toastUntil && GetTickCount() < g_toastUntil;
     if (!g_showFps && !toast) return;
@@ -995,19 +1119,46 @@ static void DrawOverlay(void* dev) {
     char line[400]; int n = 0; line[0] = 0;
     if (g_showFps)
         n += snprintf(line + n, sizeof line - n, "%.0f FPS  %.2f ms (max %.1f)  %s%s\nupdate %.2f  render %.2f  present %.2f  |  trees %.0f %.2f ms  sun %.2f ms\n"
-                      "Ctrl+1 movement: %s   Ctrl+2 characters: %s   Ctrl+3 objects: %s   Ctrl+4 optimizations: %s   Ctrl+5 particles: %s   Ctrl+6 aniso: %s   Ctrl+7 MSAA: %s\nCtrl+9 view distance: %s   F11 hide\n",
+                      "Ctrl+1 movement: %s   Ctrl+2 characters: %s   Ctrl+3 objects: %s   Ctrl+4 optimizations: %s   Ctrl+5 particles: %s   Ctrl+6 aniso: %s   Ctrl+7 MSAA: %s\nCtrl+8 tree fade: %s   Ctrl+9 view distance: %s   F11 hide\n",
                       g_ovFps, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9",
                       g_windowed && g_vsync && g_fpsLimit <= 0 ? (!g_dwmOk ? "  sync: timer" : g_dwmSync == 2 ? "  sync: flush" : g_gridOk == 1 ? "  sync: vblank" : "  sync: timer") : "",
                       g_ovUpd, g_ovRen, g_ovPres, g_ovTreeN, g_ovTrees, g_ovSun,
-                      g_interp ? "on" : "off", g_animBlend ? "on" : "off", g_meshSmooth ? "on" : "off", (g_optSun || g_optTrees || g_optPoly) ? "on" : "off", g_partSmooth ? "on" : "off", AnisoLevel() ? (AnisoLevel() >= 16 ? "16x" : AnisoLevel() >= 8 ? "8x" : AnisoLevel() >= 4 ? "4x" : "2x") : "off",
+                      g_interp ? "on" : "off", g_animBlend ? "on" : "off", g_meshSmooth ? "on" : "off", (g_optSun || g_optTrees || g_optPoly || g_optFx || g_optSort || g_asyncSnd || g_optSkin) ? "on" : "off", g_partSmooth ? "on" : "off", AnisoLevel() ? (AnisoLevel() >= 16 ? "16x" : AnisoLevel() >= 8 ? "8x" : AnisoLevel() >= 4 ? "4x" : "2x") : "off",
                       g_msaaActive == 8 ? "8x" : g_msaaActive == 4 ? "4x" : g_msaaActive == 2 ? "2x" : g_msaaActive ? "on" : "off",
-                      ObjDist() > 1.0f ? "extended" : "original");
+                      g_dissolve == 1 ? "dissolve" : g_dissolve == 2 ? "dissolve short" : "original", g_objDistOn ? "extended" : "original");
     if (toast) snprintf(line + n, sizeof line - n, "%s", g_toast);
     typedef INT (__stdcall *DT_t)(void*, void*, LPCSTR, INT, RECT*, DWORD, DWORD);
     DT_t dt = (DT_t)(*(void***)g_font)[14];
-    RECT r1 = { 12, 10, 3000, 600 }, r2 = { 10, 8, 3000, 600 };
-    dt(g_font, nullptr, line, -1, &r1, DT_NOCLIP, 0xC0000000);
-    dt(g_font, nullptr, line, -1, &r2, DT_NOCLIP, 0xFFFFE070);
+    static bool cacheFailed = false;
+    if (!cacheFailed && !g_ovTex) {
+        HMODULE x = GetModuleHandleA("d3dx9_29.dll");
+        typedef HRESULT (WINAPI *CS_t)(void*, void**);
+        CS_t cs = x ? (CS_t)GetProcAddress(x, "D3DXCreateSprite") : nullptr;
+        int h = *g_scrH / 60; if (h < 14) h = 14;
+        g_ovTexW = (UINT)*g_scrW; if (g_ovTexW < 640) g_ovTexW = 640;
+        g_ovTexH = (UINT)(h * 7 + 8);
+        // CreateTexture(W, H, Levels, Usage=RENDERTARGET, A8R8G8B8, DEFAULT, pp, shared) = 23
+        if (!cs || cs(dev, &g_ovSprite) < 0 ||
+            ((HRESULT (__stdcall*)(void*, UINT, UINT, UINT, DWORD, DWORD, DWORD, void**, void*))(*(void***)dev)[23])(dev, g_ovTexW, g_ovTexH, 1, 1, 21, 0, &g_ovTex, nullptr) < 0) {
+            ComRel(g_ovSprite); g_ovTex = nullptr; cacheFailed = true; LOG("overlay: cached text unavailable, drawing directly");
+        }
+        g_ovLast[0] = 0;
+    }
+    if (cacheFailed || !g_ovTex) {
+        RECT r1 = { 12, 10, 3000, 600 }, r2 = { 10, 8, 3000, 600 };
+        dt(g_font, nullptr, line, -1, &r1, DT_NOCLIP, 0xC0000000);
+        dt(g_font, nullptr, line, -1, &r2, DT_NOCLIP, 0xFFFFE070);
+        return;
+    }
+    if (strcmp(line, g_ovLast)) {
+        if (!OverlayRenderTexture(dev, line)) { cacheFailed = true; FontRelease(); return; }
+        snprintf(g_ovLast, sizeof g_ovLast, "%s", line);
+    }
+    void** svt = *(void***)g_ovSprite;
+    float pos[3] = { 8.0f, 6.0f, 0.0f };
+    ((HRESULT (__stdcall*)(void*, DWORD))svt[8])(g_ovSprite, 0x10 /*D3DXSPRITE_ALPHABLEND*/);
+    ((HRESULT (__stdcall*)(void*, void*, const RECT*, const float*, const float*, DWORD))svt[9])(g_ovSprite, g_ovTex, nullptr, nullptr, pos, 0xFFFFFFFF);
+    ((HRESULT (__stdcall*)(void*))svt[11])(g_ovSprite);
 }
 static void UpdateOverlayStats() {   // every 0.5 s from the per-frame sections
     static double acc[7] = {0}; static int n = 0; static double mx = 0; static LONGLONG t0 = 0;
@@ -1270,7 +1421,7 @@ static float g_animMaxRad = 1.2f;
 
 struct AEnt { BYTE* obj; void* anim; int cur, prev; double tChange, period; DWORD lastSeen; };
 static const int AMASK = 4095; static AEnt g_aent[AMASK + 1];
-static DWORD g_aBlends = 0, g_aSkips = 0, g_aCalls = 0;
+static DWORD g_aBlends = 0, g_aSkips = 0, g_aCalls = 0, g_aShared = 0, g_aWraps = 0;
 static AEnt* AGet(BYTE* obj) {
     DWORD h = ((DWORD)obj >> 3) * 2654435761u; AEnt* reuse = nullptr;
     for (int i = 0; i < 32; ++i) {
@@ -1306,7 +1457,7 @@ static inline void* SkinLod(BYTE* m, unsigned lod) {
 // The key frames of all tracks of the mesh's animation (skeleton bones as well as rigid CMatrixMeshSubObject parts)
 // are blended IN PLACE for the duration of one mesh draw and restored right after it (rendering is single-threaded;
 // the animation data is shared by all meshes using it, so it must not stay modified).
-struct KSave { float* dst; int n; };
+struct KSave { float* dst; int n; int off; };
 static KSave g_kSave[256]; static int g_nKSave = 0;
 static float g_kPool[262144]; static int g_kPoolUsed = 0; static int g_kDepth = 0;
 static bool Writable(void* p) {   // cached per 64 KB region
@@ -1376,6 +1527,9 @@ static void KeysPatch(AEnt* e, BYTE* m) {
     g_nKSave = 0; g_kPoolUsed = 0;
     if (!g_animBlend) { AnimTrace(m, e, "off", -1, 0, 0, 0, 0); return; }
     if (!e || e->prev < 0 || e->prev == e->cur || !e->anim) { AnimTrace(m, e, "noprev", -1, 0, 0, 0, 0); return; }
+    // loop wrap / restart (frame went backwards): the last and the first key frame of a looped animation are often
+    // not neighbours (root offset, portal swirl) - blending across them showed a short slide, so the wrap snaps
+    if (e->cur < e->prev) { ++g_aWraps; AnimTrace(m, e, "wrap", -1, 0, 0, 0, 0); return; }
     double a = (g_frameMs - e->tChange) / (e->period > 1.0 ? e->period : 33.333);
     if (a >= 0.999) AnimTrace(m, e, "alpha>=1", a, 0, 0, 0, 0);
     if (a >= 0.999) return;
@@ -1393,9 +1547,15 @@ static void KeysPatch(AEnt* e, BYTE* m) {
         if (!Writable(base) || !Writable(base + (size_t)frames * bones * 6 - 1)) continue;
         unsigned fc = (unsigned)f < frames ? (unsigned)f : 0, fp = (unsigned)e->prev;
         if (fp >= frames || fp == fc) continue;
+        if (fc < fp) { ++g_aWraps; continue; }                         // this track wrapped (shorter loop than the main one)
         int n = (int)bones * 6;
         if (g_nKSave >= 256 || g_kPoolUsed + n > (int)(sizeof g_kPool / sizeof(float))) { ++g_aSkips; break; }
         float* c = base + (size_t)fc * n; const float* pv = base + (size_t)fp * n;
+        // several tracks of one animation can share the same key data: blend each key range only once
+        // (blending it twice saved already-blended keys as the "original" and corrupted the animation)
+        bool shared = false;
+        for (int q = 0; q < g_nKSave; ++q) if (c < g_kSave[q].dst + g_kSave[q].n && g_kSave[q].dst < c + n) { shared = true; break; }
+        if (shared) { ++g_aShared; continue; }
         float* sv = g_kPool + g_kPoolUsed;
         memcpy(sv, c, n * sizeof(float));
         for (unsigned b = 0; b < bones; ++b) {
@@ -1403,7 +1563,7 @@ static void KeysPatch(AEnt* e, BYTE* m) {
             BlendBone(o, p, cc, fa);
             for (int k = 3; k < 6; ++k) o[k] = p[k] + (cc[k] - p[k]) * fa;
         }
-        g_kSave[g_nKSave].dst = c; g_kSave[g_nKSave].n = n; ++g_nKSave; g_kPoolUsed += n; any = true;
+        g_kSave[g_nKSave].dst = c; g_kSave[g_nKSave].n = n; g_kSave[g_nKSave].off = g_kPoolUsed; ++g_nKSave; g_kPoolUsed += n; any = true;
     }
     if (any) ++g_aBlends;
     {   float b = 0, af = 0, pv = 0;
@@ -1412,9 +1572,8 @@ static void KeysPatch(AEnt* e, BYTE* m) {
             if ((unsigned)e->prev < fr && bones > 1) pv = ((float*)tr[0])[(size_t)e->prev * bones * 6 + 7]; }
         AnimTrace(m, e, any ? "blend" : "skip", a, g_nKSave, b, af, pv); }
 }
-static void KeysRestore() {
-    int off = 0;
-    for (int i = 0; i < g_nKSave; ++i) { memcpy(g_kSave[i].dst, g_kPool + off, g_kSave[i].n * sizeof(float)); off += g_kSave[i].n; }
+static void KeysRestore() {   // newest first, so the oldest (true original) copy is written last
+    for (int i = g_nKSave - 1; i >= 0; --i) memcpy(g_kSave[i].dst, g_kPool + g_kSave[i].off, g_kSave[i].n * sizeof(float));
     g_nKSave = 0; g_kPoolUsed = 0;
 }
 static void SkinDiag(BYTE* m, void* lod) {   // log the structure of the first few distinct animations
@@ -1475,8 +1634,8 @@ static void InterpStats() {
     { char b[400]; int n = 0; b[0] = 0;
       for (int i = 0; i < g_nupd && n < 380; ++i) if (g_upd[i].iCount) { n += snprintf(b + n, sizeof b - n, " %s=%lu", g_upd[i].name, g_upd[i].iCount); g_upd[i].iCount = 0; }
       if (n) PLOG("SMOOTH by class (object-frames):%s", b); }
-    if (g_aCalls) PLOG("ANIM mesh draws=%lu blended=%lu bones via quaternion=%lu snapped=%lu", g_aCalls, g_aBlends, g_aQuat, g_aSkips);
-    g_aQuat = 0;
+    if (g_aCalls) PLOG("ANIM mesh draws=%lu blended=%lu bones via quaternion=%lu snapped=%lu shared tracks skipped=%lu loop wraps=%lu", g_aCalls, g_aBlends, g_aQuat, g_aSkips, g_aShared, g_aWraps);
+    g_aQuat = 0; g_aShared = 0; g_aWraps = 0;
     g_aCalls = g_aBlends = g_aSkips = 0;
 }
 static UpdInfo* UpdFor(BYTE* self) {
@@ -1583,8 +1742,20 @@ static const char* FuncName(int idx, char* buf) {
     for (auto& k : g_knownNames) if (k.a == a) return k.n;
     sprintf(buf, "FUN_%08lX", a); return buf;
 }
-static DWORD* g_excl = nullptr; static DWORD* g_incl = nullptr; static DWORD g_samples = 0, g_samplesExe = 0;
-struct ModCount { HMODULE m; DWORD n; char name[32]; };
+static HMODULE g_selfMod = nullptr; static int g_symN = 0; static DWORD* g_symRva = nullptr; static DWORD* g_symCnt = nullptr; static char (*g_symName)[48] = nullptr;
+static void LoadSymbols() {   // "rva name" lines, sorted by rva (written by build.sh next to the dll)
+    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)(void*)LoadSymbols, &g_selfMod);
+    char path[MAX_PATH]; GetModuleFileNameA(g_selfMod, path, MAX_PATH);
+    char* sl = strrchr(path, '\\'); if (!sl) return; strcpy(sl + 1, "AttTFix.sym");
+    FILE* f = fopen(path, "r"); if (!f) return;
+    int cap = 4096; g_symRva = (DWORD*)calloc(cap, 4); g_symCnt = (DWORD*)calloc(cap, 4); g_symName = (char (*)[48])calloc(cap, 48);
+    char line[256]; unsigned rva; char nm[200];
+    while (g_symN < cap && fgets(line, sizeof line, f)) if (sscanf(line, "%x %199s", &rva, nm) == 2) { g_symRva[g_symN] = rva; snprintf(g_symName[g_symN], 48, "%s", nm); ++g_symN; }
+    fclose(f);
+    LOG("profiler: %d AttTFix symbols loaded", g_symN);
+}
+static DWORD* g_excl = nullptr; static DWORD* g_incl = nullptr; static DWORD* g_extCall = nullptr; static DWORD* g_sysCall = nullptr; static DWORD g_samples = 0, g_samplesExe = 0;
+struct ModCount { HMODULE m; DWORD n; char name[32]; bool sys; };
 static ModCount g_mods[48]; static int g_nmods = 0;
 static CRITICAL_SECTION g_profCs; static HANDLE g_mainThread = nullptr; static DWORD g_mainStackBase = 0;
 static volatile LONG g_samplerRun = 0;
@@ -1627,8 +1798,21 @@ static DWORD WINAPI SamplerThread(void*) {
                 g_mods[j].m = m; g_mods[j].n = 0; char path[MAX_PATH] = "?";
                 if (m) GetModuleFileNameA(m, path, MAX_PATH);
                 const char* bn = strrchr(path, '\\'); snprintf(g_mods[j].name, 32, "%s", bn ? bn + 1 : path); ++g_nmods;
+                g_mods[j].sys = !_stricmp(g_mods[j].name, "ntdll.dll") || !_stricmp(g_mods[j].name, "KERNELBASE.dll") || !_stricmp(g_mods[j].name, "win32u.dll") || !_stricmp(g_mods[j].name, "KERNEL32.DLL");
             }
             if (j < g_nmods) ++g_mods[j].n;
+            if (m && m == g_selfMod && g_symN) {     // our own code: per function (AttTFix.sym from the build)
+                DWORD rva = c.Eip - (DWORD)m; int lo = 0, hi = g_symN - 1;
+                while (lo < hi) { int mid = (lo + hi + 1) / 2; if (g_symRva[mid] <= rva) lo = mid; else hi = mid - 1; }
+                if (g_symRva[lo] <= rva) ++g_symCnt[lo];
+            }
+            // which game function called out of the exe (first return address into the exe on the stack)
+            for (int i = 0; i < nWords; ++i) {
+                DWORD v = stackCopy[i]; if (!IsReturnAddr(v)) continue;
+                int f = FuncIndex(v); if (f < 0) continue;
+                ++g_extCall[f]; if (j < g_nmods && g_mods[j].sys) ++g_sysCall[f];
+                break;
+            }
         }
         // inclusive: functions on the stack (unique), plus the current one
         if (smp.excl >= 0) { smp.inc[smp.ninc++] = smp.excl; ++g_incl[smp.excl]; }
@@ -1651,7 +1835,8 @@ static void StartSampler() {
     DWORD tib; __asm__ volatile("movl %%fs:4, %0" : "=r"(tib)); g_mainStackBase = tib;   // TEB.StackBase of the game thread
     g_mainThread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, GetCurrentThreadId());
     if (!g_mainThread) { LOG("sampler: OpenThread failed"); return; }
-    g_excl = (DWORD*)calloc(NF, 4); g_incl = (DWORD*)calloc(NF, 4);
+    LoadSymbols();
+    g_excl = (DWORD*)calloc(NF, 4); g_incl = (DWORD*)calloc(NF, 4); g_extCall = (DWORD*)calloc(NF, 4); g_sysCall = (DWORD*)calloc(NF, 4);
     InitializeCriticalSection(&g_profCs);
     g_samplerRun = 1;
     CloseHandle(CreateThread(nullptr, 0, SamplerThread, nullptr, 0, nullptr));
@@ -1664,8 +1849,9 @@ static void DumpProfile(const char* why) {
     DWORD total = g_samples;
     // top lists
     static int idx[64]; char nb[32], line[2048]; int len;
-    for (int pass = 0; pass < 2; ++pass) {
-        DWORD* arr = pass == 0 ? g_excl : g_incl;
+    static const char* passName[4] = { "self time", "incl. time", "calls out of the exe from", "system (ntdll/kernel/win32u) time from" };
+    for (int pass = 0; pass < 4; ++pass) {
+        DWORD* arr = pass == 0 ? g_excl : pass == 1 ? g_incl : pass == 2 ? g_extCall : g_sysCall;
         int n = 0;
         for (int i = 0; i < NF; ++i) {
             if (!arr[i]) continue;
@@ -1676,13 +1862,23 @@ static void DumpProfile(const char* why) {
         }
         len = 0;
         for (int i = 0; i < n; ++i) len += snprintf(line + len, sizeof line - len, " %s=%.1f%%", FuncName(idx[i], nb), 100.0 * arr[idx[i]] / total);
-        PLOG("PROFILE %s (%lu samples) %s:%s", why, total, pass == 0 ? "self time" : "incl. time", line);
+        if (n) PLOG("PROFILE %s (%lu samples) %s:%s", why, total, passName[pass], line);
     }
     len = 0;
     len += snprintf(line + len, sizeof line - len, " ATThrone.exe=%.1f%%", 100.0 * g_samplesExe / total);
     for (int j = 0; j < g_nmods; ++j) len += snprintf(line + len, sizeof line - len, " %s=%.1f%%", g_mods[j].name, 100.0 * g_mods[j].n / total);
     PLOG("PROFILE %s modules:%s", why, line);
-    memset(g_excl, 0, NF * 4); memset(g_incl, 0, NF * 4); g_samples = g_samplesExe = 0;
+    if (g_symN) {   // top functions inside AttTFix itself
+        len = 0;
+        for (int t = 0; t < 15; ++t) {
+            int best = -1; for (int i = 0; i < g_symN; ++i) if (g_symCnt[i] && (best < 0 || g_symCnt[i] > g_symCnt[best])) best = i;
+            if (best < 0) break;
+            len += snprintf(line + len, sizeof line - len, " %s=%.1f%%", g_symName[best], 100.0 * g_symCnt[best] / total); g_symCnt[best] = 0;
+        }
+        memset(g_symCnt, 0, g_symN * 4);
+        if (len) PLOG("PROFILE %s AttTFix functions:%s", why, line);
+    }
+    memset(g_excl, 0, NF * 4); memset(g_incl, 0, NF * 4); memset(g_extCall, 0, NF * 4); memset(g_sysCall, 0, NF * 4); g_samples = g_samplesExe = 0;
     for (int j = 0; j < g_nmods; ++j) g_mods[j].n = 0;
     LeaveCriticalSection(&g_profCs);
 }
@@ -1765,12 +1961,14 @@ static DICreateDev_t o_DICreateDev = nullptr; static DIGetState_t o_DIGetState =
 static void* g_kbdDev = nullptr;
 static bool DigitsBlocked() { return g_showFps && (GetAsyncKeyState(VK_CONTROL) & 0x8000); }
 static HRESULT __stdcall h_DIGetState(void* dev, DWORD cb, void* buf) {
+    if (g_bgInactive) { if (buf) memset(buf, 0, cb); return 0; }       // running in the background: no input
     HRESULT hr = o_DIGetState(dev, cb, buf);
     if (hr >= 0 && dev == g_kbdDev && cb >= 256 && buf && DigitsBlocked())
         for (int k = 0x02; k <= 0x0B; ++k) ((BYTE*)buf)[k] = 0;          // DIK_1 .. DIK_0
     return hr;
 }
 static HRESULT __stdcall h_DIGetData(void* dev, DWORD cbObj, void* rg, DWORD* inout, DWORD flags) {
+    if (g_bgInactive) { if (inout) *inout = 0; return 0; }
     HRESULT hr = o_DIGetData(dev, cbObj, rg, inout, flags);
     if (hr >= 0 && dev == g_kbdDev && rg && inout && cbObj >= 8 && DigitsBlocked()) {
         BYTE* p = (BYTE*)rg; DWORD n = *inout, w = 0;
@@ -1892,6 +2090,13 @@ static void Init() {
     if (!GetPrivateProfileStringA("Video", "SkipIntro", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Video", "SkipIntro", "0", path);
     g_skipIntro = GetPrivateProfileIntA("Video", "SkipIntro", 0, path);
+    if (!GetPrivateProfileStringA("Game", "Background", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Game", "Background", "0  ; 1 = the game keeps running (and playing sound) when it loses focus or is minimized, 0 = pauses (original)", path);
+    g_bgRun = GetPrivateProfileIntA("Game", "Background", 0, path) != 0;
+    if (!GetPrivateProfileStringA("Game", "BackgroundFps", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Game", "BackgroundFps", "30  ; frame limit while running in the background (0 = no limit)", path);
+    g_bgFps = GetPrivateProfileIntA("Game", "BackgroundFps", 30, path);
+    if (g_bgRun) InstallSoundGlobalFocus();
     if (!GetPrivateProfileStringA("Game", "Language", "", tmp, sizeof tmp, path))   // first start: follow the Windows UI language
         WritePrivateProfileStringA("Game", "Language", PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN ? "ru" : "en", path);
     GetPrivateProfileStringA("Game", "Language", "ru", tmp, sizeof tmp, path);
@@ -1944,16 +2149,54 @@ static void Init() {
     }
     g_optSun = GetPrivateProfileIntA("Perf", "AsyncSunCheck", 1, path) != 0;
     g_optTrees = GetPrivateProfileIntA("Perf", "TreeBatch", 1, path) != 0;
+    if (!GetPrivateProfileStringA("Perf", "TreeGroupParts", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Perf", "TreeGroupParts", "1  ; with TreeBatch: opaque trees drawn as all trunks then all foliage, one effect pass per group, 0 = tree by tree", path);
+    g_treeParts = GetPrivateProfileIntA("Perf", "TreeGroupParts", 1, path) != 0;
+    if (!GetPrivateProfileStringA("Perf", "TreeInstancing", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Perf", "TreeInstancing", "1  ; with TreeGroupParts: opaque 3D trees drawn with hardware instancing (one draw per mesh part), 0 = one draw per tree", path);
+    g_instOn = GetPrivateProfileIntA("Perf", "TreeInstancing", 1, path) != 0;
     InstallRenderOpt();
     if (!GetPrivateProfileStringA("Perf", "FastPolygonTest", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Perf", "FastPolygonTest", "1  ; 1 = point-in-polygon test of obstacles without per-edge atan2 (same result), 0 = original", path);
     g_optPoly = GetPrivateProfileIntA("Perf", "FastPolygonTest", 1, path) != 0;
     InstallPolyOpt();
+    if (!GetPrivateProfileStringA("Perf", "EffectStates", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Perf", "EffectStates", "1  ; 1 = effects set/restore only render states that actually change (same result), 0 = original", path);
+    g_optFx = GetPrivateProfileIntA("Perf", "EffectStates", 1, path) != 0;
+    if (!GetPrivateProfileStringA("Perf", "EffectDeferRestore", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Perf", "EffectDeferRestore", "1  ; with EffectStates: states an effect changed are set back only when something needs them (next draw), 0 = right at the effect's end", path);
+    g_fxDeferCfg = GetPrivateProfileIntA("Perf", "EffectDeferRestore", 1, path) != 0;
+    InstallEffectStates();
+    InstallBillboards();
+    if (!GetPrivateProfileStringA("Perf", "TreeSort", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Perf", "TreeSort", "1  ; 1 = fast sort of visible forest trees (same order), 0 = original qsort", path);
+    g_optSort = GetPrivateProfileIntA("Perf", "TreeSort", 1, path) != 0;
+    InstallTreeSort();
+    if (!GetPrivateProfileStringA("Perf", "AsyncSound", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Perf", "AsyncSound", "1  ; 1 = 3D sound positions/commits on a worker thread, 0 = on the game thread (original)", path);
+    g_asyncSnd = GetPrivateProfileIntA("Perf", "AsyncSound", 1, path) != 0;
+    if (g_asyncSnd) InstallAsyncSound();
+    if (!GetPrivateProfileStringA("Perf", "FastSkin", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Perf", "FastSkin", "1  ; 1 = character skinning with SSE, kept when the pose did not change (same result, checked against the original), 0 = original", path);
+    g_optSkin = GetPrivateProfileIntA("Perf", "FastSkin", 1, path) != 0;
+    InstallSkin();
     if (!GetPrivateProfileStringA("Video", "ObjectDistance", "", tmp, sizeof tmp, path))
-        WritePrivateProfileStringA("Video", "ObjectDistance", "2.0  ; view distance of props (boxes, wheels, rocks), NPCs and their shadows: 1.0 = original; Ctrl+9 toggles", path);
-    g_objDist = ReadIniFloat("Video", "ObjectDistance", 2.0f);
-    if (!(g_objDist >= 0.5f && g_objDist <= 10.0f)) g_objDist = 2.0f;
+        WritePrivateProfileStringA("Video", "ObjectDistance", "1.0  ; view distance of props (boxes, wheels, rocks), NPCs and their shadows: 1.0 = original; Ctrl+9 toggles", path);
+    g_objDist = ReadIniFloat("Video", "ObjectDistance", 1.0f);
+    if (!(g_objDist >= 0.5f && g_objDist <= 10.0f)) g_objDist = 1.0f;
     InstallObjDistance();
+    if (!GetPrivateProfileStringA("Video", "TreeDistance", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Video", "TreeDistance", "1.0  ; forest: distance of the 3D tree -> flat tree crossfade: 1.0 = original; Ctrl+9 toggles", path);
+    g_treeDist = ReadIniFloat("Video", "TreeDistance", 1.0f);
+    if (!GetPrivateProfileStringA("Video", "Tree3DDistance", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Video", "Tree3DDistance", "1500  ; distance up to which forest trees are 3D (flat beyond; the game itself: ~700), 0 = as the game's tree distance option", path);
+    g_tree3D = ReadIniFloat("Video", "Tree3DDistance", 1500.0f);
+    if (!(g_tree3D >= 0 && g_tree3D <= 20000)) g_tree3D = 0;
+    if (!GetPrivateProfileStringA("Video", "TreeDissolve", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Video", "TreeDissolve", "1  ; 3D -> flat trees: 0 = original see-through fade, 1 = dissolve, 2 = dissolve in a 4x shorter band (Ctrl+8 cycles)", path);
+    g_dissolve = GetPrivateProfileIntA("Video", "TreeDissolve", 1, path);
+    if (g_dissolve < 0 || g_dissolve > 2) g_dissolve = 1;
+    if (!(g_treeDist >= 0.5f && g_treeDist <= 10.0f)) g_treeDist = 2.0f;
     if (!GetPrivateProfileStringA("Smooth", "Objects", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Smooth", "Objects", "1  ; 1 = smooth 30 fps vertex animation of trees, water, flags etc., 0 = original", path);
     g_meshSmooth = GetPrivateProfileIntA("Smooth", "Objects", 1, path) != 0;

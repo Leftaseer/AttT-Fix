@@ -64,6 +64,7 @@ local ok, err = pcall(function()
   -- Video panel (x >= 420, 84 <= y <= 470 in 800x600 units; the title at y=80 is kept) is scaled by F around
   -- (590, 85). The freed space at the bottom of the panel gets two full rows: cursor speed and camera speed.
   local F, AX, AY = 0.75, 590, 85
+  local panelObjs = {}                     -- every widget of the Video panel (hidden while the AttTFix page is shown)
   local function inPanel(ux, uy) return ux >= 420 and uy >= 84 and uy <= 470 end
   local function makeCtorWrappers(sx, sy)
     local wrapped = {}
@@ -84,8 +85,11 @@ local ok, err = pcall(function()
       cls.new = function(c, ...)
         local a = { ... }
         local n = select("#", ...)
-        if type(a[1]) == "number" and type(a[2]) == "number" and inPanel(a[1] / sx, a[2] / sy) then fix(a) end
-        return orig(c, unpack(a, 1, n))
+        local inP = type(a[1]) == "number" and type(a[2]) == "number" and inPanel(a[1] / sx, a[2] / sy)
+        if inP then fix(a) end
+        local o = orig(c, unpack(a, 1, n))
+        if inP and o then panelObjs[#panelObjs + 1] = o end
+        return o
       end
       wrapped[#wrapped + 1] = { cls, orig }
       return true
@@ -246,8 +250,146 @@ local ok, err = pcall(function()
     if AttTFix_GetIntro() == 0 then b:Conture() end
   end
 
+  -- AttTFix quality page: replaces the Video panel content while it is open (button next to the panel title)
+  local qObj = { 1.0, 1.5, 2.0, 3.0 }
+  local qAniso = { 0, 2, 4, 8, 16 }
+  local qMsaa = { 0, 2, 4, 8 }
+  local q3d = { 0, 1000, 1500, 2000, 2500, 3000, 4000 }   -- 3D trees up to (0 = as the game's tree distance option)
+  local presets = {   -- objects, aniso, msaa, 3D trees (tree fade is not part of a preset); 2 = recommended (default)
+    { 1.0, 0, 0, 0 }, { 1.0, 16, 0, 1500 }, { 1.5, 16, 0, 2000 }, { 2.0, 16, 0, 2500 }, { 3.0, 16, 4, 4000 } }
+  local function idxOf(t, v) local bi, bd = 1, 1e9 for i, x in ipairs(t) do local d = math.abs(x - v) if d < bd then bi, bd = i, d end end return bi end
+  -- the game's tree distance level. Its arrows go one step past "very far" (a second "very far"): that step is
+  -- blocked, "very far" is the last one.
+  local TREE_MAX = 80                      -- GetTreeDistCoef() + 1 at "very far"
+  local function treeCoef() return (GetTreeDistCoef and GetTreeDistCoef() or 50) + 1 end
+  local function treeLabel()
+    local c = treeCoef()
+    local t
+    if c < 20 then t = LocalText.tVeryCloseO elseif c < 40 then t = LocalText.tCloseO elseif c < 60 then t = LocalText.tMediumO
+    elseif c < 80 then t = LocalText.tFarO else t = LocalText.tVeryFarO end
+    return t or "?"
+  end
+  local function addQualityPage(self, sx, sy)
+    local t = (LocalText and LocalText.tVideoO) or ""
+    local ru = t:byte(1) ~= nil and t:byte(1) >= 192
+    local q = { AttTFix_GetQuality() }      -- objects, trees (multiplier, ini only), fade, aniso, msaa, 3D trees
+    q[6] = q[6] or 0
+    local msaa0 = q[5]
+    local sysD3D = false
+    if AttTFix_GetRenderer then local _, ract = AttTFix_GetRenderer(); sysD3D = ract ~= 1 end
+    local mine, shown = {}, false
+    local function own(o) if o then mine[#mine + 1] = o end return o end
+    local function apply() AttTFix_SetQuality(q[1], q[2], q[3], q[4], q[5], q[6]) end
+    local names = ru and { "ОРИГИНАЛЬНОЕ", "РЕКОМЕНДУЕМОЕ", "СРЕДНЕЕ", "ВЫСОКОЕ", "УЛЬТРА", "СВОЁ" } or { "ORIGINAL", "RECOMMENDED", "MEDIUM", "HIGH", "ULTRA", "CUSTOM" }
+    local function presetIdx()
+      for i, p in ipairs(presets) do
+        if math.abs(p[1] - q[1]) < 0.01 and math.abs(q[2] - 1) < 0.01 and p[2] == q[4] and p[3] == q[5] and p[4] == q[6] then return i end
+      end
+      return 6
+    end
+    local rows = {}
+    local function refreshAll() for _, r in ipairs(rows) do r() end end
+    -- label + value centred between two arrows (like the rows above); pos() -> current index, count
+    -- (index 0 = not one of the steps: both arrows active); the arrows go inactive at the ends
+    local function row(y, label, show, step, pos)
+      own(Text:new(AX * sx, y * sy, 11 * sy, label, "fStylo", "|", "colorDarkRed.tga"))
+      local val = own(Text:new(AX * sx, (y + 15) * sy, 13 * sy, "", "fStylo", "|", "colorDarkRed.tga"))
+      local bl, br
+      bl = own(arrow(self, AX - 112 - 32, y - 1, sx, sy, "Left.tga", function() step(-1); apply(); refreshAll() end, 32))
+      br = own(arrow(self, AX + 112, y - 1, sx, sy, "Right.tga", function() step(1); apply(); refreshAll() end, 32))
+      local function r()
+        val:SetText(show())
+        local i, n = pos()
+        if bl then if i == 1 then bl:Disable() else bl:Enable() end end
+        if br then if i == n then br:Disable() else br:Enable() end end
+      end
+      rows[#rows + 1] = r
+    end
+    local function clamp(i, n) if i < 1 then return 1 end if i > n then return n end return i end
+    local function mult(v) return string.format("x%.1f", v) end
+    row(106, ru and "КАЧЕСТВО ГРАФИКИ" or "GRAPHICS QUALITY", function() return names[presetIdx()] end, function(d)
+      local i = presetIdx()
+      if i > #presets then i = d > 0 and #presets or 1 else i = clamp(i + d, #presets) end   -- custom: to the nearest end
+      local p = presets[i]; q[1], q[2], q[4], q[5], q[6] = p[1], 1.0, p[2], p[3], p[4] end,
+      function() local i = presetIdx(); if i > #presets then return 0, #presets end return i, #presets end)
+    row(146, ru and "ДАЛЬНОСТЬ ОБЪЕКТОВ И ТЕНЕЙ" or "OBJECT AND SHADOW DISTANCE", function() return mult(q[1]) end,
+      function(d) q[1] = qObj[clamp(idxOf(qObj, q[1]) + d, #qObj)] end, function() return idxOf(qObj, q[1]), #qObj end)
+    -- the game's own "tree distance" (how far trees are drawn at all): the same setting as in the left panel,
+    -- changed through the game's handlers (kept until Apply / Cancel, like there)
+    local fLimit = { lo = false, hi = false }
+    local function forestText() return treeLabel() end
+    row(186, ru and "ДАЛЬНОСТЬ ЛЕСА (= ДАЛЬНОСТЬ ДЕРЕВЬЕВ)" or "FOREST DISTANCE (= TREE DISTANCE)", function() return forestText() or "?" end,
+      function(d)
+        if not GetTreeDistCoef then return end
+        local before = GetTreeDistCoef()
+        if d > 0 and self.TreeDistanceUpLua then self:TreeDistanceUpLua() elseif d < 0 and self.TreeDistanceDownLua then self:TreeDistanceDownLua() end
+        local after = GetTreeDistCoef()
+        if after == before then if d > 0 then fLimit.hi = true else fLimit.lo = true end else fLimit.lo, fLimit.hi = false, false end
+      end,
+      function() if fLimit.lo then return 1, 3 elseif treeCoef() >= TREE_MAX then return 3, 3 end return 2, 3 end)
+    row(226, ru and "РАССТОЯНИЕ ОБЪЁМНЫХ (3D) ДЕРЕВЬЕВ" or "DISTANCE OF 3D TREES", function()
+        if q[6] <= 0 then return ru and "КАК В ИГРЕ" or "AS IN THE GAME" end
+        return (ru and "ДО " or "UP TO ") .. string.format("%d", q[6]) .. (ru and ", ДАЛЬШЕ ПЛОСКИЕ" or ", FLAT BEYOND") end,
+      function(d) q[6] = q3d[clamp(idxOf(q3d, q[6]) + d, #q3d)]; q[2] = 1.0 end, function() return idxOf(q3d, q[6]), #q3d end)
+    local fades = ru and { [0] = "ПРОЗРАЧНОСТЬ", [1] = "РАСТВОРЕНИЕ", [2] = "КОРОТКОЕ" } or { [0] = "SEE-THROUGH", [1] = "DISSOLVE", [2] = "SHORT DISSOLVE" }
+    row(266, ru and "ПЕРЕХОД ДЕРЕВЬЕВ 3D -> 2D" or "TREE 3D -> 2D TRANSITION", function() return fades[q[3]] or "?" end,
+      function(d) q[3] = clamp(q[3] + 1 + d, 3) - 1 end, function() return q[3] + 1, 3 end)
+    row(306, ru and "АНИЗОТРОПНАЯ ФИЛЬТРАЦИЯ" or "ANISOTROPIC FILTERING", function() return q[4] >= 2 and (q[4] .. "X") or (ru and "ВЫКЛ" or "OFF") end,
+      function(d) q[4] = qAniso[clamp(idxOf(qAniso, q[4]) + d, #qAniso)] end, function() return idxOf(qAniso, q[4]), #qAniso end)
+    row(346, ru and "СГЛАЖИВАНИЕ (MSAA)" or "ANTI-ALIASING (MSAA)", function()
+        local t = q[5] >= 2 and (q[5] .. "X") or (ru and "ВЫКЛ" or "OFF")
+        if sysD3D and q[5] ~= msaa0 then t = t .. (ru and "^ПОСЛЕ ПЕРЕЗАПУСКА" or "^AFTER RESTART") end
+        return t end,
+      function(d) q[5] = qMsaa[clamp(idxOf(qMsaa, q[5]) + d, #qMsaa)] end, function() return idxOf(qMsaa, q[5]), #qMsaa end)
+    -- renderer (next start)
+    if AttTFix_GetRenderer then
+      local rset, ract, ravail = AttTFix_GetRenderer()
+      row(386, ru and "РЕНДЕР" or "RENDERER", function()
+          local t = rset == 1 and "DXVK (VULKAN)" or "DIRECT3D 9"
+          if rset == 1 and ravail ~= 1 then t = t .. (ru and " - НУЖЕН LAA" or " - NEEDS LAA") end
+          if rset ~= ract then t = t .. (ru and "^ПОСЛЕ ПЕРЕЗАПУСКА" or "^AFTER RESTART") end
+          return t end,
+        function(d) rset = d > 0 and 1 or 0; AttTFix_SetRenderer(rset) end,
+        function() return rset + 1, 2 end)
+    end
+    own(Text:new(AX * sx, 428 * sy, 8 * sy, ru and
+      "ДАЛЬНОСТЬ ЛЕСА - КАК ДАЛЕКО ВИДНЫ ДЕРЕВЬЯ (ТА ЖЕ НАСТРОЙКА, ЧТО СЛЕВА,^СОХРАНЯЕТСЯ \"ПРИМЕНИТЬ\"). РАССТОЯНИЕ 3D - ДО КАКОЙ ДАЛЬНОСТИ ДЕРЕВЬЯ^ОБЪЁМНЫЕ, ДАЛЬШЕ ПЛОСКИЕ (ЧЕМ ДАЛЬШЕ - ТЕМ БОЛЬШЕ НАГРУЗКА). ОСТАЛЬНОЕ - СРАЗУ"
+      or "FOREST DISTANCE - HOW FAR TREES ARE SEEN (THE SAME SETTING AS ON THE^LEFT, SAVED WITH APPLY). 3D DISTANCE - UP TO WHICH DISTANCE TREES ARE^3D, FLAT BEYOND (FURTHER = MORE LOAD). THE REST APPLIES AT ONCE",
+      "fStylo", "|", "colorDarkRed.tga"))
+    refreshAll()
+    for _, o in ipairs(mine) do if o.Hide then o:Hide() end end
+    -- toggle: label + arrow right of the "Video" title
+    local cap = Text:new(694 * sx, 87 * sy, 9 * sy, "ATTTFIX", "fStylo", "|", "colorDarkRed.tga")
+    -- a hidden checkbox still draws its tick: ticks are taken off while the page is shown and put back after
+    -- (also before Apply, which may read them)
+    local ticks = {}
+    local function hideTicks()
+      ticks = {}
+      for _, o in ipairs(panelObjs) do
+        if o.Contured and o.Unconture then local ok, c = pcall(o.Contured, o); if ok and c then ticks[#ticks + 1] = o; o:Unconture() end end
+      end
+    end
+    local function showTicks() for _, o in ipairs(ticks) do if o.Conture then o:Conture() end end ticks = {} end
+    self.AttTFix_RestoreTicks = showTicks
+    arrow(self, 722, 76, sx, sy, "Right.tga", function()
+      shown = not shown
+      if shown then hideTicks() end
+      for _, o in ipairs(panelObjs) do if shown then if o.Hide then o:Hide() end else if o.Show then o:Show() end end end
+      for _, o in ipairs(mine) do if shown then if o.Show then o:Show() end else if o.Hide then o:Hide() end end end
+      if not shown then showTicks() end
+      if cap and cap.SetText then cap:SetText(shown and (ru and "НАЗАД" or "BACK") or "ATTTFIX") end
+    end, 24)
+  end
+
+  local function fixTreeText(self) if self.TreeDistText and self.TreeDistText.SetText then self.TreeDistText:SetText(treeLabel()) end end
+  local oUp, oDown = O.TreeDistanceUpLua, O.TreeDistanceDownLua
+  if oUp then O.TreeDistanceUpLua = function(self, ...)
+    if treeCoef() >= TREE_MAX then pcall(fixTreeText, self); return end    -- already "very far"
+    local r = oUp(self, ...); pcall(fixTreeText, self); return r end end
+  if oDown then O.TreeDistanceDownLua = function(self, ...) local r = oDown(self, ...); pcall(fixTreeText, self); return r end end
   local origLoad = O.Load
   O.Load = function(self, a1)
+    panelObjs = {}
     self.Resolution = curIndex()
     local sx, sy = Config.ScreenWidth / 800, Config.ScreenHeight / 600
     local okw, compact, restore = pcall(makeCtorWrappers, sx, sy)
@@ -264,8 +406,20 @@ local ok, err = pcall(function()
     if not okl then error(r, 0) end
     self.Resolution = curIndex()
     self.ResolutionDef = self.Resolution
+    pcall(fixTreeText, self)
     refresh(self)
-    local okc, errc = pcall(addInputControls, self, compact)
+    local okc, errc = pcall(function()
+      local oT, oB, oI = rawget(Text, "new"), rawget(Button, "new"), rawget(Image, "new")
+      local function rec(orig) return function(c, ...) local o = orig(c, ...); if o then panelObjs[#panelObjs + 1] = o end; return o end end
+      Text.new, Button.new, Image.new = rec(oT), rec(oB), rec(oI)
+      local ok2, e2 = pcall(addInputControls, self, compact)
+      Text.new, Button.new, Image.new = oT, oB, oI
+      if not ok2 then error(e2, 0) end
+    end)
+    if compact then
+      local okq, errq = pcall(addQualityPage, self, sx, sy)
+      if not okq then AttTFix_Log("options: quality page error: " .. tostring(errq)) end
+    end
     AttTFix_Log("options: input controls " .. (compact and "(compact video panel)" or "(fallback layout)"))
     if not okc then AttTFix_Log("options: input controls error: " .. tostring(errc)) end
     AttTFix_Log("options opened: " .. label(self.Resolution) .. ", fullscreen=" .. tostring(self.Param and self.Param.IsFullScreen))
@@ -286,6 +440,7 @@ local ok, err = pcall(function()
 
   local origApply = O._OnApply
   O._OnApply = function(self, ...)
+    if self.AttTFix_RestoreTicks then pcall(self.AttTFix_RestoreTicks) end
     local m = modes[(self.Resolution or 0) + 1]
     local fs = (self.Param and self.Param.IsFullScreen) and true or false
     AttTFix_Log("apply: " .. label(self.Resolution or 0) .. ", fullscreen=" .. tostring(fs))

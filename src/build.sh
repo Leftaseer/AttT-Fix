@@ -24,4 +24,27 @@ open('attfix_lua.h', 'w').write(''.join('"' + esc(l) + '\\n"\n' for l in lua.spl
 PY
 "$CXX" -O2 -msse2 -mfpmath=sse -Wall -shared -static -static-libgcc -static-libstdc++ -Wl,--kill-at \
     -o dinput8.dll attfix.cpp -lwinmm
+# symbols for the built-in profiler (AttTFix.sym next to the dll; optional)
+NM="${NM:-i686-w64-mingw32-nm}"
+if command -v "$NM" >/dev/null 2>&1; then
+    "$NM" --defined-only dinput8.dll | "$PYTHON" -c "
+import sys
+import struct
+d = open('dinput8.dll', 'rb').read()
+pe = struct.unpack_from('<I', d, 0x3C)[0]
+base = struct.unpack_from('<I', d, pe + 0x34)[0]
+rows = []
+for l in sys.stdin:
+    p = l.split()
+    if len(p) == 3 and p[1] in 'tT' and not p[2].startswith('.'):
+        n = p[2].lstrip('_@')
+        import re
+        m = re.match(r'ZN?L?(\\d+)', n)
+        if m: k = int(m.group(1)); n = n[m.end():m.end() + k]
+        rows.append((int(p[0], 16), n.split('@')[0]))
+import subprocess
+rows.sort()
+open('AttTFix.sym', 'w').write(''.join('%x %s\\n' % (a - base, n) for a, n in rows))
+"
+fi
 echo "built: $(pwd)/dinput8.dll"

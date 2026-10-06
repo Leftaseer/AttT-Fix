@@ -19,7 +19,9 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 **Graphics**
 - 16x anisotropic filtering (every bilinear/trilinear minification becomes anisotropic).
 - Optional MSAA 2x/4x/8x (`[Video] MSAA`, Ctrl+7 at runtime) with alpha-to-coverage for foliage. Render-to-texture passes get a matching non-multisampled depth buffer; back buffer reads are resolved.
-- Longer draw distance of small props (boxes, wheels, rocks), NPCs and their shadows (`[Video] ObjectDistance`, default 2.0, Ctrl+9). The original size-based culling was tuned for 800x600..1280x1024.
+- Adjustable draw distance of small props (boxes, wheels, rocks), NPCs and their shadows (`[Video] ObjectDistance`, default 1.0 = original). The original size-based culling was tuned for 800x600..1280x1024.
+- Adjustable distance of 3D forest trees (`[Video] Tree3DDistance`, default 1500; flat trees beyond) and a dissolve instead of the see-through 3D → flat fade (`TreeDissolve`, Ctrl+8).
+- **Graphics settings page** in Options → video (the "ATTTFIX" button): presets Original / Recommended / Medium / High / Ultra and the individual settings (object distance, forest distance, 3D tree distance, transition, anisotropy, MSAA, renderer Direct3D 9 / DXVK).
 
 **Smoothness**
 - The game updates the world at 30 Hz and never interpolated rendering. The mod blends positions of the hero, armies, battle units and the camera between logic steps (also removes the hero jitter while the camera turns).
@@ -35,6 +37,8 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - "Intro videos" checkbox (skips 1C logo, logo and intro at start).
 - Language switch Russian / English in Options (the English localization ships with the game as `Localization.pak`).
 - Fullscreen checkbox restored in the English build.
+- Optional background mode: the game keeps running and playing sound while minimized (`[Game] Background=1`).
+- Fixed: Windows cursor left on top of the game after start; spinning parts on some unit models with animation smoothing; portal loop twitch; broken tree distances saved by the game's own option.
 - Optional: start from Steam without the Fulqrum launcher (`launcher.ini` with `skip=true`).
 - On-screen FPS / frame-time overlay (F11), optional performance log and sampling profiler.
 
@@ -42,16 +46,19 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - Sun / lens flare visibility test without a GPU stall. The original locked the whole back buffer twice per frame
   whenever the sun was on screen (33 MB copied per lock at 4K); now one pixel is copied and read 2-3 frames later.
   Looking towards the sun on the world map: about 86 → 160+ FPS (D3D9), 200+ FPS with DXVK.
-- Forest trees: no per-tree render state save/restore (exact emulation through an effect state manager).
+- Forest trees: no per-tree render state save/restore (exact emulation through an effect state manager), trunks and crowns drawn in groups, radix sort instead of qsort; with DXVK hardware instancing (one draw per mesh part; ~85 → ~110 FPS over a dense forest in our test).
+- Effects (`ID3DXEffect`) set only the states that change; with DXVK their restore is deferred until something needs the state.
+- SSE skinning of skeletal meshes, cached while the pose does not change, verified against the original code at runtime.
+- 3D sound positions and listener commits on a worker thread (DirectSound is software-emulated and waited on its mixer lock: up to ~13% of a battle frame).
 - Obstacle point-in-polygon test without two atan2 per edge (same result): standing next to a large rock dropped to ~45 FPS, now unaffected.
 - Optional Large Address Aware tool (`AttTFix_LAA.exe`, from `tools/laa.cpp`): 4 GB of address space instead of 2 GB.
   Required for the optional DXVK renderer (`[Video] Renderer=dxvk` loads `dxvk\d3d9.dll` from the game folder).
 
-**Hotkeys:** F11 — overlay. While it is shown: Ctrl+1 movement/camera smoothing, Ctrl+2 character animation, Ctrl+3 object animation, Ctrl+4 optimizations, Ctrl+5 particles, Ctrl+6 anisotropic filtering, Ctrl+7 MSAA, Ctrl+9 view distance, Ctrl+0 one-frame render target trace to the log (the digits are hidden from the game while Ctrl is held). F10 / F9 / F7 still work.
+**Hotkeys:** F11 — overlay. While it is shown: Ctrl+1 movement/camera smoothing, Ctrl+2 character animation, Ctrl+3 object animation, Ctrl+4 optimizations, Ctrl+5 particles, Ctrl+6 anisotropic filtering, Ctrl+7 MSAA, Ctrl+8 tree transition, Ctrl+9 view distance, Ctrl+0 one-frame render target trace to the log (the digits are hidden from the game while Ctrl is held). F10 / F9 / F7 still work.
 
 ## Installing a release
 
-1. Download `AttTFix-1.1.zip` from [Releases](../../releases).
+1. Download `AttTFix-1.2.zip` from [Releases](../../releases).
 2. Copy `dinput8.dll` into the game folder (Steam → right click the game → Manage → Browse local files).
 3. Optional: back up your `launcher.ini` and replace it with the one from the archive to skip the launcher.
 4. Start the game. Settings are created in `AttTFix.ini`; details are in `dist/README_EN.txt`.
@@ -83,8 +90,10 @@ The result is `src/dinput8.dll`. Copy it next to `ATThrone.exe`.
 
 - Logs: `AttTFix.log` (always), `AttTFix_perf.log` with `[Perf] Log=1` (+ `Sampler=1` for the profiler, `TraceSeconds=N` for a per-frame trace, F8 for an animation trace).
 - Every patch checks the original bytes first; on a different game build it is skipped and noted in the log.
-- `src/renderopt.inc` holds the optimizations, `src/smoothanim.inc` object/particle smoothing, `src/msaa.inc` MSAA (all included by `attfix.cpp`); `[Perf] AsyncSunCheck` / `TreeBatch` / `FastPolygonTest`, `[Smooth] Objects` / `Particles` switch them off individually.
-- Ideas that are not done yet: smoothing for trees / town animations, instanced drawing of trees, fewer effect switches.
+- Sources (all included by `attfix.cpp`): `renderopt.inc` render optimizations and draw distances, `effectsm.inc` effect state manager, `instance.inc` tree instancing and the quality settings Lua API, `billboard.inc` flat tree batching, `cpuopt.inc` tree sort, `skin.inc` + `skin_core.h` skinning, `sound.inc` async 3D sound, `smoothanim.inc` object/particle smoothing, `msaa.inc` MSAA. Each `[Perf]` / `[Smooth]` key switches one of them off.
+- Tests: `src/tests/skintest.cpp` (skinning against a reference, plain g++), `src/tests/fxtest.cpp` (deferred state restore). `tools/perfsum.py <game folder>` prints a short summary of `AttTFix_perf.log`.
+- With the system Direct3D 9 the deferred effect state restore broke the 2D menu (cause not found), so it and tree instancing run only with DXVK.
+- Ideas that are not done yet: smoothing for trees / town animations, skinning on worker threads.
 
 ## How it works (short)
 
@@ -122,27 +131,33 @@ No game code or assets are included in this repository.
 - Галочка «Заставки при запуске».
 - Переключение языка: русский / английский (английская локализация уже лежит в игре как `Localization.pak`).
 - Галочка полноэкранного режима возвращена в английскую версию.
+- Работа в фоне по желанию (`[Game] Background=1`).
+- Исправлено: курсор Windows поверх игры после запуска, «крутящиеся» части моделей некоторых юнитов, подёргивание портала, испорченные дальности деревьев в сохранённых настройках.
 - Необязательно: запуск из Steam без лаунчера (`launcher.ini` со строкой `skip=true`).
 - Счётчик FPS (F11), журнал производительности и профайлер по желанию.
 
 **Графика**
 - Анизотропная фильтрация 16x.
 - MSAA 2x/4x/8x по желанию (`[Video] MSAA`, Ctrl+7 в игре) вместе со сглаживанием краёв листвы.
-- Увеличенная дальность прорисовки мелких предметов, NPC и их теней (`[Video] ObjectDistance`, по умолчанию 2.0, Ctrl+9).
+- Настраиваемая дальность прорисовки мелких предметов, NPC и их теней (`[Video] ObjectDistance`, по умолчанию 1.0 = оригинал).
+- Настраиваемое расстояние объёмных (3D) деревьев (`[Video] Tree3DDistance`, по умолчанию 1500, дальше — плоские) и растворение вместо просвечивания при переходе (Ctrl+8).
+- **Страница настроек графики** в «Опциях» → видео (кнопка «ATTTFIX»): пресеты Оригинальное / Рекомендуемое / Среднее / Высокое / Ультра и отдельные параметры (дальность объектов, дальность леса, расстояние 3D-деревьев, переход, анизотропия, MSAA, рендер Direct3D 9 / DXVK).
 
 **Производительность**
 - Проверка видимости солнца для бликов без остановки видеокарты. Оригинал, когда солнце в кадре, дважды за кадр
   блокировал весь экранный буфер (на 4K — копия 33 МБ); теперь копируется один пиксель и читается через 2–3 кадра.
   Взгляд в сторону солнца на карте мира: примерно 86 → 160+ FPS (D3D9), 200+ FPS с DXVK.
-- Деревья леса рисуются без сохранения и восстановления состояний рендера для каждого дерева (точная эмуляция).
+- Деревья леса: без сохранения и восстановления состояний для каждого дерева, стволы и кроны группами, быстрая сортировка; с DXVK — инстансинг (над густым лесом в нашем замере ~85 → ~110 FPS).
+- Эффекты меняют только отличающиеся состояния рендера, с DXVK — восстанавливают их отложенно.
+- SSE-скиннинг скелетных моделей с проверкой против оригинала прямо в игре; 3D-звук в отдельном потоке.
 - Проверка «точка внутри препятствия» без двух atan2 на каждое ребро (тот же результат): у большого камня FPS падал до ~45, теперь нет.
 - Утилита `AttTFix_LAA.exe` (`tools/laa.cpp`): 4 ГБ адресного пространства вместо 2 ГБ. Нужна для DXVK (`[Video] Renderer=dxvk`).
 
-**Клавиши:** F11 — оверлей. Пока он открыт: Ctrl+1 движение и камера, Ctrl+2 анимации персонажей, Ctrl+3 анимации объектов, Ctrl+4 оптимизации, Ctrl+5 частицы, Ctrl+6 анизотропная фильтрация, Ctrl+7 MSAA, Ctrl+9 дальность прорисовки (цифры с Ctrl игре не передаются). F10 / F9 / F7 тоже работают.
+**Клавиши:** F11 — оверлей. Пока он открыт: Ctrl+1 движение и камера, Ctrl+2 анимации персонажей, Ctrl+3 анимации объектов, Ctrl+4 оптимизации, Ctrl+5 частицы, Ctrl+6 анизотропная фильтрация, Ctrl+7 MSAA, Ctrl+8 переход деревьев, Ctrl+9 дальность прорисовки (цифры с Ctrl игре не передаются). F10 / F9 / F7 тоже работают.
 
 ### Установка
 
-1. Скачайте `AttTFix-1.1.zip` в разделе [Releases](../../releases).
+1. Скачайте `AttTFix-1.2.zip` в разделе [Releases](../../releases).
 2. Скопируйте `dinput8.dll` в папку игры (Steam → правой кнопкой по игре → «Управление» → «Просмотреть локальные файлы»).
 3. Необязательно: сохраните свой `launcher.ini` и замените его файлом из архива, чтобы игра запускалась без лаунчера.
 4. Запустите игру. Настройки появятся в `AttTFix.ini`, подробности — в `dist/README_RU.txt`.
@@ -174,6 +189,7 @@ CXX=g++ sh build.sh
 
 - Журналы: `AttTFix.log` (всегда), `AttTFix_perf.log` при `[Perf] Log=1` (`Sampler=1` — профайлер, `TraceSeconds=N` — покадровый след, F8 — запись анимации).
 - Каждая правка сначала сверяет исходные байты игры; на другой сборке игры она пропускается с записью в журнал.
-- Не сделано: сглаживание деревьев и городских анимаций, отрисовка деревьев инстансингом, меньше переключений эффектов.
+- С системным Direct3D 9 отложенное восстановление состояний ломало 2D-меню (причина не найдена), поэтому оно и инстансинг деревьев работают только с DXVK.
+- Не сделано: сглаживание деревьев и городских анимаций, скиннинг в рабочих потоках.
 
 Код и ресурсы игры в репозитории не содержатся.
