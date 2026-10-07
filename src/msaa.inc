@@ -231,14 +231,17 @@ static int g_atoc = 1;                  // [Video] AlphaToCoverage; Ctrl+8
 static bool g_atocSupported = false, g_atocState = false;
 typedef HRESULT (__stdcall *SetRS_t)(void*, DWORD, DWORD);
 static SetRS_t o_SetRS = nullptr;
-static DWORD g_alphaTest = 0;
+static DWORD g_alphaTest = 0, g_alphaBlend = 0;
 static void AtocUpdate(void* dev) {
-    bool on = g_atocSupported && g_atoc && g_msaaActive && g_alphaTest;
+    // only alpha-TESTED geometry without blending (foliage cut-outs): with blending on (menus, UI, effects) the
+    // alpha was applied twice - as coverage and as blend - and the options window turned pale with MSAA on
+    bool on = g_atocSupported && g_atoc && g_msaaActive && g_alphaTest && !g_alphaBlend;
     if (on != g_atocState) { g_atocState = on; o_SetRS(dev, 181 /*D3DRS_ADAPTIVETESS_Y*/, on ? 0x434F5441 /*'ATOC'*/ : 0); }
 }
 static HRESULT __stdcall h_SetRS(void* dev, DWORD st, DWORD v) {
     HRESULT hr = o_SetRS(dev, st, v);
     if (st == 15 /*D3DRS_ALPHATESTENABLE*/) { g_alphaTest = v; AtocUpdate(dev); }
+    else if (st == 27 /*D3DRS_ALPHABLENDENABLE*/) { g_alphaBlend = v; AtocUpdate(dev); }
     return hr;
 }
 static void AtocCheck(void* d3d, UINT adapter, DWORD devType, DWORD fmt) {
@@ -247,7 +250,7 @@ static void AtocCheck(void* d3d, UINT adapter, DWORD devType, DWORD fmt) {
 }
 static void AtocDeviceReady(void* dev) {
     if (!o_SetRS) o_SetRS = (SetRS_t)PatchVtbl(*(void***)dev, 57, (void*)h_SetRS);
-    g_atocState = false; g_alphaTest = 0;
+    g_atocState = false; g_alphaTest = 0; g_alphaBlend = 0;
     LOG("alpha to coverage: %s%s", g_atocSupported ? "supported" : "not supported by the driver", g_atocSupported && g_msaaActive && g_atoc ? ", active with MSAA" : "");
 }
 

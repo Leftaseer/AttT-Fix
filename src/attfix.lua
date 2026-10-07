@@ -255,8 +255,8 @@ local ok, err = pcall(function()
   local qAniso = { 0, 2, 4, 8, 16 }
   local qMsaa = { 0, 2, 4, 8 }
   local q3d = { 0, 1000, 1500, 2000, 2500, 3000, 4000 }   -- 3D trees up to (0 = as the game's tree distance option)
-  local presets = {   -- objects, aniso, msaa, 3D trees (tree fade is not part of a preset); 2 = recommended (default)
-    { 1.0, 0, 0, 0 }, { 1.0, 16, 0, 1500 }, { 1.5, 16, 0, 2000 }, { 2.0, 16, 0, 2500 }, { 3.0, 16, 4, 4000 } }
+  local presets = {   -- objects, aniso, msaa, 3D trees, shadows (tree fade is not part of a preset); 2 = recommended (default)
+    { 1.0, 0, 0, 0, 0 }, { 1.0, 16, 0, 1500, 2 }, { 1.5, 16, 0, 2000, 2 }, { 2.0, 16, 0, 2500, 2 }, { 3.0, 16, 4, 4000, 3 } }
   local function idxOf(t, v) local bi, bd = 1, 1e9 for i, x in ipairs(t) do local d = math.abs(x - v) if d < bd then bi, bd = i, d end end return bi end
   -- the game's tree distance level. Its arrows go one step past "very far" (a second "very far"): that step is
   -- blocked, "very far" is the last one.
@@ -274,16 +274,21 @@ local ok, err = pcall(function()
     local ru = t:byte(1) ~= nil and t:byte(1) >= 192
     local q = { AttTFix_GetQuality() }      -- objects, trees (multiplier, ini only), fade, aniso, msaa, 3D trees
     q[6] = q[6] or 0
-    local msaa0 = q[5]
+    q[7] = AttTFix_GetShadows and AttTFix_GetShadows() or -1   -- shadow quality 0..3 (-1 = own ini values)
+    local msaa0, sh0 = q[5], q[7]
+    local shSaved = sh0
     local sysD3D = false
     if AttTFix_GetRenderer then local _, ract = AttTFix_GetRenderer(); sysD3D = ract ~= 1 end
     local mine, shown = {}, false
     local function own(o) if o then mine[#mine + 1] = o end return o end
-    local function apply() AttTFix_SetQuality(q[1], q[2], q[3], q[4], q[5], q[6]) end
+    local function apply()
+      AttTFix_SetQuality(q[1], q[2], q[3], q[4], q[5], q[6])
+      if AttTFix_SetShadows and q[7] >= 0 and q[7] ~= shSaved then AttTFix_SetShadows(q[7]); shSaved = q[7] end
+    end
     local names = ru and { "ОРИГИНАЛЬНОЕ", "РЕКОМЕНДУЕМОЕ", "СРЕДНЕЕ", "ВЫСОКОЕ", "УЛЬТРА", "СВОЁ" } or { "ORIGINAL", "RECOMMENDED", "MEDIUM", "HIGH", "ULTRA", "CUSTOM" }
     local function presetIdx()
       for i, p in ipairs(presets) do
-        if math.abs(p[1] - q[1]) < 0.01 and math.abs(q[2] - 1) < 0.01 and p[2] == q[4] and p[3] == q[5] and p[4] == q[6] then return i end
+        if math.abs(p[1] - q[1]) < 0.01 and math.abs(q[2] - 1) < 0.01 and p[2] == q[4] and p[3] == q[5] and p[4] == q[6] and (q[7] < 0 or p[5] == q[7]) then return i end
       end
       return 6
     end
@@ -292,8 +297,8 @@ local ok, err = pcall(function()
     -- label + value centred between two arrows (like the rows above); pos() -> current index, count
     -- (index 0 = not one of the steps: both arrows active); the arrows go inactive at the ends
     local function row(y, label, show, step, pos)
-      own(Text:new(AX * sx, y * sy, 11 * sy, label, "fStylo", "|", "colorDarkRed.tga"))
-      local val = own(Text:new(AX * sx, (y + 15) * sy, 13 * sy, "", "fStylo", "|", "colorDarkRed.tga"))
+      own(Text:new(AX * sx, y * sy, 10 * sy, label, "fStylo", "|", "colorDarkRed.tga"))
+      local val = own(Text:new(AX * sx, (y + 14) * sy, 12 * sy, "", "fStylo", "|", "colorDarkRed.tga"))
       local bl, br
       bl = own(arrow(self, AX - 112 - 32, y - 1, sx, sy, "Left.tga", function() step(-1); apply(); refreshAll() end, 32))
       br = own(arrow(self, AX + 112, y - 1, sx, sy, "Right.tga", function() step(1); apply(); refreshAll() end, 32))
@@ -310,23 +315,22 @@ local ok, err = pcall(function()
     row(106, ru and "КАЧЕСТВО ГРАФИКИ" or "GRAPHICS QUALITY", function() return names[presetIdx()] end, function(d)
       local i = presetIdx()
       if i > #presets then i = d > 0 and #presets or 1 else i = clamp(i + d, #presets) end   -- custom: to the nearest end
-      local p = presets[i]; q[1], q[2], q[4], q[5], q[6] = p[1], 1.0, p[2], p[3], p[4] end,
+      local p = presets[i]; q[1], q[2], q[4], q[5], q[6] = p[1], 1.0, p[2], p[3], p[4]
+      if q[7] >= 0 or AttTFix_SetShadows then q[7] = p[5] end end,
       function() local i = presetIdx(); if i > #presets then return 0, #presets end return i, #presets end)
     row(146, ru and "ДАЛЬНОСТЬ ОБЪЕКТОВ И ТЕНЕЙ" or "OBJECT AND SHADOW DISTANCE", function() return mult(q[1]) end,
       function(d) q[1] = qObj[clamp(idxOf(qObj, q[1]) + d, #qObj)] end, function() return idxOf(qObj, q[1]), #qObj end)
-    -- the game's own "tree distance" (how far trees are drawn at all): the same setting as in the left panel,
-    -- changed through the game's handlers (kept until Apply / Cancel, like there)
-    local fLimit = { lo = false, hi = false }
-    local function forestText() return treeLabel() end
-    row(186, ru and "ДАЛЬНОСТЬ ЛЕСА (= ДАЛЬНОСТЬ ДЕРЕВЬЕВ)" or "FOREST DISTANCE (= TREE DISTANCE)", function() return forestText() or "?" end,
-      function(d)
-        if not GetTreeDistCoef then return end
-        local before = GetTreeDistCoef()
-        if d > 0 and self.TreeDistanceUpLua then self:TreeDistanceUpLua() elseif d < 0 and self.TreeDistanceDownLua then self:TreeDistanceDownLua() end
-        local after = GetTreeDistCoef()
-        if after == before then if d > 0 then fLimit.hi = true else fLimit.lo = true end else fLimit.lo, fLimit.hi = false, false end
-      end,
-      function() if fLimit.lo then return 1, 3 elseif treeCoef() >= TREE_MAX then return 3, 3 end return 2, 3 end)
+    -- shadow quality (map shadow texture size + its MSAA + unit shadow texture size; next start). The game's own tree
+    -- distance is not repeated here: it is the "Trees" setting on the left.
+    local shNames = ru and { [0] = "ОРИГИНАЛ", [1] = "СРЕДНЕЕ", [2] = "ВЫСОКОЕ", [3] = "УЛЬТРА" } or { [0] = "ORIGINAL", [1] = "MEDIUM", [2] = "HIGH", [3] = "ULTRA" }
+    if AttTFix_GetShadows then
+      row(186, ru and "КАЧЕСТВО ТЕНЕЙ" or "SHADOW QUALITY", function()
+          local t = shNames[q[7]] or (ru and "СВОЁ" or "CUSTOM")
+          if q[7] ~= sh0 then t = t .. (ru and "^ПОСЛЕ ПЕРЕЗАПУСКА" or "^AFTER RESTART") end
+          return t end,
+        function(d) if q[7] < 0 then q[7] = d > 0 and 3 or 0 else q[7] = clamp(q[7] + 1 + d, 4) - 1 end end,
+        function() if q[7] < 0 then return 0, 4 end return q[7] + 1, 4 end)
+    end
     row(226, ru and "РАССТОЯНИЕ ОБЪЁМНЫХ (3D) ДЕРЕВЬЕВ" or "DISTANCE OF 3D TREES", function()
         if q[6] <= 0 then return ru and "КАК В ИГРЕ" or "AS IN THE GAME" end
         return (ru and "ДО " or "UP TO ") .. string.format("%d", q[6]) .. (ru and ", ДАЛЬШЕ ПЛОСКИЕ" or ", FLAT BEYOND") end,
@@ -338,7 +342,10 @@ local ok, err = pcall(function()
       function(d) q[4] = qAniso[clamp(idxOf(qAniso, q[4]) + d, #qAniso)] end, function() return idxOf(qAniso, q[4]), #qAniso end)
     row(346, ru and "СГЛАЖИВАНИЕ (MSAA)" or "ANTI-ALIASING (MSAA)", function()
         local t = q[5] >= 2 and (q[5] .. "X") or (ru and "ВЫКЛ" or "OFF")
-        if sysD3D and q[5] ~= msaa0 then t = t .. (ru and "^ПОСЛЕ ПЕРЕЗАПУСКА" or "^AFTER RESTART") end
+        if q[5] ~= msaa0 then
+          if sysD3D then t = t .. (ru and "^ПОСЛЕ ПЕРЕЗАПУСКА" or "^AFTER RESTART")
+          else t = t .. (ru and "^ПОСЛЕ ЗАКРЫТИЯ МЕНЮ" or "^AFTER CLOSING THE MENU") end
+        end
         return t end,
       function(d) q[5] = qMsaa[clamp(idxOf(qMsaa, q[5]) + d, #qMsaa)] end, function() return idxOf(qMsaa, q[5]), #qMsaa end)
     -- renderer (next start)
@@ -352,9 +359,9 @@ local ok, err = pcall(function()
         function(d) rset = d > 0 and 1 or 0; AttTFix_SetRenderer(rset) end,
         function() return rset + 1, 2 end)
     end
-    own(Text:new(AX * sx, 428 * sy, 8 * sy, ru and
-      "ДАЛЬНОСТЬ ЛЕСА - КАК ДАЛЕКО ВИДНЫ ДЕРЕВЬЯ (ТА ЖЕ НАСТРОЙКА, ЧТО СЛЕВА,^СОХРАНЯЕТСЯ \"ПРИМЕНИТЬ\"). РАССТОЯНИЕ 3D - ДО КАКОЙ ДАЛЬНОСТИ ДЕРЕВЬЯ^ОБЪЁМНЫЕ, ДАЛЬШЕ ПЛОСКИЕ (ЧЕМ ДАЛЬШЕ - ТЕМ БОЛЬШЕ НАГРУЗКА). ОСТАЛЬНОЕ - СРАЗУ"
-      or "FOREST DISTANCE - HOW FAR TREES ARE SEEN (THE SAME SETTING AS ON THE^LEFT, SAVED WITH APPLY). 3D DISTANCE - UP TO WHICH DISTANCE TREES ARE^3D, FLAT BEYOND (FURTHER = MORE LOAD). THE REST APPLIES AT ONCE",
+    own(Text:new(AX * sx, 426 * sy, 7 * sy, ru and
+      "РАССТОЯНИЕ 3D - ДО КАКОЙ ДАЛЬНОСТИ ДЕРЕВЬЯ ОБЪЁМНЫЕ, ДАЛЬШЕ ПЛОСКИЕ^(ДАЛЬШЕ - БОЛЬШЕ НАГРУЗКА). КАК ДАЛЕКО ВИДЕН ЛЕС - \"ДЕРЕВЬЯ\" СЛЕВА.^ТЕНИ И РЕНДЕР - ПОСЛЕ ПЕРЕЗАПУСКА, ОСТАЛЬНОЕ - СРАЗУ."
+      or "3D DISTANCE - UP TO WHICH DISTANCE TREES ARE 3D, FLAT BEYOND^(FURTHER = MORE LOAD). HOW FAR THE FOREST IS SEEN - \"TREES\" ON THE LEFT.^SHADOWS AND RENDERER - AFTER A RESTART, THE REST AT ONCE.",
       "fStylo", "|", "colorDarkRed.tga"))
     refreshAll()
     for _, o in ipairs(mine) do if o.Hide then o:Hide() end end

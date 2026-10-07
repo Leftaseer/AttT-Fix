@@ -114,7 +114,7 @@ static void PendAdd(void* dev, FxEntry& e) {      // takes over e.ref
 }
 static void FxFlush() {                           // apply everything pending
     if (!g_pendN) return;
-    void* dev = *pDevice; ++g_fxFlushes;
+    void* dev = *pDevice; ++g_fxFlushes; ++g_lightGen;
     for (int i = 0; i < g_pendN; ++i) {
         PendApply(dev, g_pend[i]); ComRelease(g_pend[i].ref);
         int sl = FxSlot(g_pend[i].key); if (sl >= 0) g_pendSlot[sl] = 0;
@@ -145,8 +145,8 @@ static void* g_sbO[8];                            // original state block method
 static HRESULT __stdcall hp_SetTransform(void* d, DWORD st, void* m) { PEND_DROP(SMKey(SM_XF, 0, st)); return O(44, F_u_p_t)(d, st, m); }
 static HRESULT __stdcall hp_MulTransform(void* d, DWORD st, void* m) { PEND_FLUSH(); return O(46, F_u_p_t)(d, st, m); }
 static HRESULT __stdcall hp_SetMaterial(void* d, void* m) { PEND_DROP(SMKey(SM_MAT, 0, 0)); return O(49, F_pp_t)(d, m); }
-static HRESULT __stdcall hp_SetLight(void* d, DWORD i, void* l) { PEND_DROP(SMKey(SM_LIGHT, 0, i)); return O(51, F_u_p_t)(d, i, l); }
-static HRESULT __stdcall hp_LightEnable(void* d, DWORD i, DWORD en) { PEND_DROP(SMKey(SM_LE, 0, i)); return O(53, F_u_u_t)(d, i, en); }
+static HRESULT __stdcall hp_SetLight(void* d, DWORD i, void* l) { ++g_lightGen; PEND_DROP(SMKey(SM_LIGHT, 0, i)); return O(51, F_u_p_t)(d, i, l); }
+static HRESULT __stdcall hp_LightEnable(void* d, DWORD i, DWORD en) { ++g_lightGen; PEND_DROP(SMKey(SM_LE, 0, i)); return O(53, F_u_u_t)(d, i, en); }
 static HRESULT __stdcall hp_SetRS(void* d, DWORD st, DWORD v) { PEND_DROP(SMKey(SM_RS, 0, st)); return O(57, F_u_u_t)(d, st, v); }
 static HRESULT __stdcall hp_SetTexture(void* d, DWORD st, void* t) { PEND_DROP(SMKey(SM_TEX, 0, st)); return O(65, F_u_p_t)(d, st, t); }
 static HRESULT __stdcall hp_SetTSS(void* d, DWORD st, DWORD ty, DWORD v) { PEND_DROP(SMKey(SM_TSS, st, ty)); return O(67, F_u_u_u_t)(d, st, ty, v); }
@@ -192,7 +192,7 @@ struct SBVt { void** vt; void* cap; void* app; };
 static SBVt g_sbVt[8]; static int g_sbVtN = 0;
 static SBVt* SBFind(void* sb) { void** vt = *(void***)sb; for (int i = 0; i < g_sbVtN; ++i) if (g_sbVt[i].vt == vt) return &g_sbVt[i]; return nullptr; }
 static HRESULT __stdcall hp_SBCapture(void* sb) { PEND_FLUSH(); SBVt* v = SBFind(sb); return v ? ((F_p_t)v->cap)(sb) : E_FAIL; }
-static HRESULT __stdcall hp_SBApply(void* sb) { PEND_FLUSH(); SBVt* v = SBFind(sb); return v ? ((F_p_t)v->app)(sb) : E_FAIL; }
+static HRESULT __stdcall hp_SBApply(void* sb) { PEND_FLUSH(); ++g_lightGen; SBVt* v = SBFind(sb); return v ? ((F_p_t)v->app)(sb) : E_FAIL; }
 static void HookStateBlock(void* sb) {
     if (!sb || SBFind(sb)) return;
     void** vt = *(void***)sb;

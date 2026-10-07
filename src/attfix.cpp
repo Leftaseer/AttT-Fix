@@ -10,7 +10,7 @@
 #include <math.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
-#define ATTFIX_VERSION "1.2.1"
+#define ATTFIX_VERSION "1.3"
 
 // ---------------------------------------------------------------- log
 static FILE* g_log = nullptr;
@@ -65,7 +65,7 @@ static int L_SetInput(void* L);
 static void SubclassWindow(HWND h);
 static void* g_d3d = nullptr;
 static int g_bgRun = 0, g_bgFps = 30; static volatile bool g_bgInactive = false;   // [Game] Background, BackgroundFps
-static void PLOG(const char* fmt, ...); static void FontRelease(); static void SunRelease(); static void RenderOptStats(); static void MsaaStats(); static void MeshSmoothStats(); static void ParticleStats(); static void EffectStats(); static void FxReleaseAll(); static void FxDeviceHooks(void* dev); static void TreeSortStats(); static void SoundStats(); static void SkinStats(); static void BillboardStats(); static void InstanceStats(); static void InstRelease(); static int L_GetQuality(void* L); static int L_SetQuality(void* L); static int L_GetRenderer(void* L); static int L_SetRenderer(void* L); static int L_TreeDistUp(void*); static int L_TreeDistDown(void*); static int L_TreeDistCoef(void*); static int L_TreeDistSave(void*); static int L_TreeDistCancel(void*); static int L_GetTreeView(void*); static void SndStop(); static bool Writable(void* p);
+static void PLOG(const char* fmt, ...); static void FontRelease(); static void SunRelease(); static void RenderOptStats(); static void MsaaStats(); static void MeshSmoothStats(); static void ParticleStats(); static void EffectStats(); static void FxReleaseAll(); static void FxDeviceHooks(void* dev); static void TreeSortStats(); static void SoundStats(); static void SkinStats(); static void BillboardStats(); static void InstanceStats(); static void InstRelease(); static void ShadowStats(); static void ShadowDeviceHooks(void* dev); static void ShadowDeviceReset(); static int L_GetQuality(void* L); static int L_SetQuality(void* L); static int L_GetRenderer(void* L); static int L_SetRenderer(void* L); static int L_TreeDistUp(void*); static int L_TreeDistDown(void*); static int L_TreeDistCoef(void*); static int L_TreeDistSave(void*); static int L_TreeDistCancel(void*); static int L_GetTreeView(void*); static int L_GetShadows(void*); static int L_SetShadows(void*); static void SndStop(); static bool Writable(void* p);
 
 // ---------------------------------------------------------------- IAT patch
 static void** FindIAT(HMODULE mod, const char* dll, const char* func) {
@@ -217,7 +217,7 @@ static HRESULT __stdcall h_Reset(void* dev, D3DPP* p) {
     if (!p->Windowed && p->Refresh == 0) { UINT hz = MaxRefresh(p->W, p->H); if (hz > 60) p->Refresh = hz; }
     p->Interval = WantInterval();
     SunRelease();
-    FxReleaseAll(); InstRelease();
+    FxReleaseAll(); InstRelease(); ShadowDeviceReset();
     FontRelease();
     MsaaReleaseResources();
     {   void* d3d = nullptr; struct { UINT ad; DWORD type; HWND w; DWORD fl; } cp = { 0, 1, nullptr, 0 };
@@ -274,6 +274,7 @@ static HRESULT __stdcall h_CreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd
         AnisoInit(*out);
         MsaaDeviceReady(*out, p);
         FxDeviceHooks(*out);
+        ShadowDeviceHooks(*out);
     }
     return hr;
 }
@@ -724,6 +725,8 @@ static void __fastcall h_DoFile(void* vm, void* edx, const char* name) {
         Register("AttTFix_SetQuality", L_SetQuality);
         Register("AttTFix_GetRenderer", L_GetRenderer);
         Register("AttTFix_GetTreeView", L_GetTreeView);
+        Register("AttTFix_GetShadows", L_GetShadows);
+        Register("AttTFix_SetShadows", L_SetShadows);
         Register("TreeDistanceUp", (lua_CFunction)L_TreeDistUp);      // the game's own, wrapped (renderopt.inc)
         Register("TreeDistanceDown", (lua_CFunction)L_TreeDistDown);
         Register("GetTreeDistCoef", (lua_CFunction)L_TreeDistCoef);
@@ -943,7 +946,7 @@ static void FlushStats(double nowMs) {
     unsigned vaMB = (unsigned)((mem.ullTotalVirtual - mem.ullAvailVirtual) >> 20), vaTotal = (unsigned)(mem.ullTotalVirtual >> 20);
     PLOG("STATS %4.1fs frames=%d fps=%.1f 1%%low=%.1f | frame ms avg=%.2f p50=%.2f p99=%.2f max=%.2f | VA %u/%u MB | avg ms:%s",
          (nowMs - g_winStartMs) / 1000.0, g_nft, g_nft * 1000.0 / (nowMs - g_winStartMs), 1000.0 * nw / ws, avg, p50, p99, mx, vaMB, vaTotal, secs);
-    RenderOptStats(); MeshSmoothStats(); ParticleStats(); MsaaStats(); EffectStats(); TreeSortStats(); SoundStats(); SkinStats(); BillboardStats(); InstanceStats();
+    RenderOptStats(); MeshSmoothStats(); ParticleStats(); MsaaStats(); EffectStats(); TreeSortStats(); SoundStats(); SkinStats(); BillboardStats(); InstanceStats(); ShadowStats();
     g_nft = 0; for (int i = 0; i < S_COUNT; ++i) g_secSum[i] = 0; g_winStartMs = nowMs;
 }
 static inline LONGLONG Now() { LARGE_INTEGER t; QueryPerformanceCounter(&t); return t.QuadPart; }
@@ -1067,6 +1070,7 @@ typedef void (__fastcall *VM0_t)(void* self, void* edx);
 #include "sound.inc"
 #include "skin.inc"
 #include "instance.inc"
+#include "shadow.inc"
 static void* g_font = nullptr;
 static double g_ovFps = 0, g_ovMs = 0, g_ovUpd = 0, g_ovRen = 0, g_ovPres = 0, g_ovMax = 0;
 // The overlay text is rendered into a texture only when it changes (about twice per second) and drawn as one
@@ -1214,7 +1218,10 @@ static void UpdateOverlayStats() {   // every 0.5 s from the per-frame sections
 static void __fastcall h_Render(BYTE* e, void* /*edx*/) {
     void* dev = *pDevice; void** vt = *(void***)dev;
     LONGLONG a = Now(), b;
-    if (g_msaaResetPending || g_vsyncResetPending) {         // Ctrl+7 / VSync option: re-create the back buffer through the engine's restore path
+    // Ctrl+7 / MSAA / VSync option: re-create the back buffer through the engine's restore path - not while a menu
+    // (GUIScene) is open: the in-game menus draw over a capture of the scene made when they open, which the device
+    // re-creation loses (the options window turned pale until reopened); the switch happens once the menu is closed
+    if ((g_msaaResetPending || g_vsyncResetPending) && strcmp(g_secClass[S_SCENE], "GUIScene")) {
         if (g_msaaResetPending) LOG("msaa: switching %s via engine device restore", g_msaaOn ? "on" : "off");
         if (g_vsyncResetPending) LOG("vsync: switching %s via engine device restore", g_vsync ? "on" : "off");
         g_msaaResetPending = false; g_vsyncResetPending = false;
@@ -1330,7 +1337,7 @@ static FILE* g_trace = nullptr; static double g_traceStartMs = 0;
 static float g_maxJump = 6.0f;
 static char g_interpClasses[512] = "CHero,CNpc,SAO,CWorldUnit,CTacticCreature,CWorldHeroCreature,LuaTacticCreature,Arrow";
 struct IEnt { BYTE* obj; void* vt; DWORD lastUpd; int valid; float prevM[16]; float saved[16];
-               int haveLast, cvalid; double tChange, period; float lastM[16], prevC[16]; UpdInfo* u; };
+               int haveLast, cvalid; double tChange, period; float lastM[16], prevC[16]; UpdInfo* u; float savedPos[3]; int posApplied; };
 static const int IMASK = 8191; static IEnt g_ient[IMASK + 1];
 static IEnt* g_iApplied[4096]; static int g_nApplied = 0;
 static BYTE* g_hero = nullptr; static DWORD g_heroFrame = 0;
@@ -1416,6 +1423,13 @@ static void InterpApply() {
             if (l > 1e-6f) { float f = want / l; row[0] *= f; row[1] *= f; row[2] *= f; }
         }
         M[12] = P[12] + dx * a; M[13] = P[13] + dy * a; M[14] = P[14] + dz * a;
+        // the logic position (+0x64 x, +0x68 y, +0x6C z) is what some render code places things by (the unit's sun
+        // shadow decal, CUnitShadow 0x4ECEDC): moved along while it matches the matrix, so it does not stay at 30 Hz
+        {   float* pos = (float*)(o + 0x64); e->posApplied = 0;
+            if (fabsf(pos[0] - e->saved[12]) < 0.01f && fabsf(pos[2] - e->saved[14]) < 0.01f) {
+                memcpy(e->savedPos, pos, 12); e->posApplied = 1;
+                pos[0] = M[12]; pos[2] = M[14]; if (fabsf(e->savedPos[1] - e->saved[13]) < 0.01f) pos[1] = M[13];
+            } }
         g_iApplied[g_nApplied++] = e; if (e->u) ++e->u->iCount;
         if (o == g_hero) { float d = sqrtf(d2); if (d > g_iHeroMax) g_iHeroMax = d; g_iHeroSum += d; ++g_iHeroN; }
     }
@@ -1436,7 +1450,8 @@ static void InterpApply() {
 static void InterpRestore() {
     for (int i = 0; i < g_nApplied; ++i) {
         IEnt* e = g_iApplied[i];
-        if (*(void**)e->obj == e->vt) memcpy(e->obj + 0x168, e->saved, 64);
+        if (*(void**)e->obj == e->vt) { memcpy(e->obj + 0x168, e->saved, 64); if (e->posApplied) memcpy(e->obj + 0x64, e->savedPos, 12); }
+        e->posApplied = 0;
     }
     g_nApplied = 0;
     if (g_camSaved && *(BYTE**)0x006CA2C4 == g_camObj) {
@@ -2108,6 +2123,7 @@ static void HookDirectInput(void* di) {
     if (o_DICreateDev) return;
     o_DICreateDev = (DICreateDev_t)PatchVtbl(*(void***)di, 3, (void*)h_DICreateDev);
 }
+static bool g_modOff = false;
 extern "C" __declspec(dllexport) HRESULT WINAPI DirectInput8Create(HINSTANCE h, DWORD v, REFIID r, LPVOID* o, void* u) {
     if (!o_DI8Create) {
         char p[MAX_PATH]; GetSystemDirectoryA(p, MAX_PATH); strcat(p, "\\dinput8.dll");
@@ -2116,7 +2132,7 @@ extern "C" __declspec(dllexport) HRESULT WINAPI DirectInput8Create(HINSTANCE h, 
         if (!o_DI8Create) { LOG("FATAL: system dinput8 not loaded"); return E_FAIL; }
     }
     HRESULT hr = o_DI8Create(h, v, r, o, u);
-    if (hr >= 0 && o && *o) HookDirectInput(*o);
+    if (hr >= 0 && o && *o && !g_modOff) HookDirectInput(*o);
     return hr;
 }
 
@@ -2147,6 +2163,10 @@ static void Init() {
     g_wsEnabled = GetPrivateProfileIntA("UI", "Widescreen", 1, path);
     strcpy(g_iniPath, path);
     char tmp[16];
+    // master switch: [Mod] Enabled=0 -> nothing is patched, the DLL only forwards DirectInput (the original game)
+    if (!GetPrivateProfileStringA("Mod", "Enabled", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Mod", "Enabled", "1  ; 0 = AttTFix does nothing (original game; all other settings are ignored)", path);
+    if (GetPrivateProfileIntA("Mod", "Enabled", 1, path) == 0) { g_modOff = true; LOG("[Mod] Enabled=0: the mod is switched off, the game runs unmodified"); return; }
     if (!GetPrivateProfileStringA("Video", "VSync", "", tmp, sizeof tmp, path)) {
         WritePrivateProfileStringA("Video", "VSync", "1  ; 1 = vertical sync (smooth, no tearing), 0 = off", path);
         WritePrivateProfileStringA("Video", "FpsLimit", "0  ; frame cap when VSync=0 (0 = unlimited)", path);
@@ -2306,6 +2326,21 @@ static void Init() {
     if (!GetPrivateProfileStringA("Video", "Tree3DDistance", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Video", "Tree3DDistance", "1500  ; distance up to which forest trees are 3D (flat beyond; the game itself: ~700), 0 = as the game's tree distance option", path);
     g_tree3D = ReadIniFloat("Video", "Tree3DDistance", 1500.0f);
+    if (!GetPrivateProfileStringA("Video", "ShadowSize", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Video", "ShadowSize", "4096  ; world sun shadows texture 1024 (original) / 2048 / 4096 / 8192, next start; 0 = untouched", path);
+    g_shadowSize = GetPrivateProfileIntA("Video", "ShadowSize", 4096, path);
+    if (!GetPrivateProfileStringA("Video", "ShadowCasterCull", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Video", "ShadowCasterCull", "0  ; 0 = buildings cast their sun shadow even when they are off the culling frustum (no vanishing shadows), 1 = original", path);
+    g_shadowCull = GetPrivateProfileIntA("Video", "ShadowCasterCull", 0, path);
+    if (!GetPrivateProfileStringA("Video", "UnitShadowSize", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Video", "UnitShadowSize", "1024  ; shadow texture of heroes / NPCs 256 (original) / 512 / 1024 / 2048, next start", path);
+    g_unitShadowSize = GetPrivateProfileIntA("Video", "UnitShadowSize", 1024, path);
+    // ShadowProjection (camera-space projective mapping of the map shadow) is disabled: in the game it tiled the
+    // shadow texture into many small copies; the key is no longer read
+    WritePrivateProfileStringA("Video", "ShadowProjection", nullptr, path);
+    if (!GetPrivateProfileStringA("Video", "ShadowMSAA", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Video", "ShadowMSAA", "4  ; anti-aliased map shadow edges 0 / 2 / 4 / 8: less crawling of shadow edges as the sun moves", path);
+    g_shadowMsaa = GetPrivateProfileIntA("Video", "ShadowMSAA", 4, path);
     if (!(g_tree3D >= 0 && g_tree3D <= 20000)) g_tree3D = 0;
     if (!GetPrivateProfileStringA("Video", "TreeDissolve", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Video", "TreeDissolve", "0  ; 3D -> flat trees: 0 = original see-through fade, 1 = dissolve, 2 = dissolve in a 4x shorter band (Ctrl+8 cycles)", path);

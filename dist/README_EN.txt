@@ -1,8 +1,28 @@
-﻿AttTFix 1.2.1 — technical update for Ascension to the Throne
-=============================================================
+﻿AttTFix 1.3 — technical update for Ascension to the Throne
+===========================================================
 
 An unofficial, non-commercial mod for the Steam version of the game. No game files are
 modified: the whole mod is a single dinput8.dll that the game loads by itself.
+
+
+WHAT'S NEW IN 1.3
+-----------------
+  * Much sharper shadows on the world map: a 4096 shadow texture instead of 1024, with
+    anti-aliased edges (MSAA) and linear filtering. Shadow edges crawl and jitter much less
+    as the sun moves (removing it completely would need a rewrite of the game's shadows).
+  * Sharper hero and NPC shadows (1024 instead of 256) that move smoothly instead of at
+    30 updates per second.
+  * Building shadows no longer vanish when you walk into them or the building leaves the
+    screen.
+  * New "Shadow quality" row on the "ATTTFIX" page: original / medium / high (recommended)
+    / ultra; part of the presets, applies after a restart. The "Forest distance" row that
+    repeated the game's own setting is gone (it is "Tree distance" on the left).
+  * MSAA and VSync changed while a menu is open apply when you leave the menu (the in-game
+    options window used to turn pale until reopened).
+  * Foliage edge anti-aliasing with MSAA no longer affects the interface and effects.
+  * Tree instancing (DXVK) handles up to 4 lights and works in towns.
+  * Master switch: [Mod] Enabled=0 in AttTFix.ini runs the game unmodified.
+  * Slightly smaller font on the "ATTTFIX" page, shorter hint.
 
 
 WHAT'S NEW IN 1.2.1
@@ -61,6 +81,8 @@ Graphics
   * Anisotropic texture filtering up to 16x.
   * MSAA 2x/4x/8x and foliage edge anti-aliasing (off by default).
   * Adjustable draw distance of small props, NPCs and their shadows.
+  * Sharp shadows: 4096 map shadow texture with anti-aliased edges, 1024 hero and NPC
+    shadows that move smoothly (adjustable "Shadow quality").
   * Adjustable distance of 3D trees, and a dissolve instead of the see-through fade
     between 3D and flat trees (optional).
 
@@ -131,26 +153,27 @@ Properties -> Installed Files -> Verify integrity).
 GRAPHICS SETTINGS ("ATTTFIX" page in Options -> video)
 ------------------------------------------------------
   Graphics quality — a preset; "Custom" is shown once any setting is changed by hand.
-                     Props   Aniso  MSAA  3D trees
-      Original       x1.0    off    off   as in the game
-      Recommended    x1.0    16x    off   up to 1500   (default)
-      Medium         x1.5    16x    off   up to 2000
-      High           x2.0    16x    off   up to 2500
-      Ultra          x3.0    16x    4x    up to 4000
+                     Props   Aniso  MSAA  3D trees         Shadows
+      Original       x1.0    off    off   as in the game   original
+      Recommended    x1.0    16x    off   up to 1500       high    (default)
+      Medium         x1.5    16x    off   up to 2000       high
+      High           x2.0    16x    off   up to 2500       high
+      Ultra          x3.0    16x    4x    up to 4000       ultra
   Object and shadow distance — multiplier for small props, NPCs and shadows.
-  Forest distance — the same setting as "Tree distance" on the left of the video page:
-                     how far trees are seen at all. Saved with Apply.
+  Shadow quality — original (1024 map / 256 units) / medium (2048, 512) / high (4096,
+                     1024, recommended) / ultra (8192, 2048); medium and higher also smooth
+                     the shadow edges (MSAA 4x). After a restart.
   Distance of 3D trees — a DISTANCE, not a number of trees: closer trees are 3D, further
                      ones are flat pictures. Higher = nicer up close, but heavier.
-                     "As in the game" follows the forest distance (at "Very far" the game
-                     keeps 3D trees up to about 700).
+                     "As in the game" follows the game's "Tree distance" (at "Very far" the
+                     game keeps 3D trees up to about 700).
   Tree 3D -> 2D transition — see-through (original, default), dissolve or short dissolve.
   Anisotropic filtering — off / 2x / 4x / 8x / 16x.
   Anti-aliasing (MSAA) — off / 2x / 4x / 8x. With the system Direct3D 9 after a restart,
-                     with DXVK at once.
+                     with DXVK after leaving the menu.
   Renderer — Direct3D 9 or DXVK (after a restart; needs AttTFix_LAA.exe and dxvk\d3d9.dll).
-Except for the forest distance and the renderer, everything applies at once and is saved
-to AttTFix.ini.
+Except for the shadows and the renderer, everything applies at once and is saved to
+AttTFix.ini.
 
 
 HOTKEYS
@@ -176,6 +199,7 @@ SETTINGS (AttTFix.ini)
 Most things are set in the game's Options. The rest is in AttTFix.ini (a text file,
 changes apply on the next start):
 
+  [Mod]    Enabled=1           0 = the mod does nothing, the game runs as the original
   [UI]     Widescreen=1        1 = menus centered in 4:3, 0 = original stretched menus
   [Video]  VSync=1             vertical sync
            FpsLimit=0          FPS limit when VSync=0 (0 = unlimited)
@@ -187,6 +211,10 @@ changes apply on the next start):
            Tree3DDistance=1500 distance up to which trees are 3D (0 = as in the game)
            TreeDistance=1.0    3D -> flat crossfade multiplier (with Tree3DDistance=0)
            TreeDissolve=0      0 = see-through (original), 1 = dissolve, 2 = short dissolve
+           ShadowSize=4096     map shadow texture size (1024 = original)
+           ShadowMSAA=4        shadow edge anti-aliasing 2/4/8 (0 = off)
+           UnitShadowSize=1024 hero and NPC shadow texture size (256 = original)
+           ShadowCasterCull=0  1 = original shadow caster culling (building shadows can vanish)
            Renderer=d3d9       d3d9 or dxvk (see below)
            WindowedSync=dwm    VSync in a window: dwm (monitor-locked), flush or timer
            AllCores=1          use all CPU cores
@@ -220,6 +248,6 @@ The active renderer is shown in the F11 counter (D3D9 or DXVK).
 TROUBLESHOOTING
 ---------------
 The mod keeps a log in AttTFix.log (the previous run is in AttTFix.prev.log). After a crash
-a .dmp dump file is saved next to it. To check whether the mod is the cause, rename
-dinput8.dll and start the game again. Individual features can be switched off with the
+a .dmp dump file is saved next to it. To check whether the mod is the cause, set [Mod]
+Enabled=0 in AttTFix.ini (or rename dinput8.dll) and start the game again. Individual features can be switched off with the
 toggles (F11 + Ctrl+digit) or in AttTFix.ini.

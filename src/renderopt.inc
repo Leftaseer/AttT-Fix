@@ -253,6 +253,7 @@ static void __fastcall h_FadingTree(BYTE* T, void* edx, void* mat, float a, DWOR
 // trunk instead of being cut by it).
 static int g_treeParts = 1;                     // [Perf] TreeGroupParts (with TreeBatch)
 static bool g_instCapture = false, g_instGroupOk = false; static const float* g_instMat = nullptr;   // instance.inc
+static DWORD g_lightGen = 0;                    // bumped on every light change (SetLight / LightEnable / state block / flush)
 static bool InstGroupBegin(); static void InstFlush();
 static int g_treePhase = 0;                     // 0 = normal, 1 = trunks only, 2 = foliage only
 static bool g_tbActive = false, g_tbDissolve = false; static void* g_tbCe = nullptr; static DWORD g_tbTech = 0; static DWORD g_tbGrouped = 0, g_tbStarts = 0, g_tbFadeGrouped = 0;

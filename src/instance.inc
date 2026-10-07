@@ -21,7 +21,7 @@ struct InEnv {                                   // per effect group: states tha
     float L[4], dif[4], amb[4];                  // light direction (to the light) + lighting on; diffuse product; ambient term
     DWORD lightOn, normalize, fogOn, fogMode; float fogStart, fogEnd, fogDens; DWORD fogColor;
     float op[4];                                 // colour op, alpha op, alpha arg2 = tfactor
-    BYTE lightRaw[104]; DWORD ambientRS;
+    BYTE lightRaw[4][104]; int nLights; DWORD ambientRS;   // up to 4 directional / point lights (D3DLIGHT9)
     DWORD ttf;                                   // stage 0 texture transform: 0 = off, 2 = COUNT2 (matrix per key)
 };
 static const DWORD kInRS[16] = { 7, 23, 15, 25, 27, 19, 20, 171, 22, 168, 206, 195, 175, 8, 9, 0 };   // ZENABLE ZFUNC ATEST AFUNC ABLEND SRC DST BLENDOP CULL COLORWRITE SEPALPHA DEPTHBIAS SLOPEBIAS FILL SHADE
@@ -38,6 +38,7 @@ static InKey g_inKey[IN_MAXKEY]; static int g_inKeyN = 0;
 static InInst g_inInst[IN_MAXINST]; static int g_inInstN = 0;
 static void* g_inVS = nullptr; static void* g_inPS = nullptr; static void* g_inDecl = nullptr; static void* g_inVB = nullptr; static DWORD g_inVBCap = 0;
 static bool g_inBroken = false;
+static DWORD g_inLightGen = 0, g_inRelit = 0;     // light state of the current group; groups re-read after a light change
 
 #define DV(i, T) ((T)(*(void***)dev)[i])
 typedef HRESULT (__stdcall *G_u_p_t)(void*, DWORD, void*);
@@ -75,13 +76,16 @@ static bool InstGroupBegin() {
     if (aop == 2) e.op[1] = 0; else if (aop == 4) e.op[1] = 1; else if (aop == 3) e.op[1] = 2; else return InFail("stage0 alpha op");
     // lighting
     e.lightOn = InRS(dev, 137) != 0; e.normalize = InRS(dev, 143) != 0; e.ambientRS = InRS(dev, 139);
-    int nl = 0, li = -1;
-    if (e.lightOn) for (int i = 0; i < 8; ++i) { BOOL on = FALSE; DV(54, G_u_p_t)(dev, i, &on); if (on) { ++nl; li = i; } }
-    if (nl > 1) return InFail("several lights");
-    if (nl == 1) {
-        DV(52, G_u_p_t)(dev, li, e.lightRaw);
-        if (*(DWORD*)e.lightRaw != 3) return InFail("non-directional light");
+    int nl = 0;
+    if (e.lightOn) for (int i = 0; i < 8; ++i) {
+        BOOL on = FALSE; DV(54, G_u_p_t)(dev, i, &on); if (!on) continue;
+        if (nl >= 4) return InFail("more than 4 lights");
+        DV(52, G_u_p_t)(dev, i, e.lightRaw[nl]);
+        DWORD t = *(DWORD*)e.lightRaw[nl];
+        if (t != 1 && t != 3) return InFail("spot light");
+        ++nl;
     }
+    e.nLights = nl;
     e.L[3] = e.lightOn ? 1.0f : 0.0f;
     for (int i = 0; i < 16; ++i) e.rs[i] = kInRS[i] ? InRS(dev, kInRS[i]) : 0;
     for (int i = 0; i < 9; ++i) { DWORD v = 0; ((HRESULT (__stdcall*)(void*, DWORD, DWORD, DWORD*))(*(void***)dev)[68])(dev, 0, kInSS[i], &v); e.ss[i] = v; }
@@ -92,21 +96,19 @@ static bool InstGroupBegin() {
         if (!e.fogMode) e.fogOn = 0;
         DWORD v; v = InRS(dev, 36); memcpy(&e.fogStart, &v, 4); v = InRS(dev, 37); memcpy(&e.fogEnd, &v, 4); v = InRS(dev, 38); memcpy(&e.fogDens, &v, 4);
     }
-    // the light part (material dependent terms are applied per key at the draw)
-    if (nl == 1) {
-        const float* d = (const float*)(e.lightRaw + 64);
-        float l = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]); if (l <= 0) l = 1;
-        e.L[0] = -d[0] / l; e.L[1] = -d[1] / l; e.L[2] = -d[2] / l;
-    }
     int k = 0; for (; k < g_inEnvN; ++k) if (!memcmp(&g_inEnv[k], &e, sizeof e)) break;
     if (k == g_inEnvN) { if (g_inEnvN >= IN_MAXENV) return InFail("too many groups"); g_inEnv[g_inEnvN++] = e; }
-    g_inCurEnv = k; g_instGroupOk = true;
+    g_inCurEnv = k; g_instGroupOk = true; g_inLightGen = g_lightGen;
     return true;
 }
 static void InRelease(InKey& k) { ComRelease(k.vb); ComRelease(k.ib); ComRelease(k.tex); k.vb = k.ib = k.tex = nullptr; }
 // hp_DIP while g_instCapture: record the draw instead of issuing it; false = draw it normally
 static bool InstCaptureDIP(void* dev, DWORD type, DWORD base, DWORD minIdx, DWORD numV, DWORD start, DWORD prim) {
     if (type != 4 || g_inCurEnv < 0 || !g_instMat || g_inInstN >= IN_MAXINST) { ++g_inFallback; return false; }
+    if (g_inLightGen != g_lightGen) {                               // lights changed inside the group (per-object lights)
+        ++g_inRelit; bool cap = g_instCapture;
+        if (!InstGroupBegin()) { g_instCapture = cap; ++g_inFallback; return false; }
+    }
     DWORD fvf = 0;
     { DWORD f = 0; ((HRESULT (__stdcall*)(void*, DWORD*))(*(void***)dev)[90])(dev, &f); fvf = f; }
     if (fvf != 0x112) { ++g_inFallback; return false; }           // XYZ | NORMAL | TEX1
@@ -141,15 +143,22 @@ static bool InstCaptureDIP(void* dev, DWORD type, DWORD base, DWORD minIdx, DWOR
 static const char* kInVS =
     "float4 vp0:register(c0); float4 vp1:register(c1); float4 vp2:register(c2); float4 vp3:register(c3);\n"
     "float4 L:register(c4); float4 dif:register(c5); float4 amb:register(c6); float4 vz:register(c7); float4 opt:register(c8);\n"
-    "float4 tmu:register(c9); float4 tmv:register(c10);\n"
+    "float4 tmu:register(c9); float4 tmv:register(c10); float4 LT[16]:register(c11);\n"
     "struct I { float3 p:POSITION; float3 n:NORMAL; float2 t:TEXCOORD0; float4 w0:TEXCOORD1; float4 w1:TEXCOORD2; float4 w2:TEXCOORD3; float4 tf:COLOR0; };\n"
     "struct O { float4 p:POSITION; float2 t:TEXCOORD0; float4 c:COLOR0; float4 tf:COLOR1; float z:TEXCOORD1; };\n"
+    "float3 Lit(float4 lp, float4 at, float4 ld, float4 la, float3 n, float3 wp) {\n"
+    "  float3 v = lp.xyz - wp; float d = length(v);\n"
+    "  float3 dir = lp.w > 1.5 ? v / max(d, 0.000001) : lp.xyz;\n"
+    "  float a = lp.w > 1.5 ? (d <= at.w ? 1.0 / max(at.x + at.y * d + at.z * d * d, 0.000001) : 0.0) : (lp.w > 0.5 ? 1.0 : 0.0);\n"
+    "  return (ld.rgb * max(0, dot(n, dir)) + la.rgb) * a; }\n"
     "O main(I i) { O o; float4 p = float4(i.p, 1);\n"
     "  float4 w = float4(dot(p, i.w0), dot(p, i.w1), dot(p, i.w2), 1);\n"
     "  o.p = float4(dot(w, vp0), dot(w, vp1), dot(w, vp2), dot(w, vp3));\n"
     "  float3 n = float3(dot(i.n, i.w0.xyz), dot(i.n, i.w1.xyz), dot(i.n, i.w2.xyz));\n"
     "  if (opt.x > 0) n = normalize(n);\n"
-    "  float3 c = amb.rgb + dif.rgb * max(0, dot(n, L.xyz));\n"
+    "  float3 c = amb.rgb;\n"
+    "  c += Lit(LT[0], LT[1], LT[2], LT[3], n, w.xyz) + Lit(LT[4], LT[5], LT[6], LT[7], n, w.xyz)\n"
+    "     + Lit(LT[8], LT[9], LT[10], LT[11], n, w.xyz) + Lit(LT[12], LT[13], LT[14], LT[15], n, w.xyz);\n"
     "  o.c = L.w > 0 ? float4(saturate(c), dif.a) : float4(1, 1, 1, 1);\n"
     "  float3 t3 = float3(i.t, 1); o.t = float2(dot(t3, tmu.xyz), dot(t3, tmv.xyz)); o.tf = i.tf; o.z = dot(w, vz); return o; }\n";
 static const char* kInPS =
@@ -264,17 +273,32 @@ static void InstFlush() {
         // material dependent lighting terms (fixed-function: emissive + Am*(Ga + La) + Dm*Ld*max(N.L,0); alpha = Dm.a)
         const float* Dm = (const float*)K.mat; const float* Am = Dm + 4; const float* Em = Dm + 12;
         float ga[4]; ColF(e.ambientRS, ga);
-        const float* Ld = (const float*)(e.lightRaw + 4); const float* La = (const float*)(e.lightRaw + 36);
-        bool hasLight = *(DWORD*)e.lightRaw == 3;
-        float c[16];
-        c[0] = e.L[0]; c[1] = e.L[1]; c[2] = e.L[2]; c[3] = e.L[3];
-        for (int i = 0; i < 3; ++i) c[4 + i] = hasLight ? Dm[i] * Ld[i] : 0.0f;
-        c[7] = Dm[3];
-        for (int i = 0; i < 3; ++i) c[8 + i] = Em[i] + Am[i] * (ga[i] + (hasLight ? La[i] : 0.0f));
+        float c[16], lt[64]; memset(lt, 0, sizeof lt);
+        float ambL[3] = { 0, 0, 0 };                                // ambient of directional lights (constant)
+        for (int l = 0; l < e.nLights; ++l) {
+            const BYTE* raw = e.lightRaw[l]; DWORD t = *(const DWORD*)raw;
+            const float* Ld = (const float*)(raw + 4); const float* La = (const float*)(raw + 36);
+            const float* pos = (const float*)(raw + 52); const float* dir = (const float*)(raw + 64);
+            float* o = lt + l * 16;
+            if (t == 3) {                                           // directional: towards the light, no attenuation
+                float n = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]); if (n <= 0) n = 1;
+                o[0] = -dir[0] / n; o[1] = -dir[1] / n; o[2] = -dir[2] / n; o[3] = 1;
+                for (int i = 0; i < 3; ++i) ambL[i] += La[i];
+            } else {                                                // point: position, attenuation, range
+                o[0] = pos[0]; o[1] = pos[1]; o[2] = pos[2]; o[3] = 2;
+                o[4] = *(const float*)(raw + 84); o[5] = *(const float*)(raw + 88); o[6] = *(const float*)(raw + 92); o[7] = *(const float*)(raw + 76);
+                for (int i = 0; i < 3; ++i) o[12 + i] = Am[i] * La[i];
+            }
+            for (int i = 0; i < 3; ++i) o[8 + i] = Dm[i] * Ld[i];
+        }
+        c[0] = c[1] = c[2] = 0; c[3] = e.L[3];
+        c[4] = c[5] = c[6] = 0; c[7] = Dm[3];
+        for (int i = 0; i < 3; ++i) c[8 + i] = Em[i] + Am[i] * (ga[i] + ambL[i]);
         c[11] = 1;
         c[12] = e.normalize ? 1.0f : 0.0f; c[13] = c[14] = c[15] = 0;
         ((SC_t)(*(void***)dev)[94])(dev, 4, c, 3);
         ((SC_t)(*(void***)dev)[94])(dev, 8, c + 12, 1);
+        ((SC_t)(*(void***)dev)[94])(dev, 11, lt, 16);
         {   float t[8] = { K.tm[0], K.tm[1], K.tm[2], 0, K.tm[3], K.tm[4], K.tm[5], 0 };
             ((SC_t)(*(void***)dev)[94])(dev, 9, t, 2); }
         DEVF(57, D_u_u)(dev, 14, K.zwrite); DEVF(57, D_u_u)(dev, 24, K.aref);
@@ -305,9 +329,9 @@ static void InstFlush() {
     InClear();
 }
 static void InstanceStats() {
-    PLOG("INSTANCING on=%d: recorded=%lu instanced draws=%lu (flushes %lu) fallback draws=%lu | groups=%lu rejected=%lu%s%s",
-         g_instOn && !g_inBroken, g_inRecords, g_inDraws, g_inFlushes, g_inFallback, g_inGroups, g_inGroupsBad, g_inWhy[0] ? " last reason: " : "", g_inWhy);
-    g_inRecords = g_inDraws = g_inFlushes = g_inFallback = g_inGroups = g_inGroupsBad = 0;
+    PLOG("INSTANCING on=%d: recorded=%lu instanced draws=%lu (flushes %lu) fallback draws=%lu | groups=%lu rejected=%lu relit=%lu%s%s",
+         g_instOn && !g_inBroken, g_inRecords, g_inDraws, g_inFlushes, g_inFallback, g_inGroups, g_inGroupsBad, g_inRelit, g_inWhy[0] ? " last reason: " : "", g_inWhy);
+    g_inRecords = g_inDraws = g_inFlushes = g_inFallback = g_inGroups = g_inGroupsBad = g_inRelit = 0;
 }
 #undef DV
 

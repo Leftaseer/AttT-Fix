@@ -20,8 +20,9 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - 16x anisotropic filtering (every bilinear/trilinear minification becomes anisotropic).
 - Optional MSAA 2x/4x/8x (`[Video] MSAA`, Ctrl+7 at runtime) with alpha-to-coverage for foliage. Render-to-texture passes get a matching non-multisampled depth buffer; back buffer reads are resolved.
 - Adjustable draw distance of small props (boxes, wheels, rocks), NPCs and their shadows (`[Video] ObjectDistance`, default 1.0 = original). The original size-based culling was tuned for 800x600..1280x1024.
+- Sharper shadows: the world map shadow texture (owned by the clouds/sun object) is raised from 1024 to 4096 (`[Video] ShadowSize`), rendered with 4x MSAA and resolved (`ShadowMSAA`), sampled with linear filtering; hero/NPC shadows 256 → 1024 (`UnitShadowSize`) and placed by the interpolated position; building shadows no longer culled by the camera frustum test (`ShadowCasterCull=0`).
 - Adjustable distance of 3D forest trees (`[Video] Tree3DDistance`, default 1500; flat trees beyond) and an optional dissolve instead of the see-through 3D → flat fade (`TreeDissolve`, default 0 = original, Ctrl+8).
-- **Graphics settings page** in Options → video (the "ATTTFIX" button): presets Original / Recommended / Medium / High / Ultra and the individual settings (object distance, forest distance, 3D tree distance, transition, anisotropy, MSAA, renderer Direct3D 9 / DXVK).
+- **Graphics settings page** in Options → video (the "ATTTFIX" button): presets Original / Recommended / Medium / High / Ultra and the individual settings (object distance, shadow quality, 3D tree distance, transition, anisotropy, MSAA, renderer Direct3D 9 / DXVK).
 
 **Smoothness**
 - The game updates the world at 30 Hz and never interpolated rendering. The mod blends positions of the hero, armies, battle units and the camera between logic steps (also removes the hero jitter while the camera turns).
@@ -38,7 +39,8 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - Language switch Russian / English in Options (the English localization ships with the game as `Localization.pak`).
 - Fullscreen checkbox restored in the English build.
 - Optional background mode: the game keeps running and playing sound while minimized (`[Game] Background=1`).
-- Fixed: Windows cursor left on top of the game after start; spinning parts on some unit models with animation smoothing; portal loop twitch; broken tree distances saved by the game's own option.
+- Fixed: Windows cursor left on top of the game after start; spinning parts on some unit models with animation smoothing; portal loop twitch; broken tree distances saved by the game's own option; the in-game options window turning pale after an MSAA change.
+- Master switch: `[Mod] Enabled=0` in `AttTFix.ini` runs the original game.
 - Optional: start from Steam without the Fulqrum launcher (`launcher.ini` with `skip=true`).
 - On-screen FPS / frame-time overlay (F11), optional performance log and sampling profiler.
 
@@ -58,7 +60,7 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 
 ## Installing a release
 
-1. Download `AttTFix-1.2.1.zip` from [Releases](../../releases).
+1. Download `AttTFix-1.3.zip` from [Releases](../../releases).
 2. Copy `dinput8.dll` into the game folder (Steam → right click the game → Manage → Browse local files).
 3. Optional: back up your `launcher.ini` and replace it with the one from the archive to skip the launcher.
 4. Start the game. Settings are created in `AttTFix.ini`; details are in `dist/README_EN.txt`.
@@ -90,7 +92,7 @@ The result is `src/dinput8.dll`. Copy it next to `ATThrone.exe`.
 
 - Logs: `AttTFix.log` (always), `AttTFix_perf.log` with `[Perf] Log=1` (+ `Sampler=1` for the profiler, `TraceSeconds=N` for a per-frame trace, F8 for an animation trace).
 - Every patch checks the original bytes first; on a different game build it is skipped and noted in the log.
-- Sources (all included by `attfix.cpp`): `renderopt.inc` render optimizations and draw distances, `effectsm.inc` effect state manager, `instance.inc` tree instancing and the quality settings Lua API, `billboard.inc` flat tree batching, `cpuopt.inc` tree sort, `skin.inc` + `skin_core.h` skinning, `sound.inc` async 3D sound, `smoothanim.inc` object/particle smoothing, `msaa.inc` MSAA. Each `[Perf]` / `[Smooth]` key switches one of them off.
+- Sources (all included by `attfix.cpp`): `renderopt.inc` render optimizations and draw distances, `effectsm.inc` effect state manager, `instance.inc` tree instancing and the quality settings Lua API, `billboard.inc` flat tree batching, `cpuopt.inc` tree sort, `skin.inc` + `skin_core.h` skinning, `sound.inc` async 3D sound, `smoothanim.inc` object/particle smoothing, `msaa.inc` MSAA, `shadow.inc` shadow resolution, filtering, MSAA and caster culling. Each `[Perf]` / `[Smooth]` key switches one of them off.
 - Tests: `src/tests/skintest.cpp` (skinning against a reference, plain g++), `src/tests/fxtest.cpp` (deferred state restore). `tools/perfsum.py <game folder>` prints a short summary of `AttTFix_perf.log`.
 - With the system Direct3D 9 the deferred effect state restore broke the 2D menu (cause not found), so it and tree instancing run only with DXVK.
 - Ideas that are not done yet: smoothing for trees / town animations, skinning on worker threads.
@@ -132,7 +134,8 @@ No game code or assets are included in this repository.
 - Переключение языка: русский / английский (английская локализация уже лежит в игре как `Localization.pak`).
 - Галочка полноэкранного режима возвращена в английскую версию.
 - Работа в фоне по желанию (`[Game] Background=1`).
-- Исправлено: курсор Windows поверх игры после запуска, «крутящиеся» части моделей некоторых юнитов, подёргивание портала, испорченные дальности деревьев в сохранённых настройках.
+- Исправлено: курсор Windows поверх игры после запуска, «крутящиеся» части моделей некоторых юнитов, подёргивание портала, испорченные дальности деревьев в сохранённых настройках, блёклое окно опций после смены MSAA.
+- Общий выключатель: `[Mod] Enabled=0` в `AttTFix.ini` — игра работает как оригинал.
 - Необязательно: запуск из Steam без лаунчера (`launcher.ini` со строкой `skip=true`).
 - Счётчик FPS (F11), журнал производительности и профайлер по желанию.
 
@@ -140,8 +143,9 @@ No game code or assets are included in this repository.
 - Анизотропная фильтрация 16x.
 - MSAA 2x/4x/8x по желанию (`[Video] MSAA`, Ctrl+7 в игре) вместе со сглаживанием краёв листвы.
 - Настраиваемая дальность прорисовки мелких предметов, NPC и их теней (`[Video] ObjectDistance`, по умолчанию 1.0 = оригинал).
+- Чёткие тени: текстура теней карты 4096 вместо 1024 со сглаживанием краёв (MSAA), тени героя и NPC 1024 вместо 256 и плавно движутся, тени зданий больше не пропадают («Качество теней»).
 - Настраиваемое расстояние объёмных (3D) деревьев (`[Video] Tree3DDistance`, по умолчанию 1500, дальше — плоские) и растворение вместо просвечивания при переходе по желанию (Ctrl+8).
-- **Страница настроек графики** в «Опциях» → видео (кнопка «ATTTFIX»): пресеты Оригинальное / Рекомендуемое / Среднее / Высокое / Ультра и отдельные параметры (дальность объектов, дальность леса, расстояние 3D-деревьев, переход, анизотропия, MSAA, рендер Direct3D 9 / DXVK).
+- **Страница настроек графики** в «Опциях» → видео (кнопка «ATTTFIX»): пресеты Оригинальное / Рекомендуемое / Среднее / Высокое / Ультра и отдельные параметры (дальность объектов, качество теней, расстояние 3D-деревьев, переход, анизотропия, MSAA, рендер Direct3D 9 / DXVK).
 
 **Производительность**
 - Проверка видимости солнца для бликов без остановки видеокарты. Оригинал, когда солнце в кадре, дважды за кадр
@@ -157,7 +161,7 @@ No game code or assets are included in this repository.
 
 ### Установка
 
-1. Скачайте `AttTFix-1.2.1.zip` в разделе [Releases](../../releases).
+1. Скачайте `AttTFix-1.3.zip` в разделе [Releases](../../releases).
 2. Скопируйте `dinput8.dll` в папку игры (Steam → правой кнопкой по игре → «Управление» → «Просмотреть локальные файлы»).
 3. Необязательно: сохраните свой `launcher.ini` и замените его файлом из архива, чтобы игра запускалась без лаунчера.
 4. Запустите игру. Настройки появятся в `AttTFix.ini`, подробности — в `dist/README_RU.txt`.
