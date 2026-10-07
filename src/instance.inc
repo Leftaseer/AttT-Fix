@@ -14,7 +14,7 @@
 #include <cstddef>
 static int g_instOn = 1;
 static DWORD g_inRecords = 0, g_inDraws = 0, g_inFallback = 0, g_inGroups = 0, g_inGroupsBad = 0, g_inFlushes = 0;
-static char g_inWhy[64] = "";
+static char g_inWhy[96] = "";
 
 struct InEnv {                                   // per effect group: states that must be equal to share a draw
     DWORD rs[16]; DWORD ss[9];
@@ -22,11 +22,13 @@ struct InEnv {                                   // per effect group: states tha
     DWORD lightOn, normalize, fogOn, fogMode; float fogStart, fogEnd, fogDens; DWORD fogColor;
     float op[4];                                 // colour op, alpha op, alpha arg2 = tfactor
     BYTE lightRaw[104]; DWORD ambientRS;
+    DWORD ttf;                                   // stage 0 texture transform: 0 = off, 2 = COUNT2 (matrix per key)
 };
 static const DWORD kInRS[16] = { 7, 23, 15, 25, 27, 19, 20, 171, 22, 168, 206, 195, 175, 8, 9, 0 };   // ZENABLE ZFUNC ATEST AFUNC ABLEND SRC DST BLENDOP CULL COLORWRITE SEPALPHA DEPTHBIAS SLOPEBIAS FILL SHADE
 static const DWORD kInSS[9] = { 1, 2, 5, 6, 7, 8, 9, 10, 11 };
 struct InKey {
     void* vb; DWORD off, stride; void* ib; void* tex; DWORD base, minIdx, numV, start, prim; DWORD zwrite, aref; int env;
+    float tm[6];                                 // stage 0 texture matrix _11 _21 _31 / _12 _22 _32 (identity without TTF)
     BYTE mat[68]; DWORD hash; int first, count, next;
 };
 struct InInst { float c[12]; DWORD tf; int key; };
@@ -59,7 +61,12 @@ static bool InstGroupBegin() {
     if (InRS(dev, 128)) return InFail("wrap0");
     // stage 0 / 1
     DWORD cop = InTSS(dev, 0, 1), ca1 = InTSS(dev, 0, 2), ca2 = InTSS(dev, 0, 3), aop = InTSS(dev, 0, 4), aa1 = InTSS(dev, 0, 5), aa2 = InTSS(dev, 0, 6);
-    if (InTSS(dev, 0, 11) != 0 || InTSS(dev, 0, 24) != 0 || InTSS(dev, 0, 28) != 1) return InFail("stage0 texcoord/result");
+    {   DWORD tci = InTSS(dev, 0, 11), ttf = InTSS(dev, 0, 24), res = InTSS(dev, 0, 28);
+        // TEXTURETRANSFORMFLAGS = COUNT2 is on for the trees in towns/forests (left by an earlier effect): the
+        // texture matrix is applied in the shader, (u, v, 1) x rows 1..3 as the fixed-function pipeline does
+        if (tci != 0 || (ttf != 0 && ttf != 2) || res != 1) {
+            char w[80]; snprintf(w, sizeof w, "stage0 texcoordindex=%lX transformflags=%lX resultarg=%lX", tci, ttf, res); return InFail(w); } }
+    e.ttf = InTSS(dev, 0, 24);
     if (InTSS(dev, 1, 1) != 1) return InFail("stage1 active");
     if (ca1 != 2 || (ca2 != 0 && ca2 != 1)) return InFail("stage0 colour args");
     if (cop == 2) e.op[0] = 0; else if (cop == 4) e.op[0] = 1; else if (cop == 5) e.op[0] = 2; else return InFail("stage0 colour op");
@@ -111,6 +118,10 @@ static bool InstCaptureDIP(void* dev, DWORD type, DWORD base, DWORD minIdx, DWOR
     ((HRESULT (__stdcall*)(void*, void*))(*(void***)dev)[50])(dev, k.mat);
     k.base = base; k.minIdx = minIdx; k.numV = numV; k.start = start; k.prim = prim;
     k.zwrite = InRS(dev, 14); k.aref = InRS(dev, 24); k.env = g_inCurEnv;
+    if (g_inEnv[g_inCurEnv].ttf == 2) {
+        float T[16]; DV(45, G_u_p_t)(dev, 16 /*D3DTS_TEXTURE0*/, T);
+        k.tm[0] = T[0]; k.tm[1] = T[4]; k.tm[2] = T[8]; k.tm[3] = T[1]; k.tm[4] = T[5]; k.tm[5] = T[9];
+    } else { k.tm[0] = 1; k.tm[1] = 0; k.tm[2] = 0; k.tm[3] = 0; k.tm[4] = 1; k.tm[5] = 0; }
     DWORD h = 2166136261u; const DWORD* w = (const DWORD*)&k;
     for (size_t i = 0; i < offsetof(InKey, hash) / 4; ++i) h = (h ^ w[i]) * 16777619u;
     k.hash = h;
@@ -130,6 +141,7 @@ static bool InstCaptureDIP(void* dev, DWORD type, DWORD base, DWORD minIdx, DWOR
 static const char* kInVS =
     "float4 vp0:register(c0); float4 vp1:register(c1); float4 vp2:register(c2); float4 vp3:register(c3);\n"
     "float4 L:register(c4); float4 dif:register(c5); float4 amb:register(c6); float4 vz:register(c7); float4 opt:register(c8);\n"
+    "float4 tmu:register(c9); float4 tmv:register(c10);\n"
     "struct I { float3 p:POSITION; float3 n:NORMAL; float2 t:TEXCOORD0; float4 w0:TEXCOORD1; float4 w1:TEXCOORD2; float4 w2:TEXCOORD3; float4 tf:COLOR0; };\n"
     "struct O { float4 p:POSITION; float2 t:TEXCOORD0; float4 c:COLOR0; float4 tf:COLOR1; float z:TEXCOORD1; };\n"
     "O main(I i) { O o; float4 p = float4(i.p, 1);\n"
@@ -139,7 +151,7 @@ static const char* kInVS =
     "  if (opt.x > 0) n = normalize(n);\n"
     "  float3 c = amb.rgb + dif.rgb * max(0, dot(n, L.xyz));\n"
     "  o.c = L.w > 0 ? float4(saturate(c), dif.a) : float4(1, 1, 1, 1);\n"
-    "  o.t = i.t; o.tf = i.tf; o.z = dot(w, vz); return o; }\n";
+    "  float3 t3 = float3(i.t, 1); o.t = float2(dot(t3, tmu.xyz), dot(t3, tmv.xyz)); o.tf = i.tf; o.z = dot(w, vz); return o; }\n";
 static const char* kInPS =
     "sampler s0:register(s0); float4 fogc:register(c0); float4 fogp:register(c1); float4 op:register(c2);\n"
     "float4 main(float2 t:TEXCOORD0, float4 c:COLOR0, float4 tf:COLOR1, float z:TEXCOORD1) : COLOR {\n"
@@ -263,6 +275,8 @@ static void InstFlush() {
         c[12] = e.normalize ? 1.0f : 0.0f; c[13] = c[14] = c[15] = 0;
         ((SC_t)(*(void***)dev)[94])(dev, 4, c, 3);
         ((SC_t)(*(void***)dev)[94])(dev, 8, c + 12, 1);
+        {   float t[8] = { K.tm[0], K.tm[1], K.tm[2], 0, K.tm[3], K.tm[4], K.tm[5], 0 };
+            ((SC_t)(*(void***)dev)[94])(dev, 9, t, 2); }
         DEVF(57, D_u_u)(dev, 14, K.zwrite); DEVF(57, D_u_u)(dev, 24, K.aref);
         ((HRESULT (__stdcall*)(void*, DWORD, void*, DWORD, DWORD))(*(void***)dev)[100])(dev, 0, K.vb, K.off, K.stride);
         ((HRESULT (__stdcall*)(void*, void*))(*(void***)dev)[104])(dev, K.ib);

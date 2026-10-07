@@ -1,8 +1,25 @@
-﻿AttTFix 1.2 — technical update for Ascension to the Throne
-===========================================================
+﻿AttTFix 1.2.1 — technical update for Ascension to the Throne
+=============================================================
 
 An unofficial, non-commercial mod for the Steam version of the game. No game files are
 modified: the whole mod is a single dinput8.dll that the game loads by itself.
+
+
+WHAT'S NEW IN 1.2.1
+-------------------
+  * Fixed the open portal flicker once per animation loop: the upright portal disc was
+    turned around for one frame by the animation smoothing.
+  * The FPS limit and VSync in Options switch at once and without a stall (after starting
+    with VSync another limit could stay inactive until a restart). With DXVK the screen is
+    no longer re-created for it.
+  * F11 cycles three modes: hidden -> FPS and frame time only -> with the Ctrl+digit
+    toggle panel. The mode is remembered.
+  * Trees: Apply in game no longer saves the mod's 3D tree distance as the game's own
+    setting. A setting broken that way (crossfade 1500..1500, trees popped) is repaired
+    automatically; press Apply once to save it.
+  * The 3D -> 2D tree transition is "See-through" again by default, as in the original
+    (dissolve is optional on the "ATTTFIX" page or with Ctrl+8).
+  * Tree instancing (DXVK) also works with transformed texture coordinates.
 
 
 WHAT'S NEW IN 1.2
@@ -25,7 +42,7 @@ WHAT'S NEW IN 1.2
   * Fixed: "spinning" model parts on some units (e.g. the Slaver's boots) with animation
     smoothing; an open portal twitching at the end of its animation loop; broken tree
     distances in saved settings (the game could save a negative or an extra distance).
-  * Distant trees fade without the see-through look (dissolve, Ctrl+8).
+  * Optional dissolve instead of the see-through fade of distant trees (Ctrl+8).
   * The prop distance is original (1.0) by default; raise it with a preset or its own
     setting.
 
@@ -45,7 +62,7 @@ Graphics
   * MSAA 2x/4x/8x and foliage edge anti-aliasing (off by default).
   * Adjustable draw distance of small props, NPCs and their shadows.
   * Adjustable distance of 3D trees, and a dissolve instead of the see-through fade
-    between 3D and flat trees.
+    between 3D and flat trees (optional).
 
 Smoothness
   * Smooth movement of the hero, armies, battle units and the camera between the game's
@@ -127,7 +144,7 @@ GRAPHICS SETTINGS ("ATTTFIX" page in Options -> video)
                      ones are flat pictures. Higher = nicer up close, but heavier.
                      "As in the game" follows the forest distance (at "Very far" the game
                      keeps 3D trees up to about 700).
-  Tree 3D -> 2D transition — see-through (original), dissolve or short dissolve.
+  Tree 3D -> 2D transition — see-through (original, default), dissolve or short dissolve.
   Anisotropic filtering — off / 2x / 4x / 8x / 16x.
   Anti-aliasing (MSAA) — off / 2x / 4x / 8x. With the system Direct3D 9 after a restart,
                      with DXVK at once.
@@ -138,8 +155,9 @@ to AttTFix.ini.
 
 HOTKEYS
 -------
-  F11 — show/hide the FPS counter and the toggle panel in the top left corner.
-  While it is shown (digits with Ctrl held are not passed to the game):
+  F11 — counter in the top left corner: hidden -> FPS and frame time -> with the toggle
+        panel -> hidden.
+  While the toggle panel is shown (digits with Ctrl held are not passed to the game):
     Ctrl+1 — movement and camera smoothing
     Ctrl+2 — character animation smoothing
     Ctrl+3 — object animation smoothing
@@ -147,7 +165,7 @@ HOTKEYS
     Ctrl+5 — particle smoothing
     Ctrl+6 — anisotropic filtering
     Ctrl+7 — MSAA and foliage anti-aliasing (DXVK: at once, Direct3D 9: after a restart)
-    Ctrl+8 — distant tree transition: dissolve / short dissolve / original
+    Ctrl+8 — distant tree transition: original / dissolve / short dissolve
     Ctrl+9 — extended draw distance (props, shadows, trees) / original
     Ctrl+0 — write one frame to AttTFix.log (debugging)
   F10 / F9 / F7 — same as Ctrl+1 / Ctrl+2 / Ctrl+4.
@@ -168,7 +186,7 @@ changes apply on the next start):
            ObjectDistance=1.0  draw distance of small props and shadows (1.0 = original)
            Tree3DDistance=1500 distance up to which trees are 3D (0 = as in the game)
            TreeDistance=1.0    3D -> flat crossfade multiplier (with Tree3DDistance=0)
-           TreeDissolve=1      0 = see-through (original), 1 = dissolve, 2 = short dissolve
+           TreeDissolve=0      0 = see-through (original), 1 = dissolve, 2 = short dissolve
            Renderer=d3d9       d3d9 or dxvk (see below)
            WindowedSync=dwm    VSync in a window: dwm (monitor-locked), flush or timer
            AllCores=1          use all CPU cores
@@ -180,7 +198,7 @@ changes apply on the next start):
   [Perf]   AsyncSunCheck, TreeBatch, TreeGroupParts, TreeInstancing, TreeSort,
            EffectStates, EffectDeferRestore, FastSkin, AsyncSound, FastPolygonTest
                                optimizations, all =1 (0 = original)
-           ShowFps=0           FPS counter at start (F11 toggles it)
+           ShowFps=0           counter: 0 = hidden, 1 = FPS, 2 = FPS + toggles (F11)
            Log=0               1 = write performance statistics to AttTFix_perf.log
   [Game]   Language=en         ru or en
            Background=0        1 = the game keeps running (and playing sound) when minimized

@@ -10,7 +10,7 @@
 #include <math.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
-#define ATTFIX_VERSION "1.2"
+#define ATTFIX_VERSION "1.2.1"
 
 // ---------------------------------------------------------------- log
 static FILE* g_log = nullptr;
@@ -28,6 +28,14 @@ static void LOG(const char* fmt, ...) {
 
 static UINT MaxRefresh(UINT w, UINT h);
 static int g_vsync = 1;
+static UINT g_devInterval = 0;                  // present interval the device was created / reset with
+static volatile bool g_vsyncResetPending = false; // VSync changed in the options: re-create the swap chain (engine restore)
+static int g_dxvkActive = 0;
+// Present interval for the device. With DXVK always ONE: VSync off is then done per Present with
+// D3DPRESENT_FORCEIMMEDIATE (DXVK honours it in Present/PresentEx and only re-creates its Vulkan swap chain), so the
+// VSync option switches at once, without a device reset. The system d3d9 (no PresentEx on a non-Ex device) keeps
+// IMMEDIATE when VSync is off.
+static inline UINT WantInterval() { return (g_vsync || g_dxvkActive) ? 1 : 0x80000000; }
 static int g_windowed;
 static int g_dwmSync = 1; static int g_dwmOk = 0; typedef HRESULT (WINAPI *DwmFlush_t)(); static DwmFlush_t g_DwmFlush = nullptr;
 typedef HRESULT (WINAPI *DwmTiming_t)(HWND, DWM_TIMING_INFO*); static DwmTiming_t g_DwmTiming = nullptr;   // g_dwmSync: 1 = vblank grid, 2 = DwmFlush
@@ -38,7 +46,7 @@ static void TraceFrame(DWORD frame, double nowMs, double ft, const char* sceneCl
 static void __fastcall h_UpdaterUpdate(BYTE* self, void* edx, float dt);
 static float g_lastDt = 0;
 static int g_traceSec = 60;
-static int g_renderer = 0; static int g_dxvkActive = 0;
+static int g_renderer = 0;
 static int g_listenerHz = 60;
 static DWORD g_listenerSkipped = 0, g_listenerDone = 0;
 static int L_GetVideo(void* L);
@@ -46,9 +54,9 @@ static int L_SetFps(void* L);
 static int g_samplerOn = 1;
 static volatile DWORD g_curFrame = 0;
 static double g_frameMs = 0;
-static FILE* g_atr = nullptr; static int g_atrLeft = 1200; static bool g_atrArmed = false;   // timestamp of the current frame (ms)
+static FILE* g_atr = nullptr; static double g_atrUntil = 0; static bool g_atrOn = false;   // timestamp of the current frame (ms)
 static int g_profileEvery = 20;
-static int g_showFps = 1;
+static int g_showFps = 1;   // F11 overlay: 0 hidden, 1 frame / performance info, 2 + Ctrl+digit toggles
 static volatile bool g_skipHitch = false;   // set on focus changes / device lost
 static void InstallFrameRewrite();
 static void InterpApply(); static void InterpRestore(); static void InterpStats();
@@ -207,7 +215,7 @@ static void AnisoInit(void* dev) {
 #include "msaa.inc"
 static HRESULT __stdcall h_Reset(void* dev, D3DPP* p) {
     if (!p->Windowed && p->Refresh == 0) { UINT hz = MaxRefresh(p->W, p->H); if (hz > 60) p->Refresh = hz; }
-    p->Interval = g_vsync ? 1 : 0x80000000;
+    p->Interval = WantInterval();
     SunRelease();
     FxReleaseAll(); InstRelease();
     FontRelease();
@@ -219,7 +227,7 @@ static HRESULT __stdcall h_Reset(void* dev, D3DPP* p) {
     HRESULT hr = o_Reset(dev, p);
     if (hr < 0 && p->MS) { LOG("Device::Reset with MSAA failed %08lX, retrying without", hr); p->MS = 0; p->MSQ = 0; p->Flags |= 1; hr = o_Reset(dev, p); }
     LOG("Device::Reset -> %08lX", hr);
-    if (hr >= 0) { AnisoApply(dev); MsaaDeviceReady(dev, p); }
+    if (hr >= 0) { g_devInterval = p->Interval; g_windowed = p->Windowed; AnisoApply(dev); MsaaDeviceReady(dev, p); }
     return hr;
 }
 static LONG g_lastTCL = 0;
@@ -229,8 +237,13 @@ static HRESULT __stdcall h_TCL(void* dev) {
     return hr;
 }
 static LONG g_lastPresent = 0; static DWORD g_frames = 0;
+typedef HRESULT (__stdcall *PresentEx_t)(void*, const void*, const void*, HWND, const void*, DWORD);
 static HRESULT __stdcall h_Present(void* dev, const void* a, const void* b, HWND c, const void* d) {
-    HRESULT hr = o_Present(dev, a, b, c, d);
+    HRESULT hr;
+    if (g_dxvkActive && !g_vsync && g_devInterval == 1) {        // DXVK, VSync off: IDirect3DDevice9Ex::PresentEx (slot 121)
+        static bool logged = false; if (!logged) { logged = true; LOG("present: VSync off via PresentEx(D3DPRESENT_FORCEIMMEDIATE) (DXVK)"); }
+        hr = ((PresentEx_t)(*(void***)dev)[121])(dev, a, b, c, d, 0x00000100 /*D3DPRESENT_FORCEIMMEDIATE*/);
+    } else hr = o_Present(dev, a, b, c, d);
     if (hr != g_lastPresent) { LOG("Present: %08lX -> %08lX (frame %lu)", g_lastPresent, hr, g_frames); g_lastPresent = hr; }
     ++g_frames;
     return hr;
@@ -240,7 +253,7 @@ static HRESULT __stdcall h_CreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd
     RECT r; GetClientRect(wnd, &r);
     LOG("CreateDevice adapter=%u type=%lu flags=%lx window client=%ldx%ld", ad, type, flags, r.right, r.bottom);
     LogPP("  params", p);
-    p->Interval = g_vsync ? 1 /*D3DPRESENT_INTERVAL_ONE*/ : 0x80000000 /*IMMEDIATE*/;
+    p->Interval = WantInterval();   // 1 = D3DPRESENT_INTERVAL_ONE, 0x80000000 = IMMEDIATE
     g_windowed = p->Windowed;
     UINT hz = (!p->Windowed && p->Refresh == 0) ? MaxRefresh(p->W, p->H) : 0;
     if (hz > 60) { p->Refresh = hz; LOG("  fullscreen refresh rate -> %u Hz", hz); }
@@ -251,6 +264,7 @@ static HRESULT __stdcall h_CreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd
     if (hr < 0 && hz > 60) { p->Refresh = 0; LOG("  failed with %u Hz (%08lX), retrying at default", hz, hr); hr = o_CreateDevice(d3d, ad, type, wnd, flags, p, out); }
     LOG("CreateDevice -> %08lX", hr);
     if (hr >= 0 && out && *out) {
+        g_devInterval = p->Interval;
         void** vt = *(void***)*out;
         if (!o_Reset) {
             o_TCL = (TCL_t)PatchVtbl(vt, 3, (void*)h_TCL);
@@ -506,6 +520,7 @@ static void LogCfg(const char* tag, const BYTE* c) {
     LOG("%s: %dx%d fmt=%d tex=%d fullscreen=%d b17=%d depth=%d b22=%d b23=%d grass/shadow/refl=%d%d%d b39-41=%d%d%d gamma=%.2f",
         tag, *(int*)c, *(int*)(c + 4), *(int*)(c + 8), *(int*)(c + 12), c[16], c[17], *(int*)(c + 18), c[22], c[23], c[24], c[25], c[26], c[39], c[40], c[41], *(double*)(c + 58));
 }
+static void TreeDistGameValues(); static void TreeDistOurValues();
 // Lua C function "ChangeSettings" (orig at 0x44D9D0) reimplemented: run the engine's writer, then enforce what the menu shows.
 static int h_ChangeSettings(void* L) {
     BYTE before[66] = {0}, after[66] = {0};
@@ -515,7 +530,9 @@ static int h_ChangeSettings(void* L) {
     void* eng = ((GetEngine_t)0x0042F160)();
     void* lvl = *(void**)((BYTE*)eng + 0x70);
     LOG("ChangeSettings (%s)", lvl ? "in game" : "main menu");
-    if (lvl) ((Method_t)0x005406F0)(lvl, nullptr); else ((Method_t)0x0044D0C0)(eng, nullptr);
+    // in game the writer also takes the forest distances from the level: the game's own values while it runs
+    // (our Tree3DDistance was saved as the game's crossfade, 1500..1500 in graphic.cfg)
+    if (lvl) { TreeDistGameValues(); ((Method_t)0x005406F0)(lvl, nullptr); TreeDistOurValues(); } else ((Method_t)0x0044D0C0)(eng, nullptr);
     if (ReadCfg(after)) {
         if (hb) LogCfg("  cfg before", before);
         LogCfg("  cfg engine", after);
@@ -846,7 +863,13 @@ static int L_SetFps(void* L) {   // (vsync 0/1, limit fps; 0 = none)
     g_vsync = LNum(L, 1) != 0; g_fpsLimit = (int)LNum(L, 2); if (g_fpsLimit < 0) g_fpsLimit = 0;
     char b[16]; snprintf(b, sizeof b, "%d", g_vsync); WritePrivateProfileStringA("Video", "VSync", b, g_iniPath);
     snprintf(b, sizeof b, "%d", g_fpsLimit); WritePrivateProfileStringA("Video", "FpsLimit", b, g_iniPath);
-    LOG("fps: vsync=%d limit=%d", g_vsync, g_fpsLimit);
+    // Present waits for the vblank with the interval the swap chain was made with. DXVK: the interval stays ONE and
+    // VSync off is a per-Present flag (h_Present), no reset. System d3d9: in a window Present does not wait (the limiter
+    // paces it); in fullscreen the interval needs a device reset (engine restore path, ~0.3 s).
+    UINT want = WantInterval();
+    bool reset = g_devInterval && want != g_devInterval && !g_dxvkActive && !g_windowed;
+    if (reset) g_vsyncResetPending = true;
+    LOG("fps: vsync=%d limit=%d%s", g_vsync, g_fpsLimit, reset ? " (present interval changes: device reset)" : "");
     return 0;
 }
 static int L_GetInput(void* L) { LPushNum(L, g_cursorSpeed); LPushNum(L, g_cameraSpeed); return 2; }
@@ -1049,7 +1072,7 @@ static double g_ovFps = 0, g_ovMs = 0, g_ovUpd = 0, g_ovRen = 0, g_ovPres = 0, g
 // The overlay text is rendered into a texture only when it changes (about twice per second) and drawn as one
 // sprite every frame: ID3DXFont::DrawText re-shapes the whole text on every call (~1.5 ms per frame at 4K).
 static void* g_ovSprite = nullptr; static void* g_ovTex = nullptr; static UINT g_ovTexW = 0, g_ovTexH = 0;
-static char g_ovLast[512] = "";
+static char g_ovLast[700] = "";
 static void ComRel(void*& p) { if (p) { ((ULONG (__stdcall*)(void*))(*(void***)p)[2])(p); p = nullptr; } }
 static void FontRelease() { ComRel(g_font); ComRel(g_ovSprite); ComRel(g_ovTex); g_ovLast[0] = 0; }
 static bool OverlayRenderTexture(void* dev, const char* text) {
@@ -1082,13 +1105,18 @@ static bool KeyPressed(int vk, bool& down) {
 }
 static void DrawOverlay(void* dev) {
     static bool d9 = false, d10 = false, d11 = false;
-    if (KeyPressed(VK_F11, d11)) g_showFps = !g_showFps;
+    if (KeyPressed(VK_F11, d11)) {   // hidden -> frame / performance info -> + toggles -> hidden (kept in the ini)
+        g_showFps = g_showFps >= 2 ? 0 : g_showFps + 1;
+        WritePrivateProfileStringA("Perf", "ShowFps", g_showFps == 2 ? "2  ; on-screen overlay: 0 = off, 1 = FPS / frame times, 2 = + Ctrl+digit toggles (F11 cycles)" :
+                                   g_showFps == 1 ? "1  ; on-screen overlay: 0 = off, 1 = FPS / frame times, 2 = + Ctrl+digit toggles (F11 cycles)" :
+                                                    "0  ; on-screen overlay: 0 = off, 1 = FPS / frame times, 2 = + Ctrl+digit toggles (F11 cycles)", g_iniPath);
+    }
     if (KeyPressed(VK_F9, d9)) { g_animBlend = !g_animBlend; Toast(g_animBlend ? "F9  animation blending: ON" : "F9  animation blending: OFF (original 30 fps)"); }
     static bool d8 = false;
-    if (KeyPressed(VK_F8, d8)) { if (g_atr) { fclose(g_atr); g_atr = nullptr; } g_atrArmed = true; g_atrLeft = 1200; Toast("F8  animation trace: recording 1200 hero draws"); }
-    // Ctrl+1..8, Ctrl+0 while the overlay is shown (F10 / F9 / F7 still work as before)
+    if (KeyPressed(VK_F8, d8)) { if (g_atr) { fclose(g_atr); g_atr = nullptr; } g_atrOn = true; g_atrUntil = g_frameMs + 4000.0; Toast("F8  animation trace: recording all animated models for 4 s"); }
+    // Ctrl+1..9, Ctrl+0 while the full overlay is shown (F10 / F9 / F7 still work as before)
     static bool d7 = false, c1 = false, c2 = false, c3 = false, c4 = false, c5 = false, c6 = false, c7 = false, c8 = false, c9 = false, c0 = false;
-    bool ctrl = g_showFps && (GetAsyncKeyState(VK_CONTROL) & 0x8000);
+    bool ctrl = g_showFps >= 2 && (GetAsyncKeyState(VK_CONTROL) & 0x8000);
     bool k1 = KeyPressed('1', c1) && ctrl, k2 = KeyPressed('2', c2) && ctrl, k3 = KeyPressed('3', c3) && ctrl, k4 = KeyPressed('4', c4) && ctrl, k5 = KeyPressed('5', c5) && ctrl, k6 = KeyPressed('6', c6) && ctrl, k7 = KeyPressed('7', c7) && ctrl, k8 = KeyPressed('8', c8) && ctrl, k9 = KeyPressed('9', c9) && ctrl, k0 = KeyPressed('0', c0) && ctrl;
     if (KeyPressed(VK_F10, d10) || k1) { g_interp = !g_interp; Toast(g_interp ? "movement/camera smoothing: ON" : "movement/camera smoothing: OFF (original)"); }
     if (k2) { g_animBlend = !g_animBlend; Toast(g_animBlend ? "character animation blending: ON" : "character animation blending: OFF (original 30 fps)"); }
@@ -1116,13 +1144,22 @@ static void DrawOverlay(void* dev) {
         int h = *g_scrH / 60; if (h < 14) h = 14;
         if (!cf || cf(dev, h, 0, 700, 1, FALSE, DEFAULT_CHARSET, 0, ANTIALIASED_QUALITY, 0, "Consolas", &g_font) < 0) { failed = true; LOG("overlay: font creation failed"); return; }
     }
-    char line[400]; int n = 0; line[0] = 0;
-    if (g_showFps)
-        n += snprintf(line + n, sizeof line - n, "%.0f FPS  %.2f ms (max %.1f)  %s%s\nupdate %.2f  render %.2f  present %.2f  |  trees %.0f %.2f ms  sun %.2f ms\n"
-                      "Ctrl+1 movement: %s   Ctrl+2 characters: %s   Ctrl+3 objects: %s   Ctrl+4 optimizations: %s   Ctrl+5 particles: %s   Ctrl+6 aniso: %s   Ctrl+7 MSAA: %s\nCtrl+8 tree fade: %s   Ctrl+9 view distance: %s   F11 hide\n",
-                      g_ovFps, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9",
-                      g_windowed && g_vsync && g_fpsLimit <= 0 ? (!g_dwmOk ? "  sync: timer" : g_dwmSync == 2 ? "  sync: flush" : g_gridOk == 1 ? "  sync: vblank" : "  sync: timer") : "",
-                      g_ovUpd, g_ovRen, g_ovPres, g_ovTreeN, g_ovTrees, g_ovSun,
+    char line[700]; int n = 0; line[0] = 0;
+    if (g_showFps) {
+        char cap[48] = "";
+        int lim = g_fpsLimit;
+        if (g_bgInactive && g_bgFps > 0 && (lim <= 0 || lim > g_bgFps)) snprintf(cap, sizeof cap, "  cap %d (background)", g_bgFps);
+        else if (lim > 0) snprintf(cap, sizeof cap, "  cap %d", lim);
+        else if (g_vsync) snprintf(cap, sizeof cap, "  vsync %d Hz%s", g_windowed ? WindowMonitorHz() : g_refreshHz,
+                                   !g_windowed || !g_dwmOk ? "" : g_dwmSync == 2 ? " (flush)" : g_gridOk == 1 ? " (vblank)" : " (timer)");
+        else snprintf(cap, sizeof cap, "  no cap");
+        n += snprintf(line + n, sizeof line - n, "%.0f FPS  %.2f ms (max %.1f)  %s%s\nupdate %.2f  render %.2f  present %.2f  |  trees %.0f %.2f ms  sun %.2f ms\n",
+                      g_ovFps, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9", cap,
+                      g_ovUpd, g_ovRen, g_ovPres, g_ovTreeN, g_ovTrees, g_ovSun);
+    }
+    if (g_showFps >= 2)
+        n += snprintf(line + n, sizeof line - n,
+                      "Ctrl+1 movement: %s   Ctrl+2 characters: %s   Ctrl+3 objects: %s   Ctrl+4 optimizations: %s   Ctrl+5 particles: %s   Ctrl+6 aniso: %s   Ctrl+7 MSAA: %s\nCtrl+8 tree fade: %s   Ctrl+9 view distance: %s   F11 next mode\n",
                       g_interp ? "on" : "off", g_animBlend ? "on" : "off", g_meshSmooth ? "on" : "off", (g_optSun || g_optTrees || g_optPoly || g_optFx || g_optSort || g_asyncSnd || g_optSkin) ? "on" : "off", g_partSmooth ? "on" : "off", AnisoLevel() ? (AnisoLevel() >= 16 ? "16x" : AnisoLevel() >= 8 ? "8x" : AnisoLevel() >= 4 ? "4x" : "2x") : "off",
                       g_msaaActive == 8 ? "8x" : g_msaaActive == 4 ? "4x" : g_msaaActive == 2 ? "2x" : g_msaaActive ? "on" : "off",
                       g_dissolve == 1 ? "dissolve" : g_dissolve == 2 ? "dissolve short" : "original", g_objDistOn ? "extended" : "original");
@@ -1177,12 +1214,13 @@ static void UpdateOverlayStats() {   // every 0.5 s from the per-frame sections
 static void __fastcall h_Render(BYTE* e, void* /*edx*/) {
     void* dev = *pDevice; void** vt = *(void***)dev;
     LONGLONG a = Now(), b;
-    if (g_msaaResetPending) {                                // Ctrl+7: re-create the back buffer through the engine's restore path
-        g_msaaResetPending = false;
+    if (g_msaaResetPending || g_vsyncResetPending) {         // Ctrl+7 / VSync option: re-create the back buffer through the engine's restore path
+        if (g_msaaResetPending) LOG("msaa: switching %s via engine device restore", g_msaaOn ? "on" : "off");
+        if (g_vsyncResetPending) LOG("vsync: switching %s via engine device restore", g_vsync ? "on" : "off");
+        g_msaaResetPending = false; g_vsyncResetPending = false;
         FontRelease();
-        LOG("msaa: switching %s via engine device restore", g_msaaOn ? "on" : "off");
         ((VM0_t)0x0044DD20)(e, nullptr);
-        FrameEvent("msaa switched");
+        FrameEvent("device re-created (msaa / vsync)");
     }
     *(DWORD*)(e + 0xAC) = 1;
     *(DWORD*)(*(BYTE**)(e + 0x8C) + 0x208) = 0;
@@ -1241,7 +1279,7 @@ static void InstallRenderRewrite() {
     if (g_dwmOk && g_DwmTiming) { DWM_TIMING_INFO ti; memset(&ti, 0, sizeof ti); ti.cbSize = sizeof ti;
         if (g_DwmTiming(nullptr, &ti) >= 0) LOG("DWM timing: refresh %u/%u Hz, period %.3f ms", ti.rateRefresh.uiNumerator, ti.rateRefresh.uiDenominator,
                                                 ti.qpcRefreshPeriod * 1000.0 / (double)g_qpf.QuadPart); }
-    LOG("render function replaced (desktop refresh %d Hz, overlay %s, F11 toggles)", g_refreshHz, g_showFps ? "on" : "off");
+    LOG("render function replaced (desktop refresh %d Hz, overlay %s, F11 cycles off / FPS / full)", g_refreshHz, g_showFps >= 2 ? "full" : g_showFps ? "FPS" : "off");
 }
 
 
@@ -1421,7 +1459,7 @@ static float g_animMaxRad = 1.2f;
 
 struct AEnt { BYTE* obj; void* anim; int cur, prev; double tChange, period; DWORD lastSeen; };
 static const int AMASK = 4095; static AEnt g_aent[AMASK + 1];
-static DWORD g_aBlends = 0, g_aSkips = 0, g_aCalls = 0, g_aShared = 0, g_aWraps = 0;
+static DWORD g_aBlends = 0, g_aSkips = 0, g_aCalls = 0, g_aShared = 0, g_aWraps = 0, g_aRestarts = 0, g_aSkipFwd = 0;
 static AEnt* AGet(BYTE* obj) {
     DWORD h = ((DWORD)obj >> 3) * 2654435761u; AEnt* reuse = nullptr;
     for (int i = 0; i < 32; ++i) {
@@ -1439,9 +1477,11 @@ static AEnt* SkinEnter(BYTE* m) {
     AEnt* e = AGet(m); if (!e) return nullptr;
     void* anim = *(void**)(m + 0x1EC); int f = *(int*)(m + 0x1D8);
     if (e->anim != anim || e->lastSeen + 3 < g_curFrame) {
+        if (e->anim && e->anim != anim && e->lastSeen + 3 >= g_curFrame) ++g_aRestarts;   // animation switched while drawn
         e->anim = anim; e->cur = f; e->prev = -1; e->tChange = g_frameMs; e->period = 33.333;
     } else if (f != e->cur) {
         double iv = g_frameMs - e->tChange;
+        if (f > e->cur + 1) ++g_aSkipFwd;
         if (iv >= 12.0 && iv <= 80.0) e->period = e->period * 0.75 + iv * 0.25;
         e->prev = e->cur; e->cur = f; e->tChange = g_frameMs;
     }
@@ -1471,26 +1511,39 @@ static bool Writable(void* p) {   // cached per 64 KB region
     if (!ok) LOG("animation blending: key data at %p not writable, skipped", p);
     return ok;
 }
-// ---- hero animation trace (AttTFix_anim.csv): first 1200 draws of the hero's mesh once it animates, F8 = again
-static BYTE* HeroMesh() {
-    BYTE* h = g_hero; if (!h || *(void**)h != (void*)0x0060C1AC) return nullptr;
-    BYTE* c = *(BYTE**)(h + 0x1DC); if (!c || IsBadReadPtr(c, 0x1C8)) return nullptr;
-    return *(BYTE**)(c + 0x1C4);
-}
-static void AnimTrace(BYTE* m, AEnt* e, const char* what, double a, int ntr, float before, float after, float prevv) {
-    static BYTE* hm = nullptr; static DWORD hmFrame = 0;
-    if (hmFrame != g_curFrame) { hm = HeroMesh(); hmFrame = g_curFrame; }
-    if (!hm || m != hm || !g_atrArmed || g_atrLeft <= 0) return;
-    if (!g_atr) {
-        if (!e || e->prev < 0) return;                       // start once the hero animates
-        char p[MAX_PATH]; snprintf(p, sizeof p, "%sAttTFix_anim.csv", g_dir); g_atr = fopen(p, "w");
-        if (!g_atr) { g_atrArmed = false; return; }
-        fprintf(g_atr, "frame;ms;depth;mesh_frame;cur;prev;period;alpha;result;tracks;key_cur_before;key_after;key_prev;anim\n");
-        LOG("anim trace started (hero mesh %p)", m);
+// ---- animation trace (AttTFix_anim.csv): F8 = every skinned mesh draw for 4 seconds. Per draw: frames, alpha, what
+// the blending did, sums of the keys (raw current / shown / previous frame) and the largest "detour" of a blended bone:
+// angle(shown, prev) + angle(shown, cur) - angle(prev, cur), i.e. how far the shown pose leaves the shortest way
+// between the two key frames (0 for a correct blend); bone_move = the largest rotation of a bone in that tick.
+static double g_trRaw = 0, g_trPrev = 0, g_trDetour = 0, g_trMove = 0; static int g_trDetourBone = -1, g_trDetourTrack = -1;
+static double TrackSums(BYTE* anim, int frame, bool prevFrame) {
+    int** tb = *(int***)(anim + 4); int** te = *(int***)(anim + 8); double sum = 0;
+    if (!tb || te < tb || te - tb > 256) return 0;
+    for (int** t = tb; t < te; ++t) {
+        int* tr = *t; if (!tr) continue;
+        const float* base = (const float*)tr[0]; unsigned frames = (unsigned)tr[2], bones = (unsigned)tr[3];
+        if (!base || !frames || !bones || bones > 1024) continue;
+        if (prevFrame && (unsigned)frame >= frames) continue;
+        unsigned fc = (unsigned)frame < frames ? (unsigned)frame : 0;
+        const float* k = base + (size_t)fc * bones * 6;
+        for (unsigned i = 0; i < bones * 6; ++i) sum += k[i];
     }
-    fprintf(g_atr, "%lu;%.2f;%d;%d;%d;%d;%.2f;%.3f;%s;%d;%.5f;%.5f;%.5f;%p\n", g_curFrame, g_frameMs, g_kDepth, *(int*)(m + 0x1D8),
-            e ? e->cur : -9, e ? e->prev : -9, e ? e->period : 0.0, a, what, ntr, before, after, prevv, e ? e->anim : nullptr);
-    if (--g_atrLeft == 0) { fclose(g_atr); g_atr = nullptr; g_atrArmed = false; LOG("anim trace finished"); }
+    return sum;
+}
+static void AnimTrace(BYTE* m, AEnt* e, const char* what, double a, int ntr, float, float, float) {
+    if (!g_atrOn) return;
+    if (g_frameMs > g_atrUntil) { if (g_atr) { fclose(g_atr); g_atr = nullptr; } g_atrOn = false; LOG("anim trace finished"); return; }
+    if (!g_atr) {
+        char p[MAX_PATH]; snprintf(p, sizeof p, "%sAttTFix_anim.csv", g_dir); g_atr = fopen(p, "w");
+        if (!g_atr) { g_atrOn = false; return; }
+        fprintf(g_atr, "frame;ms;mesh;class;anim;mesh_frame;frames;cur;prev;period;alpha;result;tracks;sum_raw;sum_shown;sum_prev;detour;detour_track;detour_bone;bone_move\n");
+        LOG("anim trace started (all skinned meshes, 4 s)");
+    }
+    BYTE* anim = *(BYTE**)(m + 0x1EC);
+    double shown = anim ? TrackSums(anim, *(int*)(m + 0x1D8), false) : 0;
+    fprintf(g_atr, "%lu;%.2f;%p;%s;%p;%d;%u;%d;%d;%.2f;%.3f;%s;%d;%.4f;%.4f;%.4f;%.4f;%d;%d;%.4f\n", g_curFrame, g_frameMs, m, RttiName(m), anim,
+            *(int*)(m + 0x1D8), *(unsigned*)(m + 0x1C8), e ? e->cur : -9, e ? e->prev : -9, e ? e->period : 0.0, a, what, ntr,
+            g_trRaw, shown, g_trPrev, g_trDetour, g_trDetourTrack, g_trDetourBone, g_trMove);
 }
 // Euler keys (pitch, yaw, roll as used by D3DXMatrixRotationYawPitchRoll = Rz*Rx*Ry for row vectors).
 // Small changes: linear per component. Larger ones (Euler flips near +-90 deg pitch etc.): quaternion slerp.
@@ -1502,10 +1555,24 @@ static void EulerToQuat(const float* e, float* q) {
     // qy*(qx*qz)
     q[0] = cy * ax + sy * az; q[1] = cy * ay + sy * aw; q[2] = cy * az - sy * ax; q[3] = cy * aw - sy * ay;
 }
-static void QuatToEuler(const float* q, float* e) {
+// At pitch = +-90 deg (gimbal lock) yaw and roll turn about the same axis and only their difference / sum is defined:
+// the plain formulas took atan2(~0, ~0) for yaw and returned a rotation flipped by up to 180 deg. A spinning disc
+// standing upright (portal swirl, pitch exactly 90 deg) hit this whenever its keys were blended through quaternions,
+// i.e. at the loop wrap where the Euler triple jumps: one tick per loop with the disc turned around. There the roll
+// is taken from the caller (the linear blend of the two keys) and yaw from the combined angle.
+static DWORD g_aGimbal = 0;
+static void QuatToEuler(const float* q, float* e, float rollHint) {
     float x = q[0], y = q[1], z = q[2], w = q[3];
     float r12 = 2 * (y * z - x * w), r02 = 2 * (x * z + y * w), r22 = 1 - 2 * (x * x + y * y), r10 = 2 * (x * y + z * w), r11 = 1 - 2 * (x * x + z * z);
-    e[0] = atan2f(-r12, sqrtf(r02 * r02 + r22 * r22)); e[1] = atan2f(r02, r22); e[2] = atan2f(r10, r11);
+    float cp = sqrtf(r02 * r02 + r22 * r22);
+    e[0] = atan2f(-r12, cp);
+    if (cp < 1e-3f) {                                   // M = Rz(roll) Rx(+-pi/2) Ry(yaw): M00 = cos(roll -+ yaw), M02 = +-sin(roll -+ yaw)
+        float m00 = 1 - 2 * (y * y + z * z), m02 = 2 * (x * z - y * w);
+        float yw = -r12 > 0 ? rollHint - atan2f(m02, m00) : atan2f(-m02, m00) - rollHint;
+        e[1] = atan2f(sinf(yw), cosf(yw)); e[2] = rollHint; ++g_aGimbal;
+        return;
+    }
+    e[1] = atan2f(r02, r22); e[2] = atan2f(r10, r11);
 }
 static DWORD g_aQuat = 0;
 static inline void BlendBone(float* o, const float* p, const float* c, float a) {
@@ -1520,16 +1587,48 @@ static inline void BlendBone(float* o, const float* p, const float* c, float a) 
     else { float th = acosf(dot), st = sinf(th); k0 = sinf((1 - a) * th) / st; k1 = sinf(a * th) / st; }
     float q[4], l = 0; for (int i = 0; i < 4; ++i) { q[i] = q0[i] * k0 + q1[i] * k1; l += q[i] * q[i]; }
     l = 1.0f / sqrtf(l); for (int i = 0; i < 4; ++i) q[i] *= l;
-    QuatToEuler(q, o); ++g_aQuat;
+    QuatToEuler(q, o, p[2] + d2 * a); ++g_aQuat;
+}
+static inline float QAngle(const float* p, const float* c) {
+    float q0[4], q1[4]; EulerToQuat(p, q0); EulerToQuat(c, q1);
+    float d = fabsf(q0[0] * q1[0] + q0[1] * q1[1] + q0[2] * q1[2] + q0[3] * q1[3]); if (d > 1) d = 1;
+    return 2.0f * acosf(d);
+}
+static int g_wrapBlend = 1;                         // [Smooth] AnimationWrap: 1 = per-bone decision at loop wraps, 0 = snap
+static DWORD g_aWrapBlend = 0, g_aWrapSnap = 0;
+static inline void KeyStep(const float* a, const float* b, float& rot, float& pos) {
+    rot = fmaxf(fabsf(WrapPi(b[0] - a[0])), fmaxf(fabsf(WrapPi(b[1] - a[1])), fabsf(WrapPi(b[2] - a[2]))));
+    pos = fmaxf(fabsf(b[3] - a[3]), fmaxf(fabsf(b[4] - a[4]), fabsf(b[5] - a[5])));
+}
+// does the step prev -> cur across a loop wrap look like an ordinary step of this bone (compared with the steps
+// right before the end (pp -> p) and right after the start (c -> cn))?
+// Rotation steps are compared as real rotation angles (quaternions): the first and the last key of a loop are often
+// written with a different Euler triple for nearly the same orientation (yaw+pi / pitch mirrored / roll+pi), which as
+// per-component differences looked like a jump and snapped bones that actually turn on smoothly.
+static bool WrapContinuous(const float* pp, const float* p, const float* c, const float* cn) {
+    float r, t, r1, t1, r2, t2;
+    KeyStep(p, c, r, t); KeyStep(pp, p, r1, t1); KeyStep(c, cn, r2, t2);
+    r = QAngle(p, c); r1 = QAngle(pp, p); r2 = QAngle(c, cn);
+    float rr = fmaxf(r1, r2), tr = fmaxf(t1, t2);
+    float scale = fmaxf(fmaxf(fabsf(c[3]), fabsf(c[4])), fabsf(c[5]));
+    return r <= rr * 2.5f + 0.02f && t <= tr * 2.5f + 0.002f * (scale > 1.0f ? scale : 1.0f);
 }
 static void KeysPatch(AEnt* e, BYTE* m) {
+    if (g_atrOn) {
+        g_trDetour = 0; g_trMove = 0; g_trDetourBone = g_trDetourTrack = -1; BYTE* an = *(BYTE**)(m + 0x1EC);
+        g_trRaw = an ? TrackSums(an, *(int*)(m + 0x1D8), false) : 0;
+        g_trPrev = an && e && e->prev >= 0 ? TrackSums(an, e->prev, true) : 0;
+    }
     if (g_kDepth) { AnimTrace(m, e, "nested", -1, 0, 0, 0, 0); return; }
     g_nKSave = 0; g_kPoolUsed = 0;
     if (!g_animBlend) { AnimTrace(m, e, "off", -1, 0, 0, 0, 0); return; }
     if (!e || e->prev < 0 || e->prev == e->cur || !e->anim) { AnimTrace(m, e, "noprev", -1, 0, 0, 0, 0); return; }
-    // loop wrap / restart (frame went backwards): the last and the first key frame of a looped animation are often
-    // not neighbours (root offset, portal swirl) - blending across them showed a short slide, so the wrap snaps
-    if (e->cur < e->prev) { ++g_aWraps; AnimTrace(m, e, "wrap", -1, 0, 0, 0, 0); return; }
+    // Loop wrap / restart (frame went backwards): the last and the first key frame of a loop are neighbours for some
+    // bones (a swirl that keeps turning) and not for others (an element that jumps back to its start, a root offset).
+    // Snapping the whole pose made the turning parts stop for a tick and jump (a visible hitch once per loop on
+    // portals); blending everything made the jumping parts slide back. So at a wrap it is decided per bone (below).
+    bool wrapAll = e->cur < e->prev;
+    if (wrapAll) ++g_aWraps;
     double a = (g_frameMs - e->tChange) / (e->period > 1.0 ? e->period : 33.333);
     if (a >= 0.999) AnimTrace(m, e, "alpha>=1", a, 0, 0, 0, 0);
     if (a >= 0.999) return;
@@ -1547,7 +1646,9 @@ static void KeysPatch(AEnt* e, BYTE* m) {
         if (!Writable(base) || !Writable(base + (size_t)frames * bones * 6 - 1)) continue;
         unsigned fc = (unsigned)f < frames ? (unsigned)f : 0, fp = (unsigned)e->prev;
         if (fp >= frames || fp == fc) continue;
-        if (fc < fp) { ++g_aWraps; continue; }                         // this track wrapped (shorter loop than the main one)
+        bool wrap = fc < fp;                                           // this track wrapped (main loop or a shorter one)
+        if (wrap && !wrapAll) ++g_aWraps;
+        if (wrap && (frames < 3 || !g_wrapBlend)) continue;            // no neighbours to judge by: snap the track
         int n = (int)bones * 6;
         if (g_nKSave >= 256 || g_kPoolUsed + n > (int)(sizeof g_kPool / sizeof(float))) { ++g_aSkips; break; }
         float* c = base + (size_t)fc * n; const float* pv = base + (size_t)fp * n;
@@ -1558,10 +1659,20 @@ static void KeysPatch(AEnt* e, BYTE* m) {
         if (shared) { ++g_aShared; continue; }
         float* sv = g_kPool + g_kPoolUsed;
         memcpy(sv, c, n * sizeof(float));
+        // at a wrap: the key steps next to it (prev-1 -> prev before the end, cur -> cur+1 after the start)
+        const float* pp = wrap ? base + (size_t)(fp > 0 ? fp - 1 : fp) * n : nullptr;
+        const float* cn = wrap ? base + (size_t)(fc + 1 < frames ? fc + 1 : fc) * n : nullptr;
         for (unsigned b = 0; b < bones; ++b) {
             float* o = c + b * 6; const float* p = pv + b * 6; const float* cc = sv + b * 6;
+            if (wrap && !WrapContinuous(pp + b * 6, p, cc, cn + b * 6)) { ++g_aWrapSnap; continue; }   // keeps the current key
+            if (wrap) ++g_aWrapBlend;
             BlendBone(o, p, cc, fa);
             for (int k = 3; k < 6; ++k) o[k] = p[k] + (cc[k] - p[k]) * fa;
+            if (g_atrOn) {
+                float pc = QAngle(p, cc), det = QAngle(o, p) + QAngle(o, cc) - pc;
+                if (det > g_trDetour) { g_trDetour = det; g_trDetourBone = (int)b; g_trDetourTrack = (int)(t - tb); }
+                if (pc > g_trMove) g_trMove = pc;
+            }
         }
         g_kSave[g_nKSave].dst = c; g_kSave[g_nKSave].n = n; g_kSave[g_nKSave].off = g_kPoolUsed; ++g_nKSave; g_kPoolUsed += n; any = true;
     }
@@ -1570,7 +1681,7 @@ static void KeysPatch(AEnt* e, BYTE* m) {
         if (g_nKSave > 0 && g_kSave[0].n > 7) { b = g_kPool[7]; af = g_kSave[0].dst[7]; }
         if (tb < te && *tb) { int* tr = *tb; unsigned bones = (unsigned)tr[3], fr = (unsigned)tr[2];
             if ((unsigned)e->prev < fr && bones > 1) pv = ((float*)tr[0])[(size_t)e->prev * bones * 6 + 7]; }
-        AnimTrace(m, e, any ? "blend" : "skip", a, g_nKSave, b, af, pv); }
+        AnimTrace(m, e, any ? (wrapAll ? "wrap-blend" : "blend") : (wrapAll ? "wrap" : "skip"), a, g_nKSave, b, af, pv); }
 }
 static void KeysRestore() {   // newest first, so the oldest (true original) copy is written last
     for (int i = g_nKSave - 1; i >= 0; --i) memcpy(g_kSave[i].dst, g_kPool + g_kSave[i].off, g_kSave[i].n * sizeof(float));
@@ -1634,8 +1745,8 @@ static void InterpStats() {
     { char b[400]; int n = 0; b[0] = 0;
       for (int i = 0; i < g_nupd && n < 380; ++i) if (g_upd[i].iCount) { n += snprintf(b + n, sizeof b - n, " %s=%lu", g_upd[i].name, g_upd[i].iCount); g_upd[i].iCount = 0; }
       if (n) PLOG("SMOOTH by class (object-frames):%s", b); }
-    if (g_aCalls) PLOG("ANIM mesh draws=%lu blended=%lu bones via quaternion=%lu snapped=%lu shared tracks skipped=%lu loop wraps=%lu", g_aCalls, g_aBlends, g_aQuat, g_aSkips, g_aShared, g_aWraps);
-    g_aQuat = 0; g_aShared = 0; g_aWraps = 0;
+    if (g_aCalls) PLOG("ANIM mesh draws=%lu blended=%lu bones via quaternion=%lu snapped=%lu shared tracks skipped=%lu loop wraps=%lu (bone draws blended across=%lu snapped=%lu) animation switches=%lu frame skips=%lu gimbal=%lu", g_aCalls, g_aBlends, g_aQuat, g_aSkips, g_aShared, g_aWraps, g_aWrapBlend, g_aWrapSnap, g_aRestarts, g_aSkipFwd, g_aGimbal);
+    g_aQuat = 0; g_aShared = 0; g_aWraps = 0; g_aWrapBlend = g_aWrapSnap = 0; g_aRestarts = g_aSkipFwd = 0; g_aGimbal = 0;
     g_aCalls = g_aBlends = g_aSkips = 0;
 }
 static UpdInfo* UpdFor(BYTE* self) {
@@ -1959,7 +2070,7 @@ typedef HRESULT (__stdcall *DIGetState_t)(void*, DWORD, void*);
 typedef HRESULT (__stdcall *DIGetData_t)(void*, DWORD, void*, DWORD*, DWORD);
 static DICreateDev_t o_DICreateDev = nullptr; static DIGetState_t o_DIGetState = nullptr; static DIGetData_t o_DIGetData = nullptr;
 static void* g_kbdDev = nullptr;
-static bool DigitsBlocked() { return g_showFps && (GetAsyncKeyState(VK_CONTROL) & 0x8000); }
+static bool DigitsBlocked() { return g_showFps >= 2 && (GetAsyncKeyState(VK_CONTROL) & 0x8000); }
 static HRESULT __stdcall h_DIGetState(void* dev, DWORD cb, void* buf) {
     if (g_bgInactive) { if (buf) memset(buf, 0, cb); return 0; }       // running in the background: no input
     HRESULT hr = o_DIGetState(dev, cb, buf);
@@ -1989,7 +2100,7 @@ static HRESULT __stdcall h_DICreateDev(void* di, const GUID* g, void** out, void
         g_kbdDev = *out;
         void** vt = *(void***)*out;
         if (!o_DIGetState) { o_DIGetState = (DIGetState_t)PatchVtbl(vt, 9, (void*)h_DIGetState); o_DIGetData = (DIGetData_t)PatchVtbl(vt, 10, (void*)h_DIGetData); }
-        LOG("DirectInput keyboard %p: Ctrl+digits reserved for AttTFix while the overlay is shown", *out);
+        LOG("DirectInput keyboard %p: Ctrl+digits reserved for AttTFix while the full overlay (F11) is shown", *out);
     }
     return hr;
 }
@@ -2065,8 +2176,9 @@ static void Init() {
     g_hitchMs = (float)GetPrivateProfileIntA("Perf", "HitchMs", 0, path);
     g_fpsTitle = GetPrivateProfileIntA("Perf", "FpsInTitle", 0, path);
     if (!GetPrivateProfileStringA("Perf", "ShowFps", "", tmp, sizeof tmp, path))
-        WritePrivateProfileStringA("Perf", "ShowFps", "0  ; on-screen FPS / frame time overlay (F11 toggles in game)", path);
+        WritePrivateProfileStringA("Perf", "ShowFps", "0  ; on-screen overlay: 0 = off, 1 = FPS / frame times, 2 = + Ctrl+digit toggles (F11 cycles)", path);
     g_showFps = GetPrivateProfileIntA("Perf", "ShowFps", 0, path);
+    if (g_showFps < 0) g_showFps = 0; if (g_showFps > 2) g_showFps = 2;
     if (!GetPrivateProfileStringA("Perf", "Sampler", "", tmp, sizeof tmp, path)) {
         WritePrivateProfileStringA("Perf", "Sampler", "0  ; sampling profiler (top functions in AttTFix_perf.log)", path);
         WritePrivateProfileStringA("Perf", "ProfileEvery", "20  ; seconds between PROFILE dumps", path);
@@ -2123,6 +2235,9 @@ static void Init() {
     if (!GetPrivateProfileStringA("Smooth", "Animation", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Smooth", "Animation", "1  ; 1 = blend skeletal animation between 30 fps key frames, 0 = original", path);
     g_animBlend = GetPrivateProfileIntA("Smooth", "Animation", 1, path);
+    if (!GetPrivateProfileStringA("Smooth", "AnimationWrap", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Smooth", "AnimationWrap", "1  ; at a loop restart: 1 = bones that keep moving are blended, bones that jump back snap, 0 = whole pose snaps", path);
+    g_wrapBlend = GetPrivateProfileIntA("Smooth", "AnimationWrap", 1, path);
     LOG("ini: Smooth Interpolate=%d Animation=%d MaxJump=%.1f Classes=%s", g_interp, g_animBlend, g_maxJump, g_interpClasses);
     g_cursorSpeed = ReadIniFloat("Mouse", "CursorSpeed", 1.0f);
     g_cameraSpeed = ReadIniFloat("Mouse", "CameraSpeed", 1.0f);
@@ -2193,8 +2308,8 @@ static void Init() {
     g_tree3D = ReadIniFloat("Video", "Tree3DDistance", 1500.0f);
     if (!(g_tree3D >= 0 && g_tree3D <= 20000)) g_tree3D = 0;
     if (!GetPrivateProfileStringA("Video", "TreeDissolve", "", tmp, sizeof tmp, path))
-        WritePrivateProfileStringA("Video", "TreeDissolve", "1  ; 3D -> flat trees: 0 = original see-through fade, 1 = dissolve, 2 = dissolve in a 4x shorter band (Ctrl+8 cycles)", path);
-    g_dissolve = GetPrivateProfileIntA("Video", "TreeDissolve", 1, path);
+        WritePrivateProfileStringA("Video", "TreeDissolve", "0  ; 3D -> flat trees: 0 = original see-through fade, 1 = dissolve, 2 = dissolve in a 4x shorter band (Ctrl+8 cycles)", path);
+    g_dissolve = GetPrivateProfileIntA("Video", "TreeDissolve", 0, path);
     if (g_dissolve < 0 || g_dissolve > 2) g_dissolve = 1;
     if (!(g_treeDist >= 0.5f && g_treeDist <= 10.0f)) g_treeDist = 2.0f;
     if (!GetPrivateProfileStringA("Smooth", "Objects", "", tmp, sizeof tmp, path))

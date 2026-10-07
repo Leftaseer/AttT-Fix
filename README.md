@@ -20,7 +20,7 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - 16x anisotropic filtering (every bilinear/trilinear minification becomes anisotropic).
 - Optional MSAA 2x/4x/8x (`[Video] MSAA`, Ctrl+7 at runtime) with alpha-to-coverage for foliage. Render-to-texture passes get a matching non-multisampled depth buffer; back buffer reads are resolved.
 - Adjustable draw distance of small props (boxes, wheels, rocks), NPCs and their shadows (`[Video] ObjectDistance`, default 1.0 = original). The original size-based culling was tuned for 800x600..1280x1024.
-- Adjustable distance of 3D forest trees (`[Video] Tree3DDistance`, default 1500; flat trees beyond) and a dissolve instead of the see-through 3D → flat fade (`TreeDissolve`, Ctrl+8).
+- Adjustable distance of 3D forest trees (`[Video] Tree3DDistance`, default 1500; flat trees beyond) and an optional dissolve instead of the see-through 3D → flat fade (`TreeDissolve`, default 0 = original, Ctrl+8).
 - **Graphics settings page** in Options → video (the "ATTTFIX" button): presets Original / Recommended / Medium / High / Ultra and the individual settings (object distance, forest distance, 3D tree distance, transition, anisotropy, MSAA, renderer Direct3D 9 / DXVK).
 
 **Smoothness**
@@ -28,7 +28,7 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - Character animations are blended between their 30 fps key frames (per bone, quaternion slerp for large changes).
 - Particles (smoke, fire, magic) are evaluated at the exact rendered moment instead of the 30 Hz tick (the game's own analytic particle formulas).
 - Vertex-tweened objects (foliage, water, flags) are drawn at the fractional frame when such animations are present.
-- VSync in windowed mode, locked to the refresh rate of the monitor the window is on; FPS limit in Options.
+- VSync in windowed mode, locked to the refresh rate of the monitor the window is on; FPS limit in Options, switched at once (with DXVK VSync off is `PresentEx(D3DPRESENT_FORCEIMMEDIATE)`, no device reset).
 
 **Stability and convenience**
 - Uses all CPU cores (the original pins itself to core 0).
@@ -54,11 +54,11 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - Optional Large Address Aware tool (`AttTFix_LAA.exe`, from `tools/laa.cpp`): 4 GB of address space instead of 2 GB.
   Required for the optional DXVK renderer (`[Video] Renderer=dxvk` loads `dxvk\d3d9.dll` from the game folder).
 
-**Hotkeys:** F11 — overlay. While it is shown: Ctrl+1 movement/camera smoothing, Ctrl+2 character animation, Ctrl+3 object animation, Ctrl+4 optimizations, Ctrl+5 particles, Ctrl+6 anisotropic filtering, Ctrl+7 MSAA, Ctrl+8 tree transition, Ctrl+9 view distance, Ctrl+0 one-frame render target trace to the log (the digits are hidden from the game while Ctrl is held). F10 / F9 / F7 still work.
+**Hotkeys:** F11 — overlay (hidden → FPS / frame times → + toggle panel). While the toggle panel is shown: Ctrl+1 movement/camera smoothing, Ctrl+2 character animation, Ctrl+3 object animation, Ctrl+4 optimizations, Ctrl+5 particles, Ctrl+6 anisotropic filtering, Ctrl+7 MSAA, Ctrl+8 tree transition, Ctrl+9 view distance, Ctrl+0 one-frame render target trace to the log (the digits are hidden from the game while Ctrl is held). F10 / F9 / F7 still work.
 
 ## Installing a release
 
-1. Download `AttTFix-1.2.zip` from [Releases](../../releases).
+1. Download `AttTFix-1.2.1.zip` from [Releases](../../releases).
 2. Copy `dinput8.dll` into the game folder (Steam → right click the game → Manage → Browse local files).
 3. Optional: back up your `launcher.ini` and replace it with the one from the archive to skip the launcher.
 4. Start the game. Settings are created in `AttTFix.ini`; details are in `dist/README_EN.txt`.
@@ -122,7 +122,7 @@ No game code or assets are included in this repository.
 - Игра считает мир 30 раз в секунду и не сглаживала картинку. Мод плавно ведёт героя, армии, юнитов в бою и камеру между шагами логики (заодно убрано дрожание героя при повороте камеры).
 - Анимации персонажей сглаживаются между ключевыми кадрами (30 к/с в оригинале).
 - Частицы (дым, огонь, магия) считаются на момент отрисовки, а не 30 раз в секунду (по собственным формулам игры).
-- VSync в оконном режиме по частоте монитора, на котором окно; ограничение FPS в «Опциях».
+- VSync в оконном режиме по частоте монитора, на котором окно; ограничение FPS в «Опциях», переключается сразу (с DXVK — без пересоздания устройства).
 
 **Стабильность и удобство**
 - Используются все ядра процессора (оригинал привязывал себя к одному).
@@ -140,7 +140,7 @@ No game code or assets are included in this repository.
 - Анизотропная фильтрация 16x.
 - MSAA 2x/4x/8x по желанию (`[Video] MSAA`, Ctrl+7 в игре) вместе со сглаживанием краёв листвы.
 - Настраиваемая дальность прорисовки мелких предметов, NPC и их теней (`[Video] ObjectDistance`, по умолчанию 1.0 = оригинал).
-- Настраиваемое расстояние объёмных (3D) деревьев (`[Video] Tree3DDistance`, по умолчанию 1500, дальше — плоские) и растворение вместо просвечивания при переходе (Ctrl+8).
+- Настраиваемое расстояние объёмных (3D) деревьев (`[Video] Tree3DDistance`, по умолчанию 1500, дальше — плоские) и растворение вместо просвечивания при переходе по желанию (Ctrl+8).
 - **Страница настроек графики** в «Опциях» → видео (кнопка «ATTTFIX»): пресеты Оригинальное / Рекомендуемое / Среднее / Высокое / Ультра и отдельные параметры (дальность объектов, дальность леса, расстояние 3D-деревьев, переход, анизотропия, MSAA, рендер Direct3D 9 / DXVK).
 
 **Производительность**
@@ -153,11 +153,11 @@ No game code or assets are included in this repository.
 - Проверка «точка внутри препятствия» без двух atan2 на каждое ребро (тот же результат): у большого камня FPS падал до ~45, теперь нет.
 - Утилита `AttTFix_LAA.exe` (`tools/laa.cpp`): 4 ГБ адресного пространства вместо 2 ГБ. Нужна для DXVK (`[Video] Renderer=dxvk`).
 
-**Клавиши:** F11 — оверлей. Пока он открыт: Ctrl+1 движение и камера, Ctrl+2 анимации персонажей, Ctrl+3 анимации объектов, Ctrl+4 оптимизации, Ctrl+5 частицы, Ctrl+6 анизотропная фильтрация, Ctrl+7 MSAA, Ctrl+8 переход деревьев, Ctrl+9 дальность прорисовки (цифры с Ctrl игре не передаются). F10 / F9 / F7 тоже работают.
+**Клавиши:** F11 — оверлей (скрыт → FPS и время кадра → + панель переключателей). Пока открыта панель: Ctrl+1 движение и камера, Ctrl+2 анимации персонажей, Ctrl+3 анимации объектов, Ctrl+4 оптимизации, Ctrl+5 частицы, Ctrl+6 анизотропная фильтрация, Ctrl+7 MSAA, Ctrl+8 переход деревьев, Ctrl+9 дальность прорисовки (цифры с Ctrl игре не передаются). F10 / F9 / F7 тоже работают.
 
 ### Установка
 
-1. Скачайте `AttTFix-1.2.zip` в разделе [Releases](../../releases).
+1. Скачайте `AttTFix-1.2.1.zip` в разделе [Releases](../../releases).
 2. Скопируйте `dinput8.dll` в папку игры (Steam → правой кнопкой по игре → «Управление» → «Просмотреть локальные файлы»).
 3. Необязательно: сохраните свой `launcher.ini` и замените его файлом из архива, чтобы игра запускалась без лаунчера.
 4. Запустите игру. Настройки появятся в `AttTFix.ini`, подробности — в `dist/README_RU.txt`.

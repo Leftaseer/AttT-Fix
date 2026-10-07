@@ -232,7 +232,7 @@ typedef void (__fastcall *Mesh_t)(void* m, void* edx, DWORD frame, DWORD lod);
 // Trees in the crossfade band (3D -> flat) are originally alpha-blended (see-through). With TreeDissolve the 3D
 // tree stays opaque and alpha-tested with its full-size alpha reference while its alpha (texture x fade) drops:
 // the foliage thins out leaf by leaf and the flat tree behind it shows through the gaps.
-static int g_dissolve = 1;   // 0 = original blending, 1 = dissolve, 2 = dissolve in a 4x shorter band
+static int g_dissolve = 0;   // 0 = original blending (default), 1 = dissolve, 2 = dissolve in a 4x shorter band
 static bool g_treeDissolve = false; static DWORD g_dissolveRef = 0x84; static DWORD g_dissolveN = 0;
 typedef void (__fastcall *ForestTree_t)(BYTE* T, void* edx, void* mat, float a, DWORD s, DWORD sh);
 static void __fastcall h_FadingTree(BYTE* T, void* edx, void* mat, float a, DWORD s, DWORD sh) {
@@ -545,6 +545,18 @@ static void TreeDistApply(BYTE* tm) {
         LOG("trees: invalid distances %.0f..%.0f visible %.0f -> repaired", r->orig[0], r->orig[1], r->orig[2]);
         r->orig[0] = 667; r->orig[1] = 1000; r->orig[2] = 4000; r->orig[3] = 200; chg = true;
     }
+    if (r->orig[1] - r->orig[0] < 50 || r->orig[0] > 1000) {
+        // no crossfade band (e.g. 1500..1500 saved in graphic.cfg when our 3D distance leaked into the game's settings
+        // on Apply): 3D trees popped to flat ones. The game keeps end = start + 200 and start <= 500 ("very far"
+        // = 500..700 with visible 5000); the band is rebuilt from the visible distance, also in the engine settings
+        // (saved with the next Apply).
+        float st = r->orig[2] * 0.1f; if (st > 500) st = 500; if (st < 50) st = 50;
+        LOG("trees: crossfade %.1f..%.1f has no band -> %.0f..%.0f", r->orig[0], r->orig[1], st, st + 200);
+        BYTE* eng = ((BYTE* (*)())0x0042F160)();
+        if (eng) { float* es = (float*)(eng + 0x2C);
+            if (fabsf(es[0] - r->orig[0]) < 1.0f && fabsf(es[1] - r->orig[1]) < 1.0f) { es[0] = st; es[1] = st + 200; LOG("trees: engine tree settings repaired too"); } }
+        r->orig[0] = st; r->orig[1] = st + 200; chg = true;
+    }
     if (chg) LOG("trees: game option -> crossfade %.0f..%.0f, visible %.0f (fade %.0f)", r->orig[0], r->orig[1], r->orig[2], r->orig[3]);
     float m = (g_objDistOn && g_treeDist > 0.5f) ? g_treeDist : 1.0f;
     // only the 3D -> flat crossfade moves; the flat-tree range stays original (scaling it filled the horizon with
@@ -552,7 +564,7 @@ static void TreeDistApply(BYTE* tm) {
     float lim = r->orig[2] - r->orig[3];                                // keep the crossfade inside the flat-tree range
     f[0] = r->orig[0] * m; f[1] = r->orig[1] * m;
     if (g_tree3D > 0 && g_objDistOn && r->orig[1] > 0) {                // absolute 3D range, crossfade band keeps its proportion
-        float ratio = r->orig[0] / r->orig[1]; if (!(ratio >= 0 && ratio < 1)) ratio = 1.0f / 3;
+        float ratio = r->orig[0] / r->orig[1]; if (!(ratio >= 0.3f && ratio <= 0.95f)) ratio = 500.0f / 700.0f;
         f[1] = g_tree3D; f[0] = g_tree3D * ratio;
     }
     if (lim > 0 && f[1] > lim) { float d = f[1] - lim; f[1] = lim; f[0] = f[0] - d > 0 ? f[0] - d : 0; }
