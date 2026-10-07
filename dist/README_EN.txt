@@ -16,6 +16,14 @@ WHAT'S NEW IN 1.3.2
     are almost as fast again as without them.
   * Comparison mode: [Mod] Baseline=1 in AttTFix.ini - the original game with only the FPS
     counter (F11) and the performance log of the mod. Handy for comparing FPS with the mod.
+  * The F11 counter shows the average FPS over 5 seconds and over 1 minute.
+  * Building shadows are drawn only when the building or its shadow is in view (1.3 drew
+    every building around the camera): noticeably faster on slow CPUs, and shadows still do
+    not vanish. Shadow quality "Original" also brings back the original culling.
+  * Fixed on some laptops with two GPUs (Intel + AMD): the system reset the mod's hooks into
+    Direct3D, so anisotropic filtering, mip levels and the optimizations did nothing, and
+    the game quit with a D3DDevice reset error after being minimized. The mod now restores
+    its hooks, and a failed device reset is retried.
 
 
 WHAT'S NEW IN 1.3.1
@@ -187,7 +195,8 @@ GRAPHICS SETTINGS ("ATTTFIX" page in Options -> video)
   Object and shadow distance — multiplier for small props, NPCs and shadows.
   Shadow quality — original (1024 map / 256 units) / medium (2048, 512) / high (4096,
                      1024, recommended) / ultra (8192, 2048); medium and higher also smooth
-                     the shadow edges (MSAA 4x). After a restart.
+                     the shadow edges (MSAA 4x). After a restart. "Original" is the fastest:
+                     choose it on slow computers.
   Distance of 3D trees — a DISTANCE, not a number of trees: closer trees are 3D, further
                      ones are flat pictures. Higher = nicer up close, but heavier.
                      "As in the game" follows the game's "Tree distance" (at "Very far" the
@@ -203,8 +212,9 @@ AttTFix.ini.
 
 HOTKEYS
 -------
-  F11 — counter in the top left corner: hidden -> FPS and frame time -> with the toggle
-        panel -> hidden.
+  F11 — counter in the top left corner: hidden -> FPS, average FPS over 5 s and 1 min and
+        frame time -> with the toggle panel -> hidden. The averages start over after a
+        loading screen or a pause.
   While the toggle panel is shown (digits with Ctrl held are not passed to the game):
     Ctrl+1 — movement and camera smoothing
     Ctrl+2 — character animation smoothing
@@ -240,7 +250,7 @@ changes apply on the next start):
            ShadowSize=4096     map shadow texture size (1024 = original)
            ShadowMSAA=4        shadow edge anti-aliasing 2/4/8 (0 = off)
            UnitShadowSize=1024 hero and NPC shadow texture size (256 = original)
-           ShadowCasterCull=0  1 = original shadow caster culling (building shadows can vanish)
+           ShadowCasterCull=0  0 = a building off screen keeps its shadow on screen, 1 = original
            Mipmaps=1           mip levels and trilinear filtering of world textures (0 = original)
            WorldLodBias=0      softness of world textures: 0.5 softer, -0.5 sharper (with Mipmaps=1)
            Renderer=d3d9       d3d9 or dxvk (see below)

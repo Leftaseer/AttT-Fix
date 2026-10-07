@@ -21,7 +21,7 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - Mip levels for world textures (`[Video] Mipmaps=1`): the game's DDS loader creates textures with the level count of the file (one in hi-res packs, so the ground was grainy and shimmered far away); one-level DXT1 textures now get the full chain, built on the CPU at load time (decode, 2x2 box filter, re-encode), and the terrain, sky and water effects, which set no mip filter, are compiled with `MipFilter = Linear` (optional `WorldLodBias`).
 - Optional MSAA 2x/4x/8x (`[Video] MSAA`, Ctrl+7 at runtime) with alpha-to-coverage for foliage. Render-to-texture passes get a matching non-multisampled depth buffer; back buffer reads are resolved.
 - Adjustable draw distance of small props (boxes, wheels, rocks), NPCs and their shadows (`[Video] ObjectDistance`, default 1.0 = original). The original size-based culling was tuned for 800x600..1280x1024.
-- Sharper shadows: the world map shadow texture (owned by the clouds/sun object) is raised from 1024 to 4096 (`[Video] ShadowSize`), rendered with 4x MSAA and resolved (`ShadowMSAA`), sampled with linear filtering; hero/NPC shadows 256 → 1024 (`UnitShadowSize`) and placed by the interpolated position; building shadows no longer culled by the camera frustum test (`ShadowCasterCull=0`).
+- Sharper shadows: the world map shadow texture (owned by the clouds/sun object) is raised from 1024 to 4096 (`[Video] ShadowSize`), rendered with 4x MSAA and resolved (`ShadowMSAA`), sampled with linear filtering; hero/NPC shadows 256 → 1024 (`UnitShadowSize`) and placed by the interpolated position; shadow casters culled together with their shadow (box + the box moved along the sun direction to its base, against the camera frustum; `ShadowCasterCull=0`), so buildings just off screen keep their shadow without drawing every building around the camera.
 - Adjustable distance of 3D forest trees (`[Video] Tree3DDistance`, default 1500; flat trees beyond) and an optional dissolve instead of the see-through 3D → flat fade (`TreeDissolve`, default 0 = original, Ctrl+8).
 - **Graphics settings page** in Options → video (the "ATTTFIX" button): presets Original / Recommended / Medium / High / Ultra and the individual settings (object distance, shadow quality, 3D tree distance, transition, anisotropy, MSAA, renderer Direct3D 9 / DXVK).
 
@@ -43,7 +43,8 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - Fixed: Windows cursor left on top of the game after start; spinning parts on some unit models with animation smoothing; portal loop twitch; broken tree distances saved by the game's own option; the in-game options window turning pale after an MSAA change.
 - Master switch: `[Mod] Enabled=0` in `AttTFix.ini` runs the original game.
 - Optional: start from Steam without the Fulqrum launcher (`launcher.ini` with `skip=true`).
-- On-screen FPS / frame-time overlay (F11), optional performance log and sampling profiler.
+- On-screen FPS / frame-time overlay (F11) with 5 s / 1 min averages, optional performance log and sampling profiler.
+- Device vtable watchdog: on some switchable-graphics laptops the system put the original d3d9 functions back into the device vtable after CreateDevice, silently disabling every device hook; they are re-applied each frame, the engine's device restore (0x44DD20) releases the mod's DEFAULT-pool resources first, and a failed Reset is retried for a few seconds.
 - Comparison mode `[Mod] Baseline=1`: the original game with only the F11 counter and the perf log STATS (hooks on Present / Reset only); `[Mod] Enabled=0` switches the mod off completely.
 
 **Performance**

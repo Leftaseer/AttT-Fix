@@ -96,7 +96,10 @@ static void* PatchIAT(const char* dll, const char* func, void* hook) {
     LOG("IAT: hooked %s!%s", dll, func);
     return orig;
 }
+static void** g_devVt = nullptr; static void* g_devVtOrig[120];   // device vtable we patched + its entries before
+static void* g_devHooked[120];                                      // what we wrote into it (see DevVtCheck)
 static void* PatchVtbl(void** vtbl, int idx, void* hook) {
+    if (vtbl == g_devVt && idx >= 0 && idx < 120) g_devHooked[idx] = hook;
     DWORD old; VirtualProtect(&vtbl[idx], 4, PAGE_READWRITE, &old);
     void* orig = vtbl[idx]; vtbl[idx] = hook;
     VirtualProtect(&vtbl[idx], 4, old, &old);
@@ -227,6 +230,17 @@ static HRESULT __stdcall h_Reset(void* dev, D3DPP* p) {
     LogPP("Device::Reset", p);
     HRESULT hr = o_Reset(dev, p);
     if (hr < 0 && p->MS) { LOG("Device::Reset with MSAA failed %08lX, retrying without", hr); p->MS = 0; p->MSQ = 0; p->Flags |= 1; hr = o_Reset(dev, p); }
+    // a device lost in a window (e.g. the switchable-graphics driver moving between the Intel and AMD GPUs) can refuse
+    // the reset for a moment (D3DERR_NOTAVAILABLE / DEVICELOST / DRIVERINTERNALERROR); the engine then quits with an
+    // error. Wait and retry for up to ~5 s while the device is resettable. INVALIDCALL (resources still alive) is final.
+    for (int tries = 0; hr < 0 && hr != (HRESULT)0x8876086C /*INVALIDCALL*/ && tries < 50; ++tries) {
+        Sleep(100);
+        HRESULT tcl = o_TCL(dev);
+        if (tcl == (HRESULT)0x88760868 /*DEVICELOST*/) continue;
+        HRESULT h2 = o_Reset(dev, p);
+        if (tries < 3 || h2 >= 0) LOG("Device::Reset retry %d (TestCooperativeLevel %08lX) -> %08lX", tries + 1, tcl, h2);
+        hr = h2;
+    }
     LOG("Device::Reset -> %08lX", hr);
     if (hr >= 0) { g_devInterval = p->Interval; g_windowed = p->Windowed; AnisoApply(dev); MsaaDeviceReady(dev, p); }
     return hr;
@@ -267,6 +281,7 @@ static HRESULT __stdcall h_CreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd
     if (hr >= 0 && out && *out) {
         g_devInterval = p->Interval;
         void** vt = *(void***)*out;
+        if (!g_devVt) { g_devVt = vt; memcpy(g_devVtOrig, vt, sizeof g_devVtOrig); }
         if (!o_Reset) {
             o_TCL = (TCL_t)PatchVtbl(vt, 3, (void*)h_TCL);
             o_Reset = (Reset_t)PatchVtbl(vt, 16, (void*)h_Reset);
@@ -1179,6 +1194,29 @@ static bool KeyPressed(int vk, bool& down) {
     bool k = (GetAsyncKeyState(vk) & 0x8000) != 0, r = k && !down && GetForegroundWindow() == g_hwnd;
     down = k; return r;
 }
+// average FPS over the last 5 s and 1 min for the F11 counter (1-second buckets; a frame longer than 0.5 s - loading,
+// a stall - starts both over, so a loading screen does not spoil the numbers)
+static struct { double ms[64]; int fr[64]; int head, n; } g_af = {};
+static void AvgFpsAdd(double ft) {
+    if (ft > 500.0 || ft <= 0) { memset(&g_af, 0, sizeof g_af); return; }
+    g_af.ms[g_af.head] += ft; ++g_af.fr[g_af.head];
+    if (g_af.ms[g_af.head] >= 1000.0) {
+        g_af.head = (g_af.head + 1) & 63; g_af.ms[g_af.head] = 0; g_af.fr[g_af.head] = 0;
+        if (g_af.n < 63) ++g_af.n;
+    }
+}
+static double AvgFps(int secs, int* have) {
+    int k = secs < g_af.n ? secs : g_af.n; double ms = 0; int fr = 0;
+    for (int i = 1; i <= k; ++i) { int j = (g_af.head - i) & 63; ms += g_af.ms[j]; fr += g_af.fr[j]; }
+    if (have) *have = k;
+    return ms > 0 ? fr * 1000.0 / ms : 0;
+}
+static void AvgFpsText(char* out, size_t n) {
+    int h5 = 0, h60 = 0; double a5 = AvgFps(5, &h5), a60 = AvgFps(60, &h60);
+    if (h5 < 1) { snprintf(out, n, "avg: ..."); return; }
+    if (h60 >= 60) snprintf(out, n, "avg 5 s %.0f  1 min %.0f", a5, a60);
+    else snprintf(out, n, "avg 5 s %.0f  1 min %.0f (%d s)", a5, a60, h60);
+}
 static void OverlayToggles(void* dev); static void DrawOverlayText(void* dev);
 static void DrawOverlay(void* dev) {
     static bool d11 = false;
@@ -1229,8 +1267,9 @@ static void DrawOverlayText(void* dev) {
         if (!cf || cf(dev, h, 0, 700, 1, FALSE, DEFAULT_CHARSET, 0, ANTIALIASED_QUALITY, 0, "Consolas", &g_font) < 0) { failed = true; LOG("overlay: font creation failed"); return; }
     }
     char line[700]; int n = 0; line[0] = 0;
+    char avg[64]; AvgFpsText(avg, sizeof avg);
     if (g_showFps && g_baseline)
-        n += snprintf(line + n, sizeof line - n, "%.0f FPS  %.2f ms (max %.1f)  %s  ORIGINAL GAME (AttTFix Baseline=1)\n", g_ovFps, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9");
+        n += snprintf(line + n, sizeof line - n, "%.0f FPS  %s  %.2f ms (max %.1f)  %s  ORIGINAL (Baseline=1)\n", g_ovFps, avg, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9");
     else if (g_showFps) {
         char cap[48] = "";
         int lim = g_fpsLimit;
@@ -1239,8 +1278,8 @@ static void DrawOverlayText(void* dev) {
         else if (g_vsync) snprintf(cap, sizeof cap, "  vsync %d Hz%s", g_windowed ? WindowMonitorHz() : g_refreshHz,
                                    !g_windowed || !g_dwmOk ? "" : g_dwmSync == 2 ? " (flush)" : g_gridOk == 1 ? " (vblank)" : " (timer)");
         else snprintf(cap, sizeof cap, "  no cap");
-        n += snprintf(line + n, sizeof line - n, "%.0f FPS  %.2f ms (max %.1f)  %s%s\nupdate %.2f  render %.2f  present %.2f  |  trees %.0f %.2f ms  sun %.2f ms\n",
-                      g_ovFps, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9", cap,
+        n += snprintf(line + n, sizeof line - n, "%.0f FPS  %s  %.2f ms (max %.1f)  %s%s\nupdate %.2f  render %.2f  present %.2f  |  trees %.0f %.2f ms  sun %.2f ms\n",
+                      g_ovFps, avg, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9", cap,
                       g_ovUpd, g_ovRen, g_ovPres, g_ovTreeN, g_ovTrees, g_ovSun);
     }
     if (g_showFps >= 2)
@@ -1289,6 +1328,7 @@ static void UpdateOverlayStats() {   // every 0.5 s from the per-frame sections
     double upd = 0; for (int i = S_TIMER; i <= S_OBJ8C; ++i) upd += g_sec[i];
     double ren = g_sec[S_CLEAR] + g_sec[S_RSCENE] + g_sec[S_RCURSOR] + g_sec[S_ENDSCENE];
     acc[4] += g_frTrees; acc[5] += g_frTreeN; acc[6] += g_frSun; g_frTrees = g_frSun = 0; g_frTreeN = 0;
+    AvgFpsAdd(g_lastFt);
     acc[0] += g_lastFt; acc[1] += upd; acc[2] += ren; acc[3] += g_sec[S_PRESENT]; if (g_lastFt > mx) mx = g_lastFt; ++n;
     double el = (now - t0) * g_tickMs;
     if (el >= 500.0 && n > 0) {
@@ -1297,8 +1337,78 @@ static void UpdateOverlayStats() {   // every 0.5 s from the per-frame sections
         acc[0] = acc[1] = acc[2] = acc[3] = 0; n = 0; mx = 0; t0 = now;
     }
 }
+// ---- device vtable watchdog
+// All device hooks (Present, Reset, draws, sampler / texture / render states, CreateTexture ...) patch the device's
+// vtable once at CreateDevice. On some systems (seen on a laptop with Intel + AMD Radeon 530 graphics, system d3d9)
+// none of them were called afterwards: the anisotropy, mip levels, shadow filtering etc. did nothing and, as the hook
+// on Reset never ran, a lost device could not be reset (D3DERR_INVALIDCALL, our DEFAULT-pool resources still alive).
+// Checked every frame: if the device has a different vtable with the same original functions, the hooks are carried
+// over; anything else is written to the log (with the module now owning the slot) once.
+static void ModuleOf(const void* a, char* out, size_t n) {
+    HMODULE m = nullptr; char path[MAX_PATH] = "?";
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)a, &m) && m) {
+        GetModuleFileNameA(m, path, MAX_PATH);
+        const char* b = strrchr(path, '\\'); snprintf(out, n, "%s+%lx", b ? b + 1 : path, (unsigned long)((BYTE*)a - (BYTE*)m));
+    } else snprintf(out, n, "%p (no module)", a);
+}
+static DWORD g_vtMoves = 0, g_vtRestores = 0, g_vtRestoreEvents = 0;
+static void DevVtCheck(void* dev) {
+    if (!g_devVt) return;
+    void** vt = *(void***)dev;
+    static int reports = 0;
+    if (vt != g_devVt) {   // another table: carry our hooks over where it has the same original functions
+        int moved = 0, kept = 0, foreign = 0;
+        DWORD old; VirtualProtect(vt, sizeof(void*) * 120, PAGE_READWRITE, &old);
+        for (int i = 0; i < 120; ++i) {
+            if (!g_devHooked[i]) continue;
+            if (vt[i] == g_devHooked[i]) { ++kept; continue; }
+            if (vt[i] == g_devVtOrig[i]) { vt[i] = g_devHooked[i]; ++moved; } else ++foreign;
+        }
+        VirtualProtect(vt, sizeof(void*) * 120, old, &old);
+        if (reports < 6) {
+            ++reports; char m[160]; ModuleOf(vt, m, sizeof m);
+            LOG("device vtable changed %p -> %p (%s): hooks carried over %d, already there %d, slot taken by other code %d", g_devVt, vt, m, moved, kept, foreign);
+            if (foreign) for (int i = 0; i < 120; ++i) if (g_devHooked[i] && vt[i] != g_devHooked[i]) {
+                char a[160], b[160]; ModuleOf(vt[i], a, sizeof a); ModuleOf(g_devVtOrig[i], b, sizeof b);
+                LOG("  slot %d: now %s, original was %s", i, a, b); }
+        }
+        if (!foreign) { g_devVt = vt; ++g_vtMoves; }
+        return;
+    }
+    // same table: entries put back to the original d3d9 functions (seen on an Intel + AMD laptop right after
+    // CreateDevice) are hooked again - safe, they are the functions our hooks call anyway; a slot holding other code
+    // (an overlay chaining to us) is left alone and reported
+    int restored = 0, foreign = 0;
+    for (int i = 0; i < 120; ++i) {
+        if (!g_devHooked[i] || vt[i] == g_devHooked[i]) continue;
+        if (vt[i] == g_devVtOrig[i]) {
+            DWORD old; VirtualProtect(&vt[i], 4, PAGE_READWRITE, &old); vt[i] = g_devHooked[i]; VirtualProtect(&vt[i], 4, old, &old);
+            ++restored;
+        } else if (++foreign == 1 && reports < 6) {
+            ++reports; char a[160], b[160]; ModuleOf(vt[i], a, sizeof a); ModuleOf(g_devVtOrig[i], b, sizeof b);
+            LOG("device vtable %p slot %d taken by other code: now %s (original %s) - left alone", vt, i, a, b);
+        }
+    }
+    if (restored) {
+        g_vtRestores += restored;
+        if (++g_vtRestoreEvents <= 5 || (g_vtRestoreEvents & (g_vtRestoreEvents - 1)) == 0)
+            LOG("device vtable %p: %d hooks were reset to the original d3d9 functions, hooked again (time %lu, %lu hooks in total)", vt, restored, g_vtRestoreEvents, g_vtRestores);
+    }
+}
+// engine device restore (0x44DD20, also called by the game itself): our DEFAULT-pool resources go first, even when
+// the Reset hook is bypassed
+static void ReleaseDeviceResources() { SunRelease(); FxReleaseAll(); InstRelease(); ShadowDeviceReset(); FontRelease(); MsaaReleaseResources(); }
+typedef void (__fastcall *Restore_t)(BYTE*, void*);
+static Restore_t o_Restore = nullptr;
+static void __fastcall h_Restore(BYTE* e, void* edx) { LOG("engine device restore: releasing AttTFix device resources"); ReleaseDeviceResources(); o_Restore(e, edx); }
+static void InstallRestoreGuard() {
+    static const BYTE p[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF8 };
+    o_Restore = (Restore_t)Detour((BYTE*)0x0044DD20, p, 6, (void*)h_Restore);
+}
 static void __fastcall h_Render(BYTE* e, void* /*edx*/) {
-    void* dev = *pDevice; void** vt = *(void***)dev;
+    void* dev = *pDevice;
+    DevVtCheck(dev);
+    void** vt = *(void***)dev;
     LONGLONG a = Now(), b;
     // Ctrl+7 / MSAA / VSync option: re-create the back buffer through the engine's restore path - not while a menu
     // (GUIScene) is open: the in-game menus draw over a capture of the scene made when they open, which the device
@@ -1382,6 +1492,7 @@ static int CmpFloat(const void* a, const void* b) { float x = *(const float*)a, 
 static void BaselineFrame(double ft) {
     static double acc = 0, mx = 0; static int n = 0; static LONGLONG t0 = 0;
     LONGLONG now = Now(); if (!t0) t0 = now;
+    AvgFpsAdd(ft);
     acc += ft; if (ft > mx) mx = ft; ++n;
     double el = (now - t0) * g_tickMs;
     if (el >= 500.0) { g_ovFps = n * 1000.0 / el; g_ovMs = acc / n; g_ovMax = mx; acc = 0; mx = 0; n = 0; t0 = now; }
@@ -1410,13 +1521,19 @@ static HRESULT __stdcall h_BPresent(void* dev, const void* a, const void* b, HWN
     return o_BPresent(dev, a, b, c, d);
 }
 static HRESULT __stdcall h_BReset(void* dev, D3DPP* p) { FontRelease(); return o_BReset(dev, p); }
+static DWORD WINAPI BVtWatch(LPVOID d) { for (;;) { Sleep(100); DevVtCheck(d); } return 0; }
 static HRESULT __stdcall h_BCreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd, DWORD flags, D3DPP* p, void** out) {
     HRESULT hr = o_CreateDevice(d3d, ad, type, wnd, flags, p, out);
     LOG("baseline: CreateDevice %ux%u windowed=%d interval=%lx -> %08lX", p ? p->W : 0, p ? p->H : 0, p ? p->Windowed : 0, p ? p->Interval : 0, hr);
     if (hr >= 0 && out && *out) {
         if (!g_hwnd) g_hwnd = p && p->hwnd ? p->hwnd : wnd;
         void** vt = *(void***)*out;
-        if (!o_BPresent) { o_BReset = (Reset_t)PatchVtbl(vt, 16, (void*)h_BReset); o_BPresent = (Present_t)PatchVtbl(vt, 17, (void*)h_BPresent); }
+        if (!g_devVt) { g_devVt = vt; memcpy(g_devVtOrig, vt, sizeof g_devVtOrig); }
+        if (!o_BPresent) {
+            o_BReset = (Reset_t)PatchVtbl(vt, 16, (void*)h_BReset); o_BPresent = (Present_t)PatchVtbl(vt, 17, (void*)h_BPresent);
+            static void* dev; dev = *out;   // the hooks may be reset by the system (see DevVtCheck): checked every 100 ms
+            CreateThread(nullptr, 0, BVtWatch, dev, 0, nullptr);
+        }
     }
     return hr;
 }
@@ -1986,6 +2103,7 @@ static void InstallFrameRewrite() {
     }
     LOG("frame function replaced (profiler %s)", g_perfOn ? "on" : "off");
     InstallRenderRewrite();
+    InstallRestoreGuard();
     InstallOptimizations();
     InstallUpdaterRewrite();
     InstallAnimBlend();
@@ -2480,7 +2598,7 @@ static void Init() {
         WritePrivateProfileStringA("Video", "ShadowSize", "4096  ; world sun shadows texture 1024 (original) / 2048 / 4096 / 8192, next start; 0 = untouched", path);
     g_shadowSize = GetPrivateProfileIntA("Video", "ShadowSize", 4096, path);
     if (!GetPrivateProfileStringA("Video", "ShadowCasterCull", "", tmp, sizeof tmp, path))
-        WritePrivateProfileStringA("Video", "ShadowCasterCull", "0  ; 0 = buildings cast their sun shadow even when they are off the culling frustum (no vanishing shadows), 1 = original", path);
+        WritePrivateProfileStringA("Video", "ShadowCasterCull", "0  ; 0 = a building off screen still casts its shadow onto the screen (no vanishing shadows), 1 = original culling (a bit faster)", path);
     g_shadowCull = GetPrivateProfileIntA("Video", "ShadowCasterCull", 0, path);
     if (!GetPrivateProfileStringA("Video", "UnitShadowSize", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Video", "UnitShadowSize", "1024  ; shadow texture of heroes / NPCs 256 (original) / 512 / 1024 / 2048, next start", path);

@@ -78,6 +78,50 @@ static HRESULT __stdcall h_ShSetTex(void* dev, DWORD stage, void* tex) {
     return hr;
 }
 static void InstallShadowProjection(); static void ShadowMsaaRelease(); static void InstallShadowMsaa();
+// ---- shadow-aware caster culling (ShadowCasterCull=0)
+// The game draws a shadow caster only if its box (8 world-space corners) is inside the camera frustum, so a building
+// just off screen lost the shadow it throws onto the screen (shadows vanished when the hero walked into them). 1.3
+// simply drew every caster near the camera - on a slow CPU about a third of the frame (hundreds of extra draws).
+// Now the box is tested together with its shadow: the 8 corners plus the same corners moved along the sun's direction
+// (device light 0, as the shadow pass uses) down to the base of the box, horizontally at most 4000 units. A caster is
+// drawn when, for each of the 6 frustum planes, one of the 16 points is in front of it (the same rule as 0x458120).
+static float g_shL[3]; static DWORD g_shLFrame = 0xFFFFFFFF; static bool g_shLOk = false;
+static DWORD g_shCullIn = 0, g_shCullOut = 0;
+static void ShLight() {
+    if (g_shLFrame == g_curFrame) return;
+    g_shLFrame = g_curFrame; g_shLOk = false;
+    void* dev = *(void**)0x006C8C10; if (!dev) return;
+    BYTE l[104] = {};
+    if (((HRESULT (__stdcall*)(void*, DWORD, void*))(*(void***)dev)[52])(dev, 0, l) < 0) return;   // GetLight(0)
+    const float* d = (const float*)(l + 0x40);                                                       // D3DLIGHT9.Direction
+    float len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    if (len < 1e-6f || d[1] > -0.02f * len) return;   // sun at or below the horizon: box only
+    g_shL[0] = d[0] / len; g_shL[1] = d[1] / len; g_shL[2] = d[2] / len; g_shLOk = true;
+}
+static bool ShadowBoxVisible(const float* fr, const float* c) {
+    float p[16][3]; int n = 8;
+    memcpy(p, c, sizeof(float) * 24);
+    ShLight();
+    if (g_shLOk) {
+        float miny = c[1]; for (int i = 1; i < 8; ++i) if (c[i * 3 + 1] < miny) miny = c[i * 3 + 1];
+        float hl = sqrtf(g_shL[0] * g_shL[0] + g_shL[2] * g_shL[2]);
+        float tmax = hl > 1e-4f ? 4000.0f / hl : 1e9f;
+        for (int i = 0; i < 8; ++i) {
+            float t = (c[i * 3 + 1] - (miny - 20.0f)) / -g_shL[1]; if (t > tmax) t = tmax; if (t < 0) t = 0;
+            for (int k = 0; k < 3; ++k) p[8 + i][k] = c[i * 3 + k] + g_shL[k] * t;
+        }
+        n = 16;
+    }
+    const float* pl = fr + 1;                           // 6 planes (a, b, c, d) at frustum + 4
+    for (int k = 0; k < 6; ++k, pl += 4) {
+        bool in = false;
+        for (int i = 0; i < n && !in; ++i) in = pl[0] * p[i][0] + pl[1] * p[i][1] + pl[2] * p[i][2] + pl[3] > 0.0f;
+        if (!in) { ++g_shCullOut; return false; }
+    }
+    ++g_shCullIn; return true;
+}
+static bool __attribute__((thiscall)) h_CullCell(const float* frustum, const float* corners) { return ShadowBoxVisible(frustum, corners); }
+static bool __attribute__((thiscall)) h_CullObj(const BYTE* obj) { return ShadowBoxVisible(*(const float**)0x006CA2C8, (const float*)(obj + 0x244)); }
 static void ShadowDeviceReset() { g_shTexN = 0; g_shFilt = false; g_shTci = false; ShadowMsaaRelease(); }   // textures are re-created after a reset
 static void ShadowDeviceHooks(void* dev) {
     if (g_shadowSize <= 0) return;
@@ -117,14 +161,17 @@ static void ShadowDeviceHooks(void* dev) {
     static bool cullPatched = false;
     if (!cullPatched && !g_shadowCull) {
         cullPatched = true;
-        // 0x458120 is thiscall with one stack argument (ret 4): "mov al,1 / add esp,4"; 0x58EB50 takes none: "mov al,1"
-        static const struct { DWORD at, to; const char* rep; } cs[4] = {
-            { 0x004B6BC5, 0x00458120, "\xB0\x01\x83\xC4\x04" }, { 0x004B6BEF, 0x00458120, "\xB0\x01\x83\xC4\x04" },
-            { 0x004B6DA8, 0x0058EB50, "\xB0\x01\x90\x90\x90" }, { 0x004B6DE6, 0x0058EB50, "\xB0\x01\x90\x90\x90" } };
+        // the four frustum tests of shadow casters call our shadow-aware tests instead (same calling conventions:
+        // 0x458120 thiscall(frustum, corners) ret 4; 0x58EB50 thiscall(object))
+        static const struct { DWORD at, to; void* fn; } cs[4] = {
+            { 0x004B6BC5, 0x00458120, (void*)h_CullCell }, { 0x004B6BEF, 0x00458120, (void*)h_CullCell },
+            { 0x004B6DA8, 0x0058EB50, (void*)h_CullObj },  { 0x004B6DE6, 0x0058EB50, (void*)h_CullObj } };
         bool ok = true;
         for (auto& c : cs) if (*(BYTE*)c.at != 0xE8 || c.at + 5 + *(int*)(c.at + 1) != c.to) ok = false;
-        if (ok) { for (auto& c : cs) PatchBytes((void*)c.at, c.rep, 5); LOG("shadows: building shadow casters no longer frustum-culled (ShadowCasterCull=0)"); }
-        else LOG("shadows: unexpected code, caster culling unchanged");
+        if (ok) {
+            for (auto& c : cs) { BYTE j[5] = { 0xE8 }; *(int*)(j + 1) = (int)((DWORD)c.fn - (c.at + 5)); PatchBytes((void*)c.at, j, 5); }
+            LOG("shadows: shadow casters culled together with their shadow (ShadowCasterCull=0)");
+        } else LOG("shadows: unexpected code, caster culling unchanged");
     }
     // unit shadows (CUnitShadow): one 256x256 render target, re-used per unit
     static bool unitPatched = false;
@@ -146,6 +193,8 @@ static void ShadowDeviceHooks(void* dev) {
     LOG("shadows: world shadow texture at least %dx%d (level data: 1024; device max %ux%u), linear filtering", g_shadowSize, g_shadowSize, maxW, maxH);
 }
 static void ShadowStats() {
+    if (g_shCullIn + g_shCullOut) PLOG("SHADOWS casters (cells + objects) drawn %lu, culled %lu (with their shadow, ShadowCasterCull=0)", g_shCullIn, g_shCullOut);
+    g_shCullIn = g_shCullOut = 0;
     if (g_shBinds) PLOG("SHADOWS size=%d: shadow texture binds=%lu filter set to linear=%lu | projection from the sun camera=%lu (game formula kept %lu; sun camera found before %lu / after %lu / not %lu) msaa frames=%lu", g_shadowSize, g_shBinds, g_shFixed, g_shProjN, g_shProjSkip, g_shCapBefore, g_shCapAfter, g_shCapNone, g_shMsFrames);
     g_shBinds = g_shFixed = 0; g_shProjN = g_shProjSkip = 0; g_shCapBefore = g_shCapAfter = g_shCapNone = 0; g_shMsFrames = 0;
 }
@@ -304,14 +353,15 @@ static void InstallShadowMsaa() {
 }
 
 // ---- Lua: shadow quality for the options page (applied on the next start: the shadow textures are created with
-// the level / device). Levels: 0 original (1024, no MSAA, units 256), 1 medium (2048, 4x, 512),
+// the level / device). Levels: 0 original (1024, no MSAA, units 256, original caster culling), 1 medium (2048, 4x, 512),
 // 2 high = recommended (4096, 4x, 1024), 3 ultra (8192, 4x, 2048); -1 = something else set in the ini.
 static const int kShLevels[4][3] = { { 1024, 0, 256 }, { 2048, 4, 512 }, { 4096, 4, 1024 }, { 8192, 4, 2048 } };
 static int ShadowLevelFromIni() {
     int sz = GetPrivateProfileIntA("Video", "ShadowSize", 4096, g_iniPath), ms = GetPrivateProfileIntA("Video", "ShadowMSAA", 4, g_iniPath),
         us = GetPrivateProfileIntA("Video", "UnitShadowSize", 1024, g_iniPath);
+    int cull = GetPrivateProfileIntA("Video", "ShadowCasterCull", 0, g_iniPath) != 0;
     if (sz <= 0) sz = 1024;
-    for (int i = 0; i < 4; ++i) if (kShLevels[i][0] == sz && kShLevels[i][1] == ms && kShLevels[i][2] == us) return i;
+    for (int i = 0; i < 4; ++i) if (kShLevels[i][0] == sz && kShLevels[i][1] == ms && kShLevels[i][2] == us && cull == (i == 0)) return i;
     return -1;
 }
 static int L_GetShadows(void* L) { LPushNum(L, (float)ShadowLevelFromIni()); return 1; }
@@ -321,6 +371,7 @@ static int L_SetShadows(void* L) {
     snprintf(b, sizeof b, "%d", kShLevels[lv][0]); WritePrivateProfileStringA("Video", "ShadowSize", b, g_iniPath);
     snprintf(b, sizeof b, "%d", kShLevels[lv][1]); WritePrivateProfileStringA("Video", "ShadowMSAA", b, g_iniPath);
     snprintf(b, sizeof b, "%d", kShLevels[lv][2]); WritePrivateProfileStringA("Video", "UnitShadowSize", b, g_iniPath);
+    WritePrivateProfileStringA("Video", "ShadowCasterCull", lv == 0 ? "1" : "0", g_iniPath);   // "original" = original culling too
     LOG("options: shadow quality %d (map %d, MSAA %d, units %d) - next start", lv, kShLevels[lv][0], kShLevels[lv][1], kShLevels[lv][2]);
     return 0;
 }
