@@ -1,79 +1,69 @@
 # AttT-Fix
 
 Unofficial technical update for **Ascension to the Throne / Восхождение на Трон** (Steam version 1.1.128):
-native modern resolutions, widescreen menus, smooth movement, animation and particles, anisotropic filtering and MSAA, large performance fixes, crash fixes, a language switch and more.
+modern resolutions and widescreen menus, smooth movement and animation, sharper textures and shadows,
+MSAA, an optional Vulkan renderer (DXVK), large performance fixes and crash fixes.
 
-The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No game files are modified.
+The mod is a proxy `dinput8.dll` placed next to `ATThrone.exe` (plus an optional `dxvk` folder).
+No game files are modified, and `[Mod] Enabled=0` in `AttTFix.ini` switches everything off.
 
 [Русская версия ниже](#русский)
 
 ---
 
-## What it changes
+## Features
 
 **Display and interface**
-- Any resolution the monitor supports (Full HD, 1440p, 4K, …) without stretching; the Options list comes from the monitor and the choice no longer resets.
-- Menus are laid out on a centered 4:3 canvas with black bars; the in-game HUD keeps the original full-screen layout.
-- Fix for an original layout bug in the (Russian) battle victory window.
+- Any resolution the monitor supports (Full HD, 1440p, 4K, …) without stretching; the list in Options comes from the monitor and the choice no longer resets.
+- Menus on a centered 4:3 canvas; the in-game HUD stays full-screen as in the original.
+- If the monitor refuses the chosen fullscreen mode (e.g. the default 1280x960 on a 4K screen), the game starts in a window instead of quitting.
+- Language switch Russian / English, intro videos checkbox, cursor and camera sensitivity, fullscreen checkbox in the English build.
 
 **Graphics**
-- 16x anisotropic filtering (every bilinear/trilinear minification becomes anisotropic).
-- Mip levels for world textures (`[Video] Mipmaps=1`): the game's DDS loader creates textures with the level count of the file (one in hi-res packs, so the ground was grainy and shimmered far away); one-level DXT1 textures now get the full chain, built on the CPU at load time (decode, 2x2 box filter, re-encode), and the terrain, sky and water effects, which set no mip filter, are compiled with `MipFilter = Linear` (optional `WorldLodBias`).
-- Optional MSAA 2x/4x/8x (`[Video] MSAA`, Ctrl+7 at runtime) with alpha-to-coverage for foliage. Render-to-texture passes get a matching non-multisampled depth buffer; back buffer reads are resolved.
-- Adjustable draw distance of small props (boxes, wheels, rocks), NPCs and their shadows (`[Video] ObjectDistance`, default 1.0 = original). The original size-based culling was tuned for 800x600..1280x1024.
-- Sharper shadows: the world map shadow texture (owned by the clouds/sun object) is raised from 1024 to 4096 (`[Video] ShadowSize`), rendered with 4x MSAA and resolved (`ShadowMSAA`), sampled with linear filtering; hero/NPC shadows 256 → 1024 (`UnitShadowSize`) and placed by the interpolated position; shadow casters culled together with their shadow (box + the box moved along the sun direction to its base, against the camera frustum; `ShadowCasterCull=0`), so buildings just off screen keep their shadow without drawing every building around the camera.
-- Adjustable distance of 3D forest trees (`[Video] Tree3DDistance`, default 1500; flat trees beyond) and an optional dissolve instead of the see-through 3D → flat fade (`TreeDissolve`, default 0 = original, Ctrl+8).
-- **Graphics settings page** in Options → video (the "ATTTFIX" button): presets Original / Recommended / Medium / High / Ultra and the individual settings (object distance, shadow quality, 3D tree distance, transition, anisotropy, MSAA, renderer Direct3D 9 / DXVK).
+- Anisotropic filtering up to 16x and mip levels for world textures: no grainy, shimmering ground far away (most visible with upscaled texture packs).
+- MSAA 2x/4x/8x with anti-aliased foliage edges.
+- Sharper sun shadows (up to 8192 with smoothed edges), sharper hero and NPC shadows that move smoothly, building shadows that no longer vanish.
+- Adjustable draw distance of props and NPCs and of 3D forest trees; optional dissolve instead of the see-through tree fade.
+- **"ATTTFIX" page** in Options → video: presets Original / Recommended / Medium / High / Ultra and each setting separately, including the renderer (Direct3D 9 / DXVK).
 
 **Smoothness**
-- The game updates the world at 30 Hz and never interpolated rendering. The mod blends positions of the hero, armies, battle units and the camera between logic steps (also removes the hero jitter while the camera turns).
-- Character animations are blended between their 30 fps key frames (per bone, quaternion slerp for large changes).
-- Particles (smoke, fire, magic) are evaluated at the exact rendered moment instead of the 30 Hz tick (the game's own analytic particle formulas).
-- Vertex-tweened objects (foliage, water, flags) are drawn at the fractional frame when such animations are present.
-- VSync in windowed mode, locked to the refresh rate of the monitor the window is on; FPS limit in Options, switched at once (with DXVK VSync off is `PresentEx(D3DPRESENT_FORCEIMMEDIATE)`, no device reset).
-
-**Stability and convenience**
-- Uses all CPU cores (the original pins itself to core 0).
-- Fixed crashes: Alt-Tab / lost device in fullscreen, returning to the main menu.
-- Cursor and camera sensitivity in Options.
-- "Intro videos" checkbox (skips 1C logo, logo and intro at start).
-- Language switch Russian / English in Options (the English localization ships with the game as `Localization.pak`).
-- Fullscreen checkbox restored in the English build.
-- Optional background mode: the game keeps running and playing sound while minimized (`[Game] Background=1`).
-- Fixed: Windows cursor left on top of the game after start; spinning parts on some unit models with animation smoothing; portal loop twitch; broken tree distances saved by the game's own option; the in-game options window turning pale after an MSAA change.
-- Master switch: `[Mod] Enabled=0` in `AttTFix.ini` runs the original game.
-- Optional: start from Steam without the Fulqrum launcher (`launcher.ini` with `skip=true`).
-- On-screen FPS / frame-time overlay (F11) with 5 s / 1 min averages, optional performance log and sampling profiler.
-- Device vtable watchdog: on some switchable-graphics laptops the system put the original d3d9 functions back into the device vtable after CreateDevice, silently disabling every device hook; they are re-applied each frame, the engine's device restore (0x44DD20) releases the mod's DEFAULT-pool resources first, and a failed Reset is retried for a few seconds.
-- Comparison mode `[Mod] Baseline=1`: the original game with only the F11 counter and the perf log STATS (hooks on Present / Reset only); `[Mod] Enabled=0` switches the mod off completely.
+- The game updates the world 30 times per second; the mod smooths the hero, armies, battle units and the camera between those steps.
+- Smooth character and object animations (30 fps in the original) and particles.
+- VSync in a window locked to the monitor; FPS limit in Options, switched at once.
 
 **Performance**
-- Sun / lens flare visibility test without a GPU stall. The original locked the whole back buffer twice per frame
-  whenever the sun was on screen (33 MB copied per lock at 4K); now one pixel is copied and read 2-3 frames later.
-  Looking towards the sun on the world map: about 86 → 160+ FPS (D3D9), 200+ FPS with DXVK.
-- Forest trees: no per-tree render state save/restore (exact emulation through an effect state manager), trunks and crowns drawn in groups, radix sort instead of qsort; with DXVK hardware instancing (one draw per mesh part; ~85 → ~110 FPS over a dense forest in our test).
-- Effects (`ID3DXEffect`) set only the states that change; with DXVK their restore is deferred until something needs the state.
-- SSE skinning of skeletal meshes, cached while the pose does not change, verified against the original code at runtime.
-- 3D sound positions and listener commits on a worker thread (DirectSound is software-emulated and waited on its mixer lock: up to ~13% of a battle frame).
-- Obstacle point-in-polygon test without two atan2 per edge (same result): standing next to a large rock dropped to ~45 FPS, now unaffected.
-- Optional Large Address Aware tool (`AttTFix_LAA.exe`, from `tools/laa.cpp`): 4 GB of address space instead of 2 GB.
-  Required for the optional DXVK renderer (`[Video] Renderer=dxvk` loads `dxvk\d3d9.dll` from the game folder; DXVK 3.1.1 is included in the release archive, zlib license). Before that the mod checks for the LAA exe, the file and a Vulkan 1.3 GPU (`vkCreateInstance` + `vkGetPhysicalDeviceProperties`); otherwise it shows the reason, starts with Direct3D 9 and resets the setting.
+- Sun / lens flare test without stalling the GPU (looking at the sun at 4K: about 86 → 160+ FPS).
+- Faster forests (grouped drawing, fast sorting, hardware instancing with DXVK), fewer effect state changes, SSE skinning, 3D sound on a worker thread, a fast obstacle test.
+- Uses all CPU cores (the original pinned itself to one).
+- Optional DXVK renderer (DXVK 3.1.1 included) with `AttTFix_LAA.exe` for 4 GB of memory. Before using it the mod checks for a Vulkan 1.3 GPU and falls back to Direct3D 9 with a message.
 
-**Hotkeys:** F11 — overlay (hidden → FPS / frame times → + toggle panel). While the toggle panel is shown: Ctrl+1 movement/camera smoothing, Ctrl+2 character animation, Ctrl+3 object animation, Ctrl+4 optimizations, Ctrl+5 particles, Ctrl+6 anisotropic filtering, Ctrl+7 MSAA, Ctrl+8 tree transition, Ctrl+9 view distance, Ctrl+0 one-frame render target trace to the log (the digits are hidden from the game while Ctrl is held). F10 / F9 / F7 still work.
+**Stability**
+- Fixed crashes on Alt-Tab / lost device and on returning to the main menu; a failed device reset is retried.
+- Works on switchable-graphics laptops where the system resets Direct3D hooks.
+- Fixed: Windows cursor over the game, spinning model parts, portal flicker, broken tree distances in saved settings, pale options window after an MSAA change.
 
-## Installing a release
+**Tools**
+- F11: FPS, frame time, average FPS over 5 s and 1 min; a second press adds a toggle panel (Ctrl+digits).
+- `[Mod] Baseline=1`: the original game with only the FPS counter, to compare performance.
+- `[Perf] Log=1`: performance log (`AttTFix_perf.log`), with `Sampler=1` a sampling profiler.
+
+## Installation
 
 1. Download `AttTFix-1.3.2.zip` from [Releases](../../releases).
-2. Copy `dinput8.dll` into the game folder (Steam → right click the game → Manage → Browse local files).
-3. Optional: back up your `launcher.ini` and replace it with the one from the archive to skip the launcher.
-4. Optional, for the DXVK renderer: run `AttTFix_LAA.exe` once in the game folder and copy the `dxvk` folder from the archive there, then pick DXVK in Options → "ATTTFIX".
-5. Start the game. Settings are created in `AttTFix.ini`; details are in `dist/README_EN.txt`.
+2. Open the game folder (Steam → right click the game → Manage → Browse local files) and copy `dinput8.dll` there.
+3. Optional, for the DXVK renderer: run `AttTFix_LAA.exe` once in the game folder, copy the `dxvk` folder from the archive there, then pick DXVK in Options → "ATTTFIX".
+4. Optional: back up your `launcher.ini` and replace it with the one from the archive to start without the launcher.
+5. Start the game. `AttTFix.ini` is created on the first start; all settings are described in `dist/README_EN.txt`.
 
-To uninstall, delete `dinput8.dll`, `AttTFix.ini` and the `dxvk` folder.
+**Uninstall:** delete `dinput8.dll`, `AttTFix.ini` and the `dxvk` folder; run `AttTFix_LAA.exe /undo` if you used it (or verify the game files in Steam).
+
+**Slow or old computer:** choose shadow quality "Original" on the "ATTTFIX" page and, without high-resolution textures, set `[Video] Mipmaps=0` for faster loading.
+
+**Problems:** the mod writes `AttTFix.log` (the previous run is `AttTFix.prev.log`, a crash also leaves a `.dmp` file). Set `[Mod] Enabled=0` to check whether the mod is the cause.
 
 ## Building from source
 
-Requirements: a 32-bit MinGW-w64 C++ compiler and Python 3 (`luac` 5.1 is optional, used only as a syntax check).
+Requirements: a 32-bit MinGW-w64 C++ compiler and Python 3 (`luac` 5.1 is optional, only a syntax check).
 
 **Linux or WSL (Ubuntu / Debian):**
 ```sh
@@ -89,89 +79,76 @@ cd src
 CXX=g++ sh build.sh
 ```
 
-The result is `src/dinput8.dll`. Copy it next to `ATThrone.exe`.
-`build.sh` converts `attfix.lua` (UTF-8) into `attfix_lua.h` (cp1251, the game's encoding), which is embedded into the DLL.
+The result is `src/dinput8.dll`. `build.sh` converts `attfix.lua` (UTF-8) into `attfix_lua.h` (cp1251, the game's encoding), which is embedded into the DLL. `tools/laa.cpp` is the source of `AttTFix_LAA.exe`.
 
-### What next (development)
+## Technical notes
 
-- Logs: `AttTFix.log` (always), `AttTFix_perf.log` with `[Perf] Log=1` (+ `Sampler=1` for the profiler, `TraceSeconds=N` for a per-frame trace, F8 for an animation trace).
-- Every patch checks the original bytes first; on a different game build it is skipped and noted in the log.
-- Sources (all included by `attfix.cpp`): `renderopt.inc` render optimizations and draw distances, `effectsm.inc` effect state manager, `instance.inc` tree instancing and the quality settings Lua API, `billboard.inc` flat tree batching, `cpuopt.inc` tree sort, `skin.inc` + `skin_core.h` skinning, `sound.inc` async 3D sound, `smoothanim.inc` object/particle smoothing, `msaa.inc` MSAA, `shadow.inc` shadow resolution, filtering, MSAA and caster culling, `mipmap.inc` + `dxt1mip.h` mip levels and trilinear filtering. Each `[Perf]` / `[Smooth]` key switches one of them off.
-- Tests: `src/tests/skintest.cpp` (skinning against a reference, plain g++), `src/tests/fxtest.cpp` (deferred state restore). `tools/perfsum.py <game folder>` prints a short summary of `AttTFix_perf.log`.
-- With the system Direct3D 9 the deferred effect state restore broke the 2D menu (cause not found), so it and tree instancing run only with DXVK.
-- Ideas that are not done yet: smoothing for trees / town animations, skinning on worker threads.
+- **Proxy DLL.** The game imports `dinput8.dll`; ours forwards `DirectInput8Create` to the system DLL and patches the game in memory. Every patch checks the original bytes first; on a different game build it is skipped and noted in the log.
+- **Hooks.** IAT hooks (Direct3D 9 / D3DX creation, exception and exit handling, affinity), small detours, device vtable hooks (re-applied when a driver resets them), and rewrites of the frame (`0x44A9C0`), render (`0x44E480`) and fixed-step update (`0x424D90`) functions.
+- **Lua bridge.** The game logic and GUI are Lua 5.1 scripts inside `.pak` archives. The DLL registers C functions in the game's Lua state and runs the embedded `attfix.lua` (options pages, widescreen layout, layout fixes).
+- **Smoothing.** World matrices and skeletal key frames are replaced with interpolated values only while rendering and restored afterwards; the game logic is untouched.
+- **Sources** (all included by `attfix.cpp`): `renderopt.inc` render optimizations and draw distances, `effectsm.inc` effect state manager, `instance.inc` tree instancing and the quality settings API, `billboard.inc` flat trees, `cpuopt.inc` tree sort, `skin.inc` + `skin_core.h` skinning, `sound.inc` async 3D sound, `smoothanim.inc` object and particle smoothing, `msaa.inc` MSAA, `shadow.inc` shadows, `mipmap.inc` + `dxt1mip.h` mip levels. `funcs_table.h` lists function addresses of `ATThrone.exe` for the profiler.
+- **Tests:** `src/tests/skintest.cpp` (skinning against a reference), `src/tests/fxtest.cpp` (deferred state restore); `tools/perfsum.py <game folder>` summarizes `AttTFix_perf.log`.
 
-## How it works (short)
-
-- **Proxy DLL.** The game imports `dinput8.dll`; ours forwards `DirectInput8Create` to the system DLL and patches the game in memory at load time.
-- **Hooks.** IAT hooks (Direct3D 9 creation, exception/exit handling, affinity, file opening), small detours and full rewrites of the frame (`0x44A9C0`) and render (`0x44E480`) functions, the fixed-step updater (`0x424D90`) and the skinned mesh draw calls.
-- **Lua bridge.** The game logic and GUI are Lua 5.1 scripts inside `.pak` archives. The DLL registers C functions in the game's Lua state and runs the embedded `attfix.lua`, which patches the Options screen, the widescreen layout and a few original layout bugs.
-- **Smoothing.** World matrices of moving objects and skeletal key frames are replaced with interpolated values only for the duration of rendering and restored afterwards, so the game logic is untouched.
-- `funcs_table.h` is a list of function start addresses of `ATThrone.exe` (from Ghidra), used by the sampling profiler.
-
-No game code or assets are included in this repository.
+No game code or assets are included in this repository. DXVK (https://github.com/doitsujin/dxvk) is distributed in the release archive unmodified under the zlib/libpng license.
 
 ---
 
 ## Русский
 
-Неофициальное техническое обновление для **«Восхождение на Трон»** (Steam-версия 1.1.128). Весь мод — один файл `dinput8.dll` рядом с `ATThrone.exe`, файлы игры не изменяются.
+Неофициальное техническое обновление для **«Восхождение на Трон»** (Steam-версия 1.1.128): современные разрешения и широкоформатные меню, плавные движение и анимации, более чёткие текстуры и тени, MSAA, рендер Vulkan (DXVK) по желанию, заметный прирост производительности и исправления вылетов.
 
-### Что меняется
+Мод — это файл `dinput8.dll` рядом с `ATThrone.exe` (и, по желанию, папка `dxvk`). Файлы игры не изменяются, а `[Mod] Enabled=0` в `AttTFix.ini` выключает всё.
+
+### Возможности
 
 **Экран и интерфейс**
 - Любые разрешения монитора (Full HD, 1440p, 4K…) без растягивания; список в «Опциях» берётся с монитора, выбор больше не сбрасывается.
-- Меню по центру в пропорциях 4:3 с чёрными полями, игровой интерфейс — как в оригинале.
-- Исправлено окно победы: строки «Золото» и «Опыт» больше не уезжают за край.
-
-**Плавность**
-- Игра считает мир 30 раз в секунду и не сглаживала картинку. Мод плавно ведёт героя, армии, юнитов в бою и камеру между шагами логики (заодно убрано дрожание героя при повороте камеры).
-- Анимации персонажей сглаживаются между ключевыми кадрами (30 к/с в оригинале).
-- Частицы (дым, огонь, магия) считаются на момент отрисовки, а не 30 раз в секунду (по собственным формулам игры).
-- VSync в оконном режиме по частоте монитора, на котором окно; ограничение FPS в «Опциях», переключается сразу (с DXVK — без пересоздания устройства).
-
-**Стабильность и удобство**
-- Используются все ядра процессора (оригинал привязывал себя к одному).
-- Исправлены вылеты: Alt-Tab в полноэкранном режиме, выход в главное меню.
-- Чувствительность курсора и камеры в «Опциях».
-- Галочка «Заставки при запуске».
-- Переключение языка: русский / английский (английская локализация уже лежит в игре как `Localization.pak`).
-- Галочка полноэкранного режима возвращена в английскую версию.
-- Работа в фоне по желанию (`[Game] Background=1`).
-- Исправлено: курсор Windows поверх игры после запуска, «крутящиеся» части моделей некоторых юнитов, подёргивание портала, испорченные дальности деревьев в сохранённых настройках, блёклое окно опций после смены MSAA.
-- Общий выключатель: `[Mod] Enabled=0` в `AttTFix.ini` — игра работает как оригинал.
-- Необязательно: запуск из Steam без лаунчера (`launcher.ini` со строкой `skip=true`).
-- Счётчик FPS (F11), журнал производительности и профайлер по желанию. Режим сравнения `[Mod] Baseline=1`: оригинальная игра, от мода — только счётчик и журнал.
+- Меню по центру в пропорциях 4:3; игровой интерфейс — на весь экран, как в оригинале.
+- Если монитор не принимает выбранный полноэкранный режим (например, 1280x960 по умолчанию на 4K), игра запускается в окне, а не вылетает.
+- Переключение языка (русский / английский), галочка «Заставки», чувствительность курсора и камеры, галочка полноэкранного режима в английской версии.
 
 **Графика**
-- Анизотропная фильтрация 16x и мип-уровни для текстур мира (`[Video] Mipmaps=1`): земля вдали больше не «зернит» и не мельтешит, особенно с текстурами высокого разрешения.
-- MSAA 2x/4x/8x по желанию (`[Video] MSAA`, Ctrl+7 в игре) вместе со сглаживанием краёв листвы.
-- Настраиваемая дальность прорисовки мелких предметов, NPC и их теней (`[Video] ObjectDistance`, по умолчанию 1.0 = оригинал).
-- Чёткие тени: текстура теней карты 4096 вместо 1024 со сглаживанием краёв (MSAA), тени героя и NPC 1024 вместо 256 и плавно движутся, тени зданий больше не пропадают («Качество теней»).
-- Настраиваемое расстояние объёмных (3D) деревьев (`[Video] Tree3DDistance`, по умолчанию 1500, дальше — плоские) и растворение вместо просвечивания при переходе по желанию (Ctrl+8).
-- **Страница настроек графики** в «Опциях» → видео (кнопка «ATTTFIX»): пресеты Оригинальное / Рекомендуемое / Среднее / Высокое / Ультра и отдельные параметры (дальность объектов, качество теней, расстояние 3D-деревьев, переход, анизотропия, MSAA, рендер Direct3D 9 / DXVK).
+- Анизотропная фильтрация до 16x и мип-уровни для текстур мира: земля вдали не «зернит» и не мельтешит (особенно заметно с апскейлами текстур).
+- MSAA 2x/4x/8x со сглаживанием краёв листвы.
+- Чёткие тени от солнца (до 8192, со сглаженными краями), чёткие и плавные тени героя и NPC, тени зданий больше не пропадают.
+- Настраиваемая дальность предметов и NPC и объёмных деревьев; растворение вместо просвечивания деревьев по желанию.
+- **Страница «ATTTFIX»** в «Опциях» → видео: пресеты Оригинальное / Рекомендуемое / Среднее / Высокое / Ультра и каждый параметр отдельно, включая рендер (Direct3D 9 / DXVK).
+
+**Плавность**
+- Игра считает мир 30 раз в секунду; мод плавно ведёт героя, армии, юнитов в бою и камеру между этими шагами.
+- Плавные анимации персонажей и объектов (30 к/с в оригинале) и частиц.
+- VSync в окне по частоте монитора; ограничение FPS в «Опциях», переключается сразу.
 
 **Производительность**
-- Проверка видимости солнца для бликов без остановки видеокарты. Оригинал, когда солнце в кадре, дважды за кадр
-  блокировал весь экранный буфер (на 4K — копия 33 МБ); теперь копируется один пиксель и читается через 2–3 кадра.
-  Взгляд в сторону солнца на карте мира: примерно 86 → 160+ FPS (D3D9), 200+ FPS с DXVK.
-- Деревья леса: без сохранения и восстановления состояний для каждого дерева, стволы и кроны группами, быстрая сортировка; с DXVK — инстансинг (над густым лесом в нашем замере ~85 → ~110 FPS).
-- Эффекты меняют только отличающиеся состояния рендера, с DXVK — восстанавливают их отложенно.
-- SSE-скиннинг скелетных моделей с проверкой против оригинала прямо в игре; 3D-звук в отдельном потоке.
-- Проверка «точка внутри препятствия» без двух atan2 на каждое ребро (тот же результат): у большого камня FPS падал до ~45, теперь нет.
-- Утилита `AttTFix_LAA.exe` (`tools/laa.cpp`): 4 ГБ адресного пространства вместо 2 ГБ. Нужна для DXVK (`[Video] Renderer=dxvk`; DXVK 3.1.1 входит в архив релиза). Перед запуском с DXVK мод проверяет наличие Vulkan 1.3 и при проблеме показывает причину и запускает игру на Direct3D 9.
+- Проверка солнца для бликов без остановки видеокарты (взгляд на солнце в 4K: примерно 86 → 160+ FPS).
+- Более быстрые леса (отрисовка группами, быстрая сортировка, инстансинг с DXVK), меньше смен состояний в эффектах, SSE-скиннинг, 3D-звук в отдельном потоке, быстрая проверка препятствий.
+- Используются все ядра процессора (оригинал привязывал себя к одному).
+- Рендер DXVK по желанию (DXVK 3.1.1 в комплекте) вместе с `AttTFix_LAA.exe` для 4 ГБ памяти. Перед запуском мод проверяет поддержку Vulkan 1.3 и при её отсутствии запускает Direct3D 9 с пояснением.
 
-**Клавиши:** F11 — оверлей (скрыт → FPS и время кадра → + панель переключателей). Пока открыта панель: Ctrl+1 движение и камера, Ctrl+2 анимации персонажей, Ctrl+3 анимации объектов, Ctrl+4 оптимизации, Ctrl+5 частицы, Ctrl+6 анизотропная фильтрация, Ctrl+7 MSAA, Ctrl+8 переход деревьев, Ctrl+9 дальность прорисовки (цифры с Ctrl игре не передаются). F10 / F9 / F7 тоже работают.
+**Стабильность**
+- Исправлены вылеты при Alt-Tab / потере устройства и при выходе в главное меню; неудачный сброс устройства повторяется.
+- Работает на ноутбуках с двумя видеокартами, где система сбрасывает подключение мода к Direct3D.
+- Исправлено: курсор Windows поверх игры, «крутящиеся» части моделей, мерцание порталов, испорченные дальности деревьев в настройках, блёклое окно опций после смены MSAA.
+
+**Инструменты**
+- F11: FPS, время кадра, средний FPS за 5 с и 1 мин; повторное нажатие — панель переключателей (Ctrl+цифры).
+- `[Mod] Baseline=1`: оригинальная игра только со счётчиком FPS — для сравнения производительности.
+- `[Perf] Log=1`: журнал производительности (`AttTFix_perf.log`), с `Sampler=1` — профайлер.
 
 ### Установка
 
 1. Скачайте `AttTFix-1.3.2.zip` в разделе [Releases](../../releases).
-2. Скопируйте `dinput8.dll` в папку игры (Steam → правой кнопкой по игре → «Управление» → «Просмотреть локальные файлы»).
-3. Необязательно: сохраните свой `launcher.ini` и замените его файлом из архива, чтобы игра запускалась без лаунчера.
-4. Необязательно, для рендера DXVK: запустите один раз `AttTFix_LAA.exe` в папке игры и скопируйте туда папку `dxvk` из архива, затем выберите DXVK в «Опциях» → «ATTTFIX».
-5. Запустите игру. Настройки появятся в `AttTFix.ini`, подробности — в `dist/README_RU.txt`.
+2. Откройте папку игры (Steam → правой кнопкой по игре → «Управление» → «Просмотреть локальные файлы») и скопируйте туда `dinput8.dll`.
+3. Необязательно, для рендера DXVK: запустите один раз `AttTFix_LAA.exe` в папке игры, скопируйте туда папку `dxvk` из архива и выберите DXVK в «Опциях» → «ATTTFIX».
+4. Необязательно: сохраните свой `launcher.ini` и замените его файлом из архива, чтобы игра запускалась без лаунчера.
+5. Запустите игру. `AttTFix.ini` появится при первом запуске; все настройки описаны в `dist/README_RU.txt`.
 
-Удаление: удалите `dinput8.dll`, `AttTFix.ini` и папку `dxvk`.
+**Удаление:** удалите `dinput8.dll`, `AttTFix.ini` и папку `dxvk`; если запускали `AttTFix_LAA.exe` — выполните `AttTFix_LAA.exe /undo` (или проверьте файлы игры в Steam).
+
+**Слабый или старый компьютер:** выберите «Качество теней» = «Оригинал» на странице «ATTTFIX» и, если не используете текстуры высокого разрешения, поставьте `[Video] Mipmaps=0` — загрузка будет быстрее.
+
+**Если что-то не так:** мод пишет журнал `AttTFix.log` (предыдущий запуск — `AttTFix.prev.log`, при вылете рядом сохраняется `.dmp`). Чтобы проверить, виноват ли мод, поставьте `[Mod] Enabled=0`.
 
 ### Сборка из исходников
 
@@ -191,14 +168,6 @@ cd src
 CXX=g++ sh build.sh
 ```
 
-Готовый файл — `src/dinput8.dll`, его нужно положить рядом с `ATThrone.exe`.
-`build.sh` переводит `attfix.lua` (UTF-8) в `attfix_lua.h` (cp1251, кодировка игры), который встраивается в DLL.
+Готовый файл — `src/dinput8.dll`. `build.sh` переводит `attfix.lua` (UTF-8) в `attfix_lua.h` (cp1251, кодировка игры), который встраивается в DLL. Исходник `AttTFix_LAA.exe` — `tools/laa.cpp`. Устройство мода описано в разделе [Technical notes](#technical-notes).
 
-### Что дальше
-
-- Журналы: `AttTFix.log` (всегда), `AttTFix_perf.log` при `[Perf] Log=1` (`Sampler=1` — профайлер, `TraceSeconds=N` — покадровый след, F8 — запись анимации).
-- Каждая правка сначала сверяет исходные байты игры; на другой сборке игры она пропускается с записью в журнал.
-- С системным Direct3D 9 отложенное восстановление состояний ломало 2D-меню (причина не найдена), поэтому оно и инстансинг деревьев работают только с DXVK.
-- Не сделано: сглаживание деревьев и городских анимаций, скиннинг в рабочих потоках.
-
-Код и ресурсы игры в репозитории не содержатся.
+Код и ресурсы игры в репозитории не содержатся. DXVK (https://github.com/doitsujin/dxvk) входит в архив релиза без изменений, лицензия zlib/libpng.
