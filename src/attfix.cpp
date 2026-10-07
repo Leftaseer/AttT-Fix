@@ -217,7 +217,9 @@ static void AnisoInit(void* dev) {
     AnisoApply(dev);
 }
 #include "msaa.inc"
+static bool g_fsFallback = false;   // the fullscreen mode was refused at CreateDevice: the game runs in a window
 static HRESULT __stdcall h_Reset(void* dev, D3DPP* p) {
+    if (g_fsFallback && !p->Windowed) { p->Windowed = 1; p->Refresh = 0; }
     if (!p->Windowed && p->Refresh == 0) { UINT hz = MaxRefresh(p->W, p->H); if (hz > 60) p->Refresh = hz; }
     p->Interval = WantInterval();
     SunRelease();
@@ -277,6 +279,14 @@ static HRESULT __stdcall h_CreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd
     HRESULT hr = o_CreateDevice(d3d, ad, type, wnd, flags, p, out);
     if (hr < 0 && p->MS) { LOG("  failed with MSAA %lux (%08lX), retrying without", p->MS, hr); p->MS = 0; p->MSQ = 0; p->Flags = flags0; hr = o_CreateDevice(d3d, ad, type, wnd, flags, p, out); }
     if (hr < 0 && hz > 60) { p->Refresh = 0; LOG("  failed with %u Hz (%08lX), retrying at default", hz, hr); hr = o_CreateDevice(d3d, ad, type, wnd, flags, p, out); }
+    // a fullscreen mode the monitor does not offer (the game's default graphic.cfg is 1280x960 fullscreen, which e.g. a
+    // 4K monitor without GPU scaling refuses: D3DERR_NOTAVAILABLE, the game quit with an error): start in a window
+    if (hr < 0 && !p->Windowed) {
+        LOG("  fullscreen %ux%u failed (%08lX): the monitor does not offer this mode, starting in a window", p->W, p->H, hr);
+        p->Windowed = 1; p->Refresh = 0; g_windowed = 1;
+        hr = o_CreateDevice(d3d, ad, type, wnd, flags, p, out);
+        if (hr >= 0) g_fsFallback = true;
+    }
     LOG("CreateDevice -> %08lX", hr);
     if (hr >= 0 && out && *out) {
         g_devInterval = p->Interval;

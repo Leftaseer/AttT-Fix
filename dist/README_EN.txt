@@ -24,6 +24,9 @@ WHAT'S NEW IN 1.3.2
     Direct3D, so anisotropic filtering, mip levels and the optimizations did nothing, and
     the game quit with a D3DDevice reset error after being minimized. The mod now restores
     its hooks, and a failed device reset is retried.
+  * If the monitor does not offer the chosen fullscreen mode (e.g. 1280x960 from the game's
+    default settings on a 4K monitor), the game starts in a window instead of quitting with
+    a D3DDevice creation error. Pick the resolution in Options afterwards.
 
 
 WHAT'S NEW IN 1.3.1
