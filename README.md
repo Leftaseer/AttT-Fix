@@ -18,6 +18,7 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 
 **Graphics**
 - 16x anisotropic filtering (every bilinear/trilinear minification becomes anisotropic).
+- Mip levels for world textures (`[Video] Mipmaps=1`): the game's DDS loader creates textures with the level count of the file (one in hi-res packs, so the ground was grainy and shimmered far away); one-level DXT1 textures now get the full chain, built on the CPU at load time (decode, 2x2 box filter, re-encode), and the terrain, sky and water effects, which set no mip filter, are compiled with `MipFilter = Linear` (optional `WorldLodBias`).
 - Optional MSAA 2x/4x/8x (`[Video] MSAA`, Ctrl+7 at runtime) with alpha-to-coverage for foliage. Render-to-texture passes get a matching non-multisampled depth buffer; back buffer reads are resolved.
 - Adjustable draw distance of small props (boxes, wheels, rocks), NPCs and their shadows (`[Video] ObjectDistance`, default 1.0 = original). The original size-based culling was tuned for 800x600..1280x1024.
 - Sharper shadows: the world map shadow texture (owned by the clouds/sun object) is raised from 1024 to 4096 (`[Video] ShadowSize`), rendered with 4x MSAA and resolved (`ShadowMSAA`), sampled with linear filtering; hero/NPC shadows 256 → 1024 (`UnitShadowSize`) and placed by the interpolated position; building shadows no longer culled by the camera frustum test (`ShadowCasterCull=0`).
@@ -60,7 +61,7 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 
 ## Installing a release
 
-1. Download `AttTFix-1.3.zip` from [Releases](../../releases).
+1. Download `AttTFix-1.3.1.zip` from [Releases](../../releases).
 2. Copy `dinput8.dll` into the game folder (Steam → right click the game → Manage → Browse local files).
 3. Optional: back up your `launcher.ini` and replace it with the one from the archive to skip the launcher.
 4. Start the game. Settings are created in `AttTFix.ini`; details are in `dist/README_EN.txt`.
@@ -92,7 +93,7 @@ The result is `src/dinput8.dll`. Copy it next to `ATThrone.exe`.
 
 - Logs: `AttTFix.log` (always), `AttTFix_perf.log` with `[Perf] Log=1` (+ `Sampler=1` for the profiler, `TraceSeconds=N` for a per-frame trace, F8 for an animation trace).
 - Every patch checks the original bytes first; on a different game build it is skipped and noted in the log.
-- Sources (all included by `attfix.cpp`): `renderopt.inc` render optimizations and draw distances, `effectsm.inc` effect state manager, `instance.inc` tree instancing and the quality settings Lua API, `billboard.inc` flat tree batching, `cpuopt.inc` tree sort, `skin.inc` + `skin_core.h` skinning, `sound.inc` async 3D sound, `smoothanim.inc` object/particle smoothing, `msaa.inc` MSAA, `shadow.inc` shadow resolution, filtering, MSAA and caster culling. Each `[Perf]` / `[Smooth]` key switches one of them off.
+- Sources (all included by `attfix.cpp`): `renderopt.inc` render optimizations and draw distances, `effectsm.inc` effect state manager, `instance.inc` tree instancing and the quality settings Lua API, `billboard.inc` flat tree batching, `cpuopt.inc` tree sort, `skin.inc` + `skin_core.h` skinning, `sound.inc` async 3D sound, `smoothanim.inc` object/particle smoothing, `msaa.inc` MSAA, `shadow.inc` shadow resolution, filtering, MSAA and caster culling, `mipmap.inc` + `dxt1mip.h` mip levels and trilinear filtering. Each `[Perf]` / `[Smooth]` key switches one of them off.
 - Tests: `src/tests/skintest.cpp` (skinning against a reference, plain g++), `src/tests/fxtest.cpp` (deferred state restore). `tools/perfsum.py <game folder>` prints a short summary of `AttTFix_perf.log`.
 - With the system Direct3D 9 the deferred effect state restore broke the 2D menu (cause not found), so it and tree instancing run only with DXVK.
 - Ideas that are not done yet: smoothing for trees / town animations, skinning on worker threads.
@@ -140,7 +141,7 @@ No game code or assets are included in this repository.
 - Счётчик FPS (F11), журнал производительности и профайлер по желанию.
 
 **Графика**
-- Анизотропная фильтрация 16x.
+- Анизотропная фильтрация 16x и мип-уровни для текстур мира (`[Video] Mipmaps=1`): земля вдали больше не «зернит» и не мельтешит, особенно с текстурами высокого разрешения.
 - MSAA 2x/4x/8x по желанию (`[Video] MSAA`, Ctrl+7 в игре) вместе со сглаживанием краёв листвы.
 - Настраиваемая дальность прорисовки мелких предметов, NPC и их теней (`[Video] ObjectDistance`, по умолчанию 1.0 = оригинал).
 - Чёткие тени: текстура теней карты 4096 вместо 1024 со сглаживанием краёв (MSAA), тени героя и NPC 1024 вместо 256 и плавно движутся, тени зданий больше не пропадают («Качество теней»).
@@ -161,7 +162,7 @@ No game code or assets are included in this repository.
 
 ### Установка
 
-1. Скачайте `AttTFix-1.3.zip` в разделе [Releases](../../releases).
+1. Скачайте `AttTFix-1.3.1.zip` в разделе [Releases](../../releases).
 2. Скопируйте `dinput8.dll` в папку игры (Steam → правой кнопкой по игре → «Управление» → «Просмотреть локальные файлы»).
 3. Необязательно: сохраните свой `launcher.ini` и замените его файлом из архива, чтобы игра запускалась без лаунчера.
 4. Запустите игру. Настройки появятся в `AttTFix.ini`, подробности — в `dist/README_RU.txt`.

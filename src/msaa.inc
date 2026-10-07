@@ -192,6 +192,7 @@ static RTRec g_rtRec[64]; static int g_rtRecN = 0;
 static void RTCount() {
     if (!g_rtTraceOn) return;
     void* dev = *(void**)0x006C8C10; void* rt = nullptr; void* ds = nullptr;
+    MipTraceDraw(dev);
     ((HRESULT (__stdcall*)(void*, DWORD, void**))(*(void***)dev)[38])(dev, 0, &rt);
     ((HRESULT (__stdcall*)(void*, void**))(*(void***)dev)[40])(dev, &ds);
     Rel(rt); Rel(ds);
@@ -219,6 +220,7 @@ static void RTTraceFrame(void* dev) {   // called once per frame after Present
                 g_rtRec[i].ds, b.W, b.H, b.MS, g_rtRec[i].draws, g_rtRec[i].rt == g_bb ? "  <- back buffer" : "");
         }
         g_rtRecN = 0;
+        MipTraceFlush();
     }
     if (g_rtTraceArm > 0 && --g_rtTraceArm == 0) { g_rtTraceOn = true; g_rtRecN = 0; }
 }

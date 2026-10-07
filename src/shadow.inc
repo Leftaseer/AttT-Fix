@@ -35,7 +35,11 @@ typedef HRESULT (__stdcall *CreateTex_t)(void*, UINT, UINT, UINT, DWORD, DWORD, 
 typedef HRESULT (__stdcall *SetTex_t)(void*, DWORD, void*);
 static CreateTex_t o_ShCreateTex = nullptr; static SetTex_t o_ShSetTex = nullptr;
 static HRESULT __stdcall h_ShCreateTex(void* dev, UINT w, UINT h, UINT lv, DWORD usage, DWORD fmt, DWORD pool, void** out, HANDLE* sh) {
-    HRESULT hr = o_ShCreateTex(dev, w, h, lv, usage, fmt, pool, out, sh);
+    void* ret = __builtin_return_address(0);
+    UINT lv2 = MipCreateLevels(ret, w, h, lv, usage, fmt, pool);
+    HRESULT hr = o_ShCreateTex(dev, w, h, lv2, usage, fmt, pool, out, sh);
+    if (hr < 0 && lv2 != lv) { lv2 = lv; hr = o_ShCreateTex(dev, w, h, lv, usage, fmt, pool, out, sh); }
+    if (hr >= 0) { MipNoteCreate(ret, w, h, lv2, usage, fmt, pool); if (lv2 != lv && pool == 2 && out && *out) MipTrackSys(*out); }
     bool unitSh = g_unitShadowSize > 256 && w == (UINT)g_unitShadowSize && h == w && fmt != 0x17;
     if (hr >= 0 && out && *out && (usage & 1 /*RENDERTARGET*/) && ((fmt == 0x17 /*R5G6B5*/ && w == h && w >= (UINT)g_shadowSize) || unitSh)) {
         if (g_shTexN < 8) g_shTex[g_shTexN++] = *out; else g_shTex[7] = *out;

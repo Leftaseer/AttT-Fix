@@ -10,7 +10,7 @@
 #include <math.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
-#define ATTFIX_VERSION "1.3"
+#define ATTFIX_VERSION "1.3.1"
 
 // ---------------------------------------------------------------- log
 static FILE* g_log = nullptr;
@@ -65,7 +65,7 @@ static int L_SetInput(void* L);
 static void SubclassWindow(HWND h);
 static void* g_d3d = nullptr;
 static int g_bgRun = 0, g_bgFps = 30; static volatile bool g_bgInactive = false;   // [Game] Background, BackgroundFps
-static void PLOG(const char* fmt, ...); static void FontRelease(); static void SunRelease(); static void RenderOptStats(); static void MsaaStats(); static void MeshSmoothStats(); static void ParticleStats(); static void EffectStats(); static void FxReleaseAll(); static void FxDeviceHooks(void* dev); static void TreeSortStats(); static void SoundStats(); static void SkinStats(); static void BillboardStats(); static void InstanceStats(); static void InstRelease(); static void ShadowStats(); static void ShadowDeviceHooks(void* dev); static void ShadowDeviceReset(); static int L_GetQuality(void* L); static int L_SetQuality(void* L); static int L_GetRenderer(void* L); static int L_SetRenderer(void* L); static int L_TreeDistUp(void*); static int L_TreeDistDown(void*); static int L_TreeDistCoef(void*); static int L_TreeDistSave(void*); static int L_TreeDistCancel(void*); static int L_GetTreeView(void*); static int L_GetShadows(void*); static int L_SetShadows(void*); static void SndStop(); static bool Writable(void* p);
+static void PLOG(const char* fmt, ...); static void FontRelease(); static void SunRelease(); static void RenderOptStats(); static void MsaaStats(); static void MeshSmoothStats(); static void ParticleStats(); static void EffectStats(); static void FxReleaseAll(); static void FxDeviceHooks(void* dev); static void TreeSortStats(); static void SoundStats(); static void SkinStats(); static void BillboardStats(); static void InstanceStats(); static void InstRelease(); static void ShadowStats(); static void MipStats(); static void MipTraceDraw(void* dev); static void MipTraceFlush(); static void MipNoteCreate(void* ret, UINT w, UINT h, UINT lv, DWORD usage, DWORD fmt, DWORD pool); static UINT MipCreateLevels(void* ret, UINT w, UINT h, UINT lv, DWORD usage, DWORD fmt, DWORD pool); static void MipTrackSys(void* tex); static void MipDeviceHooks(void* dev); static void ShadowDeviceHooks(void* dev); static void ShadowDeviceReset(); static int L_GetQuality(void* L); static int L_SetQuality(void* L); static int L_GetRenderer(void* L); static int L_SetRenderer(void* L); static int L_TreeDistUp(void*); static int L_TreeDistDown(void*); static int L_TreeDistCoef(void*); static int L_TreeDistSave(void*); static int L_TreeDistCancel(void*); static int L_GetTreeView(void*); static int L_GetShadows(void*); static int L_SetShadows(void*); static void SndStop(); static bool Writable(void* p);
 
 // ---------------------------------------------------------------- IAT patch
 static void** FindIAT(HMODULE mod, const char* dll, const char* func) {
@@ -274,7 +274,7 @@ static HRESULT __stdcall h_CreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd
         AnisoInit(*out);
         MsaaDeviceReady(*out, p);
         FxDeviceHooks(*out);
-        ShadowDeviceHooks(*out);
+        MipDeviceHooks(*out); ShadowDeviceHooks(*out);
     }
     return hr;
 }
@@ -978,6 +978,7 @@ static void __fastcall h_Frame(BYTE* e, void* /*edx*/) {
         double nowMs = t0 * g_tickMs;
         TraceFrame(g_frameNo, nowMs, ft, g_secClass[S_SCENE]);
         if (g_winStartMs == 0) g_winStartMs = nowMs;
+        { static double mipMs = 0; if (nowMs - mipMs >= 5000.0) { mipMs = nowMs; MipStats(); } }   // to AttTFix.log, only on changes
         if (nowMs - g_winStartMs >= 5000.0 && g_perfOn) {
             FlushStats(nowMs);
             InterpStats();
@@ -1071,6 +1072,7 @@ typedef void (__fastcall *VM0_t)(void* self, void* edx);
 #include "skin.inc"
 #include "instance.inc"
 #include "shadow.inc"
+#include "mipmap.inc"
 static void* g_font = nullptr;
 static double g_ovFps = 0, g_ovMs = 0, g_ovUpd = 0, g_ovRen = 0, g_ovPres = 0, g_ovMax = 0;
 // The overlay text is rendered into a texture only when it changes (about twice per second) and drawn as one
@@ -2352,6 +2354,15 @@ static void Init() {
     g_meshSmooth = GetPrivateProfileIntA("Smooth", "Objects", 1, path) != 0;
     InstallMeshSmooth();
     InstallSunLockCtx();
+    if (!GetPrivateProfileStringA("Video", "Mipmaps", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Video", "Mipmaps", "1  ; 1 = world textures get mip levels (built at load time) and trilinear filtering: no grainy, shimmering ground in the distance; 0 = original", path);
+    g_mipFix = GetPrivateProfileIntA("Video", "Mipmaps", 1, path) != 0;
+    if (!GetPrivateProfileStringA("Video", "WorldLodBias", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Video", "WorldLodBias", "0  ; with Mipmaps=1: > 0 softens the ground, sky and water (e.g. 0.5), < 0 sharpens (e.g. -0.5), 0 = neutral", path);
+    GetPrivateProfileStringA("Video", "WorldLodBias", "0", tmp, sizeof tmp, path);
+    g_worldLodBias = (float)atof(tmp);
+    if (!(g_worldLodBias >= -3.0f && g_worldLodBias <= 3.0f)) g_worldLodBias = 0.0f;
+    InstallMipmaps();
     if (!GetPrivateProfileStringA("Smooth", "Particles", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Smooth", "Particles", "1  ; 1 = particles (smoke, fire, magic) evaluated at the rendered moment, 0 = original tick rate", path);
     g_partSmooth = GetPrivateProfileIntA("Smooth", "Particles", 1, path) != 0;

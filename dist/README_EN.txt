@@ -1,8 +1,17 @@
-﻿AttTFix 1.3 — technical update for Ascension to the Throne
-===========================================================
+﻿AttTFix 1.3.1 — technical update for Ascension to the Throne
+=============================================================
 
 An unofficial, non-commercial mod for the Steam version of the game. No game files are
 modified: the whole mod is a single dinput8.dll that the game loads by itself.
+
+
+WHAT'S NEW IN 1.3.1
+-------------------
+  * The ground and objects far away no longer look grainy and shimmer while the camera
+    moves, most visible with high-resolution (upscaled) texture packs. The game's textures
+    had no smaller (mip) levels: the mod now builds them at load time, and the ground, sky
+    and water are drawn with trilinear filtering. Loading a map takes 2-4 seconds longer.
+    [Video] Mipmaps=0 turns it off, WorldLodBias sets the softness.
 
 
 WHAT'S NEW IN 1.3
@@ -78,7 +87,7 @@ Display and interface
     off the book.
 
 Graphics
-  * Anisotropic texture filtering up to 16x.
+  * Anisotropic texture filtering up to 16x and mip levels for world textures: no grain far away.
   * MSAA 2x/4x/8x and foliage edge anti-aliasing (off by default).
   * Adjustable draw distance of small props, NPCs and their shadows.
   * Sharp shadows: 4096 map shadow texture with anti-aliased edges, 1024 hero and NPC
@@ -215,6 +224,8 @@ changes apply on the next start):
            ShadowMSAA=4        shadow edge anti-aliasing 2/4/8 (0 = off)
            UnitShadowSize=1024 hero and NPC shadow texture size (256 = original)
            ShadowCasterCull=0  1 = original shadow caster culling (building shadows can vanish)
+           Mipmaps=1           mip levels and trilinear filtering of world textures (0 = original)
+           WorldLodBias=0      softness of world textures: 0.5 softer, -0.5 sharper (with Mipmaps=1)
            Renderer=d3d9       d3d9 or dxvk (see below)
            WindowedSync=dwm    VSync in a window: dwm (monitor-locked), flush or timer
            AllCores=1          use all CPU cores
