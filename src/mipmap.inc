@@ -233,6 +233,52 @@ static void MipTrackSys(void* tex) {
     if (g_mipSysN < 64) g_mipSys[g_mipSysN++] = tex; else g_mipSys[63] = tex;
     LeaveCriticalSection(&g_mipCs);
 }
+// worker threads for the chain build (parallel-for over block rows; the caller works too). One build at a time:
+// if another thread is already using the pool, the build runs serially on its own thread.
+static struct MipPool {
+    HANDLE ev[15], done; int n; volatile LONG next, left; int count, chunk; Dxt1RangeFn fn; void* ctx;
+} g_mp = {};
+static CRITICAL_SECTION g_mpCs; static bool g_mpInit = false;
+static void MipPoolWork() {
+    for (;;) {
+        LONG c = InterlockedIncrement(&g_mp.next) - 1;
+        int a = (int)c * g_mp.chunk; if (a >= g_mp.count) break;
+        int b = a + g_mp.chunk; if (b > g_mp.count) b = g_mp.count;
+        g_mp.fn(g_mp.ctx, a, b);
+    }
+}
+static DWORD WINAPI MipWorker(LPVOID p) {
+    int i = (int)(intptr_t)p;
+    for (;;) {
+        WaitForSingleObject(g_mp.ev[i], INFINITE);
+        MipPoolWork();
+        if (InterlockedDecrement(&g_mp.left) == 0) SetEvent(g_mp.done);
+    }
+    return 0;
+}
+static void MipPFor(int count, Dxt1RangeFn fn, void* ctx) {
+    g_mp.fn = fn; g_mp.ctx = ctx; g_mp.count = count;
+    int ch = count / (4 * (g_mp.n + 1)); g_mp.chunk = ch < 4 ? 4 : ch;
+    g_mp.next = 0; g_mp.left = g_mp.n; ResetEvent(g_mp.done);
+    for (int i = 0; i < g_mp.n; ++i) SetEvent(g_mp.ev[i]);
+    MipPoolWork();
+    WaitForSingleObject(g_mp.done, INFINITE);
+}
+static void MipPoolInit() {
+    if (g_mpInit) return;
+    InitializeCriticalSection(&g_mpCs);
+    SYSTEM_INFO si; GetSystemInfo(&si);
+    int n = (int)si.dwNumberOfProcessors - 1; if (n > 15) n = 15; if (n < 0) n = 0;
+    g_mp.done = CreateEventA(nullptr, TRUE, FALSE, nullptr);
+    for (int i = 0; i < n; ++i) {
+        g_mp.ev[i] = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+        HANDLE th = CreateThread(nullptr, 64 * 1024, MipWorker, (LPVOID)(intptr_t)i, 0, nullptr);
+        if (!th) { CloseHandle(g_mp.ev[i]); break; }
+        CloseHandle(th); g_mp.n = i + 1;
+    }
+    g_mpInit = true;
+    LOG("mipmaps: %d worker threads for building mip levels", g_mp.n);
+}
 typedef HRESULT (__stdcall *UpdTex_t)(void*, void*, void*);
 static UpdTex_t o_UpdTex = nullptr;
 static HRESULT __stdcall h_UpdTex(void* dev, void* src, void* dst) {
@@ -258,7 +304,11 @@ static HRESULT __stdcall h_UpdTex(void* dev, void* src, void* dst) {
             }
             int w = (int)desc[6], h = (int)desc[7];
             uint8_t* tmp = ok ? (uint8_t*)malloc((size_t)w * h * 2) : nullptr;   // two half-size RGBA levels
-            if (tmp) { Dxt1BuildChain(lvp, pitch, (int)n, w, h, tmp); free(tmp); }
+            if (tmp) {
+                if (g_mp.n > 0 && TryEnterCriticalSection(&g_mpCs)) { Dxt1BuildChain(lvp, pitch, (int)n, w, h, tmp, MipPFor); LeaveCriticalSection(&g_mpCs); }
+                else Dxt1BuildChain(lvp, pitch, (int)n, w, h, tmp);
+                free(tmp);
+            }
             for (DWORD i = 0; i < n; ++i) if (locked & (1u << i)) ((Unlock_t)tv[20])(src, i);
             if (tmp) {
                 QueryPerformanceCounter(&t1); QueryPerformanceFrequency(&fq);
@@ -270,5 +320,5 @@ static HRESULT __stdcall h_UpdTex(void* dev, void* src, void* dst) {
 }
 static void MipDeviceHooks(void* dev) {
     if (!g_mipCsInit) { InitializeCriticalSection(&g_mipCs); g_mipCsInit = true; }
-    if (!o_UpdTex && g_mipFix) o_UpdTex = (UpdTex_t)PatchVtbl(*(void***)dev, 31, (void*)h_UpdTex);
+    if (!o_UpdTex && g_mipFix) { MipPoolInit(); o_UpdTex = (UpdTex_t)PatchVtbl(*(void***)dev, 31, (void*)h_UpdTex); }
 }

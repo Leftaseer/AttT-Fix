@@ -350,10 +350,12 @@ local ok, err = pcall(function()
       function(d) q[5] = qMsaa[clamp(idxOf(qMsaa, q[5]) + d, #qMsaa)] end, function() return idxOf(qMsaa, q[5]), #qMsaa end)
     -- renderer (next start)
     if AttTFix_GetRenderer then
-      local rset, ract, ravail = AttTFix_GetRenderer()
+      local rset, ract, ravail, rwhy = AttTFix_GetRenderer()
+      local whyRu = { "НУЖЕН LAA", "НЕТ ФАЙЛА DXVK", "НЕТ VULKAN", "НЕТ VULKAN 1.3" }
+      local whyEn = { "NEEDS LAA", "NO DXVK FILE", "NO VULKAN", "NO VULKAN 1.3" }
       row(386, ru and "РЕНДЕР" or "RENDERER", function()
           local t = rset == 1 and "DXVK (VULKAN)" or "DIRECT3D 9"
-          if rset == 1 and ravail ~= 1 then t = t .. (ru and " - НУЖЕН LAA" or " - NEEDS LAA") end
+          if rset == 1 and ravail ~= 1 then t = t .. " - " .. ((ru and whyRu or whyEn)[rwhy or 1] or (ru and "НЕДОСТУПЕН" or "UNAVAILABLE")) end
           if rset ~= ract then t = t .. (ru and "^ПОСЛЕ ПЕРЕЗАПУСКА" or "^AFTER RESTART") end
           return t end,
         function(d) rset = d > 0 and 1 or 0; AttTFix_SetRenderer(rset) end,

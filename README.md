@@ -44,6 +44,7 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - Master switch: `[Mod] Enabled=0` in `AttTFix.ini` runs the original game.
 - Optional: start from Steam without the Fulqrum launcher (`launcher.ini` with `skip=true`).
 - On-screen FPS / frame-time overlay (F11), optional performance log and sampling profiler.
+- Comparison mode `[Mod] Baseline=1`: the original game with only the F11 counter and the perf log STATS (hooks on Present / Reset only); `[Mod] Enabled=0` switches the mod off completely.
 
 **Performance**
 - Sun / lens flare visibility test without a GPU stall. The original locked the whole back buffer twice per frame
@@ -55,18 +56,19 @@ The whole mod is a single proxy `dinput8.dll` placed next to `ATThrone.exe`. No 
 - 3D sound positions and listener commits on a worker thread (DirectSound is software-emulated and waited on its mixer lock: up to ~13% of a battle frame).
 - Obstacle point-in-polygon test without two atan2 per edge (same result): standing next to a large rock dropped to ~45 FPS, now unaffected.
 - Optional Large Address Aware tool (`AttTFix_LAA.exe`, from `tools/laa.cpp`): 4 GB of address space instead of 2 GB.
-  Required for the optional DXVK renderer (`[Video] Renderer=dxvk` loads `dxvk\d3d9.dll` from the game folder).
+  Required for the optional DXVK renderer (`[Video] Renderer=dxvk` loads `dxvk\d3d9.dll` from the game folder; DXVK 3.1.1 is included in the release archive, zlib license). Before that the mod checks for the LAA exe, the file and a Vulkan 1.3 GPU (`vkCreateInstance` + `vkGetPhysicalDeviceProperties`); otherwise it shows the reason, starts with Direct3D 9 and resets the setting.
 
 **Hotkeys:** F11 — overlay (hidden → FPS / frame times → + toggle panel). While the toggle panel is shown: Ctrl+1 movement/camera smoothing, Ctrl+2 character animation, Ctrl+3 object animation, Ctrl+4 optimizations, Ctrl+5 particles, Ctrl+6 anisotropic filtering, Ctrl+7 MSAA, Ctrl+8 tree transition, Ctrl+9 view distance, Ctrl+0 one-frame render target trace to the log (the digits are hidden from the game while Ctrl is held). F10 / F9 / F7 still work.
 
 ## Installing a release
 
-1. Download `AttTFix-1.3.1.zip` from [Releases](../../releases).
+1. Download `AttTFix-1.3.2.zip` from [Releases](../../releases).
 2. Copy `dinput8.dll` into the game folder (Steam → right click the game → Manage → Browse local files).
 3. Optional: back up your `launcher.ini` and replace it with the one from the archive to skip the launcher.
-4. Start the game. Settings are created in `AttTFix.ini`; details are in `dist/README_EN.txt`.
+4. Optional, for the DXVK renderer: run `AttTFix_LAA.exe` once in the game folder and copy the `dxvk` folder from the archive there, then pick DXVK in Options → "ATTTFIX".
+5. Start the game. Settings are created in `AttTFix.ini`; details are in `dist/README_EN.txt`.
 
-To uninstall, delete `dinput8.dll` and `AttTFix.ini`.
+To uninstall, delete `dinput8.dll`, `AttTFix.ini` and the `dxvk` folder.
 
 ## Building from source
 
@@ -138,7 +140,7 @@ No game code or assets are included in this repository.
 - Исправлено: курсор Windows поверх игры после запуска, «крутящиеся» части моделей некоторых юнитов, подёргивание портала, испорченные дальности деревьев в сохранённых настройках, блёклое окно опций после смены MSAA.
 - Общий выключатель: `[Mod] Enabled=0` в `AttTFix.ini` — игра работает как оригинал.
 - Необязательно: запуск из Steam без лаунчера (`launcher.ini` со строкой `skip=true`).
-- Счётчик FPS (F11), журнал производительности и профайлер по желанию.
+- Счётчик FPS (F11), журнал производительности и профайлер по желанию. Режим сравнения `[Mod] Baseline=1`: оригинальная игра, от мода — только счётчик и журнал.
 
 **Графика**
 - Анизотропная фильтрация 16x и мип-уровни для текстур мира (`[Video] Mipmaps=1`): земля вдали больше не «зернит» и не мельтешит, особенно с текстурами высокого разрешения.
@@ -156,18 +158,19 @@ No game code or assets are included in this repository.
 - Эффекты меняют только отличающиеся состояния рендера, с DXVK — восстанавливают их отложенно.
 - SSE-скиннинг скелетных моделей с проверкой против оригинала прямо в игре; 3D-звук в отдельном потоке.
 - Проверка «точка внутри препятствия» без двух atan2 на каждое ребро (тот же результат): у большого камня FPS падал до ~45, теперь нет.
-- Утилита `AttTFix_LAA.exe` (`tools/laa.cpp`): 4 ГБ адресного пространства вместо 2 ГБ. Нужна для DXVK (`[Video] Renderer=dxvk`).
+- Утилита `AttTFix_LAA.exe` (`tools/laa.cpp`): 4 ГБ адресного пространства вместо 2 ГБ. Нужна для DXVK (`[Video] Renderer=dxvk`; DXVK 3.1.1 входит в архив релиза). Перед запуском с DXVK мод проверяет наличие Vulkan 1.3 и при проблеме показывает причину и запускает игру на Direct3D 9.
 
 **Клавиши:** F11 — оверлей (скрыт → FPS и время кадра → + панель переключателей). Пока открыта панель: Ctrl+1 движение и камера, Ctrl+2 анимации персонажей, Ctrl+3 анимации объектов, Ctrl+4 оптимизации, Ctrl+5 частицы, Ctrl+6 анизотропная фильтрация, Ctrl+7 MSAA, Ctrl+8 переход деревьев, Ctrl+9 дальность прорисовки (цифры с Ctrl игре не передаются). F10 / F9 / F7 тоже работают.
 
 ### Установка
 
-1. Скачайте `AttTFix-1.3.1.zip` в разделе [Releases](../../releases).
+1. Скачайте `AttTFix-1.3.2.zip` в разделе [Releases](../../releases).
 2. Скопируйте `dinput8.dll` в папку игры (Steam → правой кнопкой по игре → «Управление» → «Просмотреть локальные файлы»).
 3. Необязательно: сохраните свой `launcher.ini` и замените его файлом из архива, чтобы игра запускалась без лаунчера.
-4. Запустите игру. Настройки появятся в `AttTFix.ini`, подробности — в `dist/README_RU.txt`.
+4. Необязательно, для рендера DXVK: запустите один раз `AttTFix_LAA.exe` в папке игры и скопируйте туда папку `dxvk` из архива, затем выберите DXVK в «Опциях» → «ATTTFIX».
+5. Запустите игру. Настройки появятся в `AttTFix.ini`, подробности — в `dist/README_RU.txt`.
 
-Удаление: удалите `dinput8.dll` и `AttTFix.ini`.
+Удаление: удалите `dinput8.dll`, `AttTFix.ini` и папку `dxvk`.
 
 ### Сборка из исходников
 

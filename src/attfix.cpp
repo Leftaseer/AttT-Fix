@@ -10,7 +10,7 @@
 #include <math.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
-#define ATTFIX_VERSION "1.3.1"
+#define ATTFIX_VERSION "1.3.2"
 
 // ---------------------------------------------------------------- log
 static FILE* g_log = nullptr;
@@ -31,6 +31,7 @@ static int g_vsync = 1;
 static UINT g_devInterval = 0;                  // present interval the device was created / reset with
 static volatile bool g_vsyncResetPending = false; // VSync changed in the options: re-create the swap chain (engine restore)
 static int g_dxvkActive = 0;
+static bool g_baseline = false;   // [Mod] Baseline=1: original game + FPS counter only
 // Present interval for the device. With DXVK always ONE: VSync off is then done per Present with
 // D3DPRESENT_FORCEIMMEDIATE (DXVK honours it in Present/PresentEx and only re-creates its Vulkan swap chain), so the
 // VSync option switches at once, without a device reset. The system d3d9 (no PresentEx on a non-Ex device) keeps
@@ -278,14 +279,82 @@ static HRESULT __stdcall h_CreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd
     }
     return hr;
 }
+// ---------------------------------------------------------------- DXVK availability
+// DXVK needs: the 4 GB (Large Address Aware) exe - it runs out of 2 GB at high resolutions; dxvk\d3d9.dll; a Vulkan
+// 1.3 driver with a real GPU (DXVK 2.x+ requirement). Checked once (vkCreateInstance takes ~0.1 s) and cached.
+// 0 = available, 1 = exe not LAA, 2 = no dxvk\d3d9.dll, 3 = no Vulkan driver, 4 = no GPU with Vulkan 1.3
+static bool LangEn();
+static char g_iniPath[MAX_PATH];
+static int g_dxvkCheck = -1; static char g_dxvkWhy[200] = "";
+static int VulkanCheck(char* why, size_t n) {
+    HMODULE vk = LoadLibraryA("vulkan-1.dll");
+    if (!vk) { snprintf(why, n, "vulkan-1.dll not found"); return 3; }
+    typedef int (__stdcall *CreateInst_t)(const void*, const void*, void**);
+    typedef void (__stdcall *DestroyInst_t)(void*, const void*);
+    typedef int (__stdcall *EnumPD_t)(void*, unsigned*, void**);
+    typedef void (__stdcall *PDProps_t)(void*, void*);
+    auto ci = (CreateInst_t)GetProcAddress(vk, "vkCreateInstance");
+    auto di = (DestroyInst_t)GetProcAddress(vk, "vkDestroyInstance");
+    auto ep = (EnumPD_t)GetProcAddress(vk, "vkEnumeratePhysicalDevices");
+    auto gp = (PDProps_t)GetProcAddress(vk, "vkGetPhysicalDeviceProperties");
+    if (!ci || !di || !ep || !gp) { snprintf(why, n, "vulkan-1.dll has no Vulkan entry points"); return 3; }
+    const unsigned v13 = (1u << 22) | (3u << 12);
+    struct { unsigned sType; const void* next; const char* app; unsigned appV; const char* eng; unsigned engV; unsigned api; } ai = { 0, nullptr, "AttTFix", 1, "AttTFix", 1, v13 };
+    struct { unsigned sType; const void* next; unsigned flags; const void* app; unsigned nl; const char* const* l; unsigned ne; const char* const* e; } ici = { 1, nullptr, 0, &ai, 0, nullptr, 0, nullptr };
+    void* inst = nullptr;
+    int r = ci(&ici, nullptr, &inst);
+    if (r != 0 || !inst) { snprintf(why, n, "vkCreateInstance failed (VkResult %d)", r); return 3; }
+    void* pd[16]; unsigned cnt = 16;
+    r = ep(inst, &cnt, pd);
+    int res = 4; char best[160] = "";
+    if (r < 0 || !cnt) snprintf(best, sizeof best, "no Vulkan devices");
+    for (unsigned i = 0; i < cnt && i < 16; ++i) {
+        static unsigned long long props[512];                 // VkPhysicalDeviceProperties (~0.8 KB)
+        memset(props, 0, sizeof props); gp(pd[i], props);
+        const unsigned* u = (const unsigned*)props;
+        unsigned api = u[0] & 0x1FFFFFFF, type = u[4]; const char* name = (const char*)props + 20;
+        LOG("vulkan: device %u \"%.100s\" Vulkan %u.%u.%u type %u", i, name, (api >> 22) & 0x7F, (api >> 12) & 0x3FF, api & 0xFFF, type);
+        if (api >= v13 && type != 4 /*CPU*/) res = 0;
+        else if (res != 0) snprintf(best, sizeof best, "\"%.100s\" supports Vulkan %u.%u%s", name, (api >> 22) & 0x7F, (api >> 12) & 0x3FF, type == 4 ? " (software)" : "");
+    }
+    di(inst, nullptr);
+    if (res) snprintf(why, n, "%s", best[0] ? best : "no GPU with Vulkan 1.3");
+    return res;
+}
+static int DxvkCheck() {
+    if (g_dxvkCheck >= 0) return g_dxvkCheck;
+    auto nt = (IMAGE_NT_HEADERS*)((BYTE*)GetModuleHandleA(nullptr) + ((IMAGE_DOS_HEADER*)GetModuleHandleA(nullptr))->e_lfanew);
+    char p[MAX_PATH]; snprintf(p, sizeof p, "%sdxvk\\d3d9.dll", g_dir);
+    if (!(nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE)) { g_dxvkCheck = 1; snprintf(g_dxvkWhy, sizeof g_dxvkWhy, "ATThrone.exe is not Large Address Aware"); }
+    else if (GetFileAttributesA(p) == INVALID_FILE_ATTRIBUTES) { g_dxvkCheck = 2; snprintf(g_dxvkWhy, sizeof g_dxvkWhy, "%s not found", p); }
+    else g_dxvkCheck = VulkanCheck(g_dxvkWhy, sizeof g_dxvkWhy);
+    LOG("renderer: DXVK %s%s%s", g_dxvkCheck ? "unavailable" : "available", g_dxvkCheck ? " - " : "", g_dxvkWhy);
+    return g_dxvkCheck;
+}
+// DXVK selected but unavailable: tell the player once and switch the setting back to Direct3D 9
+static void DxvkFallbackMessage(int code, const char* why) {
+    WritePrivateProfileStringA("Video", "Renderer", "d3d9  ; d3d9 = system Direct3D 9, dxvk = DXVK (Vulkan) from the dxvk folder", g_iniPath);
+    bool en = LangEn(); char msg[900];
+    const char* what = en ?
+        (code == 1 ? "ATThrone.exe is limited to 2 GB of memory, which is not enough for DXVK.\nRun AttTFix_LAA.exe once in the game folder, then choose DXVK again." :
+         code == 2 ? "The DXVK library dxvk\\d3d9.dll is missing in the game folder.\nCopy the dxvk folder from the AttTFix archive, then choose DXVK again." :
+         code == 3 ? "Vulkan is not available on this system (no Vulkan driver).\nDXVK needs a graphics card and driver with Vulkan 1.3 support; updating the graphics driver may help." :
+                     "No graphics card with Vulkan 1.3 support was found.\nDXVK needs Vulkan 1.3; updating the graphics driver may help.") :
+        (code == 1 ? "ATThrone.exe ограничен 2 ГБ памяти, а DXVK этого мало.\nЗапустите один раз AttTFix_LAA.exe в папке игры и снова выберите DXVK." :
+         code == 2 ? "В папке игры нет библиотеки DXVK dxvk\\d3d9.dll.\nСкопируйте папку dxvk из архива AttTFix и снова выберите DXVK." :
+         code == 3 ? "Vulkan в системе недоступен (нет драйвера Vulkan).\nDXVK нужна видеокарта и драйвер с поддержкой Vulkan 1.3; может помочь обновление драйвера видеокарты." :
+                     "Не найдена видеокарта с поддержкой Vulkan 1.3.\nDXVK нужен Vulkan 1.3; может помочь обновление драйвера видеокарты.");
+    snprintf(msg, sizeof msg, en ? "%s\n\n(%s)\n\nThe game starts with Direct3D 9; the renderer setting is switched back to Direct3D 9."
+                                 : "%s\n\n(%s)\n\nИгра запущена на Direct3D 9; в настройках выбран рендер Direct3D 9.", what, why);
+    wchar_t w[900]; if (!MultiByteToWideChar(CP_UTF8, 0, msg, -1, w, 900)) w[0] = 0;   // the source text is UTF-8
+    MessageBoxW(nullptr, w, L"AttTFix: DXVK", MB_OK | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND);
+}
+static HRESULT __stdcall h_BCreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd, DWORD flags, D3DPP* p, void** out);
 static void* __stdcall h_D3DCreate(UINT sdk) {
     void* d3d = nullptr;
-    if (g_renderer == 1) {   // DXVK needs more address space than 2 GB at high resolutions -> only with LAA
-        auto nt = (IMAGE_NT_HEADERS*)((BYTE*)GetModuleHandleA(nullptr) + ((IMAGE_DOS_HEADER*)GetModuleHandleA(nullptr))->e_lfanew);
-        if (!(nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE)) {
-            g_renderer = 0;
-            LOG("renderer: DXVK skipped - ATThrone.exe is not Large Address Aware (2 GB limit, run AttTFix_LAA.exe); using system d3d9");
-        }
+    if (g_renderer == 1) {
+        int c = DxvkCheck();
+        if (c) { g_renderer = 0; LOG("renderer: DXVK requested but unavailable (%s); using system d3d9", g_dxvkWhy); DxvkFallbackMessage(c, g_dxvkWhy); }
     }
     if (g_renderer == 1) {
         char p[MAX_PATH]; snprintf(p, sizeof p, "%sdxvk\\d3d9.dll", g_dir);
@@ -293,6 +362,7 @@ static void* __stdcall h_D3DCreate(UINT sdk) {
         auto f = m ? (D3DCreate_t)GetProcAddress(m, "Direct3DCreate9") : nullptr;
         if (f) { d3d = f(sdk); g_dxvkActive = d3d != nullptr; LOG("renderer: DXVK (%s) -> %p", p, d3d); }
         else LOG("renderer: DXVK requested but %s could not be loaded (error %lu), using system d3d9", p, GetLastError());
+        if (!d3d) { char why[200]; snprintf(why, sizeof why, "%s: error %lu", p, GetLastError()); DxvkFallbackMessage(2, why); }
     }
     if (!d3d) d3d = o_D3DCreate(sdk);
     LOG("Direct3DCreate9(%u) -> %p", sdk, d3d);
@@ -303,7 +373,7 @@ static void* __stdcall h_D3DCreate(UINT sdk) {
         struct { UINT W, H, Refresh; DWORD Fmt; } mode;
         typedef HRESULT (__stdcall *GADM_t)(void*, UINT, void*);
         if (((GADM_t)vt[8])(d3d, 0, &mode) >= 0) LOG("desktop mode %ux%u @%uHz fmt=%lu", mode.W, mode.H, mode.Refresh, mode.Fmt);
-        o_CreateDevice = (CreateDevice_t)PatchVtbl(vt, 16, (void*)h_CreateDevice);
+        o_CreateDevice = (CreateDevice_t)PatchVtbl(vt, 16, g_baseline ? (void*)h_BCreateDevice : (void*)h_CreateDevice);
     }
     return d3d;
 }
@@ -558,7 +628,6 @@ static Canvas GetCanvas() {
     c.ox = (c.rw - c.cw) / 2; c.oy = (c.rh - c.ch) / 2;
     return c;
 }
-static char g_iniPath[MAX_PATH];
 static int g_skipIntro = 0;
 static int L_GetIntro(void* L) { LPushNum(L, (float)g_skipIntro); return 1; }
 static int L_SetIntro(void* L) {
@@ -570,6 +639,7 @@ static int L_SetIntro(void* L) {
 // ---- language: the Russian localization is Resource1.pak (overrides Resource0), Localization.pak is the same set
 // of 53 files in English (normally swapped in by the Steam launcher). Language=en opens Localization.pak instead.
 static int g_langSetting = 0, g_langActive = 0;   // 0 = ru, 1 = en
+static bool LangEn() { return g_langSetting != 0; }
 static DWORD g_langRedirects = 0;
 typedef HANDLE (WINAPI *CFA_t)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 static CFA_t o_CFA = nullptr;
@@ -1109,14 +1179,20 @@ static bool KeyPressed(int vk, bool& down) {
     bool k = (GetAsyncKeyState(vk) & 0x8000) != 0, r = k && !down && GetForegroundWindow() == g_hwnd;
     down = k; return r;
 }
+static void OverlayToggles(void* dev); static void DrawOverlayText(void* dev);
 static void DrawOverlay(void* dev) {
-    static bool d9 = false, d10 = false, d11 = false;
+    static bool d11 = false;
     if (KeyPressed(VK_F11, d11)) {   // hidden -> frame / performance info -> + toggles -> hidden (kept in the ini)
-        g_showFps = g_showFps >= 2 ? 0 : g_showFps + 1;
+        g_showFps = g_showFps >= (g_baseline ? 1 : 2) ? 0 : g_showFps + 1;
         WritePrivateProfileStringA("Perf", "ShowFps", g_showFps == 2 ? "2  ; on-screen overlay: 0 = off, 1 = FPS / frame times, 2 = + Ctrl+digit toggles (F11 cycles)" :
                                    g_showFps == 1 ? "1  ; on-screen overlay: 0 = off, 1 = FPS / frame times, 2 = + Ctrl+digit toggles (F11 cycles)" :
                                                     "0  ; on-screen overlay: 0 = off, 1 = FPS / frame times, 2 = + Ctrl+digit toggles (F11 cycles)", g_iniPath);
     }
+    if (!g_baseline) OverlayToggles(dev);
+    DrawOverlayText(dev);
+}
+static void OverlayToggles(void* dev) {
+    static bool d9 = false, d10 = false;
     if (KeyPressed(VK_F9, d9)) { g_animBlend = !g_animBlend; Toast(g_animBlend ? "F9  animation blending: ON" : "F9  animation blending: OFF (original 30 fps)"); }
     static bool d8 = false;
     if (KeyPressed(VK_F8, d8)) { if (g_atr) { fclose(g_atr); g_atr = nullptr; } g_atrOn = true; g_atrUntil = g_frameMs + 4000.0; Toast("F8  animation trace: recording all animated models for 4 s"); }
@@ -1140,6 +1216,8 @@ static void DrawOverlay(void* dev) {
         int on = !(g_optSun || g_optTrees || g_optPoly || g_optFx || g_optSort || g_asyncSnd || g_optSkin); g_optSun = g_optTrees = g_optPoly = g_optFx = g_optSort = on; if (g_sndRun) g_asyncSnd = on; if (o_Skin) SkinToggle(on);
         Toast(on ? "optimizations (sun test, trees, polygon test, effect states, sound, skinning): ON" : "optimizations: OFF (original)");
     }
+}
+static void DrawOverlayText(void* dev) {
     bool toast = g_toastUntil && GetTickCount() < g_toastUntil;
     if (!g_showFps && !toast) return;
     if (!g_font) {
@@ -1151,7 +1229,9 @@ static void DrawOverlay(void* dev) {
         if (!cf || cf(dev, h, 0, 700, 1, FALSE, DEFAULT_CHARSET, 0, ANTIALIASED_QUALITY, 0, "Consolas", &g_font) < 0) { failed = true; LOG("overlay: font creation failed"); return; }
     }
     char line[700]; int n = 0; line[0] = 0;
-    if (g_showFps) {
+    if (g_showFps && g_baseline)
+        n += snprintf(line + n, sizeof line - n, "%.0f FPS  %.2f ms (max %.1f)  %s  ORIGINAL GAME (AttTFix Baseline=1)\n", g_ovFps, g_ovMs, g_ovMax, g_dxvkActive ? "DXVK" : "D3D9");
+    else if (g_showFps) {
         char cap[48] = "";
         int lim = g_fpsLimit;
         if (g_bgInactive && g_bgFps > 0 && (lim <= 0 || lim > g_bgFps)) snprintf(cap, sizeof cap, "  cap %d (background)", g_bgFps);
@@ -1291,6 +1371,71 @@ static void InstallRenderRewrite() {
     LOG("render function replaced (desktop refresh %d Hz, overlay %s, F11 cycles off / FPS / full)", g_refreshHz, g_showFps >= 2 ? "full" : g_showFps ? "FPS" : "off");
 }
 
+
+// ---------------------------------------------------------------- [Mod] Baseline=1: the original game + FPS counter
+// For comparisons: nothing of the game is patched (as with Enabled=0) except the device's Present / Reset, where the
+// F11 counter (FPS, frame time, max) is drawn, and AttTFix_perf.log STATS lines with [Perf] Log=1. The renderer
+// setting is honoured (DXVK is a library swap, not a change of the game), so both modes can be compared on one API.
+static Present_t o_BPresent = nullptr; static Reset_t o_BReset = nullptr;
+static float g_bFt[8192]; static int g_bN = 0; static LONGLONG g_bWin = 0;
+static int CmpFloat(const void* a, const void* b) { float x = *(const float*)a, y = *(const float*)b; return x < y ? -1 : x > y; }
+static void BaselineFrame(double ft) {
+    static double acc = 0, mx = 0; static int n = 0; static LONGLONG t0 = 0;
+    LONGLONG now = Now(); if (!t0) t0 = now;
+    acc += ft; if (ft > mx) mx = ft; ++n;
+    double el = (now - t0) * g_tickMs;
+    if (el >= 500.0) { g_ovFps = n * 1000.0 / el; g_ovMs = acc / n; g_ovMax = mx; acc = 0; mx = 0; n = 0; t0 = now; }
+    if (!g_perf) return;
+    if (g_bN < 8192) g_bFt[g_bN++] = (float)ft;
+    if (!g_bWin) g_bWin = now;
+    double w = (now - g_bWin) * g_tickMs;
+    if (w >= 5000.0 && g_bN) {
+        double sum = 0; for (int i = 0; i < g_bN; ++i) sum += g_bFt[i];
+        qsort(g_bFt, g_bN, sizeof(float), CmpFloat);
+        int nw = g_bN / 100; if (nw < 1) nw = 1; double ws = 0; for (int i = g_bN - nw; i < g_bN; ++i) ws += g_bFt[i];
+        PLOG("STATS %4.1fs frames=%d fps=%.1f 1%%low=%.1f | frame ms avg=%.2f p50=%.2f p99=%.2f max=%.2f | baseline: original game, %s",
+             w / 1000.0, g_bN, g_bN * 1000.0 / w, 1000.0 * nw / ws, sum / g_bN, g_bFt[g_bN / 2], g_bFt[g_bN * 99 / 100], g_bFt[g_bN - 1], g_dxvkActive ? "DXVK" : "D3D9");
+        g_bN = 0; g_bWin = now;
+    }
+}
+static HRESULT __stdcall h_BPresent(void* dev, const void* a, const void* b, HWND c, const void* d) {
+    static LONGLONG last = 0; LONGLONG now = Now();
+    if (last) BaselineFrame((now - last) * g_tickMs);
+    last = now;
+    void** vt = *(void***)dev;
+    if (((Dev0_t)vt[3])(dev) == 0 && ((Dev0_t)vt[41])(dev) >= 0) {   // TestCooperativeLevel ok -> BeginScene
+        DrawOverlay(dev);
+        ((Dev0_t)vt[42])(dev);                                          // EndScene
+    }
+    return o_BPresent(dev, a, b, c, d);
+}
+static HRESULT __stdcall h_BReset(void* dev, D3DPP* p) { FontRelease(); return o_BReset(dev, p); }
+static HRESULT __stdcall h_BCreateDevice(void* d3d, UINT ad, DWORD type, HWND wnd, DWORD flags, D3DPP* p, void** out) {
+    HRESULT hr = o_CreateDevice(d3d, ad, type, wnd, flags, p, out);
+    LOG("baseline: CreateDevice %ux%u windowed=%d interval=%lx -> %08lX", p ? p->W : 0, p ? p->H : 0, p ? p->Windowed : 0, p ? p->Interval : 0, hr);
+    if (hr >= 0 && out && *out) {
+        if (!g_hwnd) g_hwnd = p && p->hwnd ? p->hwnd : wnd;
+        void** vt = *(void***)*out;
+        if (!o_BPresent) { o_BReset = (Reset_t)PatchVtbl(vt, 16, (void*)h_BReset); o_BPresent = (Present_t)PatchVtbl(vt, 17, (void*)h_BPresent); }
+    }
+    return hr;
+}
+static void InitBaseline(const char* path) {
+    char tmp[16];
+    g_baseline = true;
+    LARGE_INTEGER f; QueryPerformanceFrequency(&f); g_tickMs = 1000.0 / (double)f.QuadPart;
+    g_showFps = GetPrivateProfileIntA("Perf", "ShowFps", 0, path); if (g_showFps < 0) g_showFps = 0; if (g_showFps > 1) g_showFps = 1;
+    GetPrivateProfileStringA("Game", "Language", "ru", tmp, sizeof tmp, path); g_langSetting = !_strnicmp(tmp, "en", 2) ? 1 : 0;
+    GetPrivateProfileStringA("Video", "Renderer", "d3d9", tmp, sizeof tmp, path); g_renderer = !_strnicmp(tmp, "dxvk", 4) ? 1 : 0;
+    if (GetPrivateProfileIntA("Perf", "Log", 0, path)) {
+        char p[MAX_PATH]; snprintf(p, sizeof p, "%sAttTFix_perf.log", g_dir);
+        char prev[MAX_PATH]; snprintf(prev, sizeof prev, "%sAttTFix_perf.prev.log", g_dir); DeleteFileA(prev); MoveFileA(p, prev);
+        g_perf = fopen(p, "w");
+        PLOG("AttTFix performance log, BASELINE mode ([Mod] Baseline=1): the original game, STATS every 5 s");
+    }
+    o_D3DCreate = (D3DCreate_t)PatchIAT("d3d9.dll", "Direct3DCreate9", (void*)h_D3DCreate);
+    LOG("[Mod] Baseline=1: original game; only the FPS counter (F11) and the perf log are active; renderer %s", g_renderer ? "dxvk" : "d3d9");
+}
 
 // ---------------------------------------------------------------- optimizations
 // 1) 3D sound listener (0x518D90, virtual thiscall(dt)): the original pushes position/orientation to
@@ -2169,6 +2314,9 @@ static void Init() {
     if (!GetPrivateProfileStringA("Mod", "Enabled", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Mod", "Enabled", "1  ; 0 = AttTFix does nothing (original game; all other settings are ignored)", path);
     if (GetPrivateProfileIntA("Mod", "Enabled", 1, path) == 0) { g_modOff = true; LOG("[Mod] Enabled=0: the mod is switched off, the game runs unmodified"); return; }
+    if (!GetPrivateProfileStringA("Mod", "Baseline", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Mod", "Baseline", "0  ; 1 = for comparisons: the original game with only the FPS counter (F11) and the perf log ([Perf] Log=1)", path);
+    if (GetPrivateProfileIntA("Mod", "Baseline", 0, path) != 0) { g_modOff = true; InitBaseline(path); return; }
     if (!GetPrivateProfileStringA("Video", "VSync", "", tmp, sizeof tmp, path)) {
         WritePrivateProfileStringA("Video", "VSync", "1  ; 1 = vertical sync (smooth, no tearing), 0 = off", path);
         WritePrivateProfileStringA("Video", "FpsLimit", "0  ; frame cap when VSync=0 (0 = unlimited)", path);

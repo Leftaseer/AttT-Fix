@@ -371,15 +371,14 @@ static int L_SetQuality(void* L) {
     LOG("options: quality objects x%.1f trees x%.1f 3D trees to %.0f fade %d aniso %d msaa %d", g_objDist, g_treeDist, g_tree3D, g_dissolve, g_anisoOn ? g_aniso : 0, g_msaaOn ? g_msaa : 0);
     return 0;
 }
-// Lua: AttTFix_GetRenderer() -> setting (0 = d3d9, 1 = dxvk), active, dxvk available (LAA exe + dxvk\d3d9.dll)
+// Lua: AttTFix_GetRenderer() -> setting (0 = d3d9, 1 = dxvk), active, dxvk available (1/0), why not
+//      (0 ok, 1 exe not LAA, 2 no dxvk\d3d9.dll, 3 no Vulkan, 4 no GPU with Vulkan 1.3; see DxvkCheck)
 //      AttTFix_SetRenderer(v): saved to AttTFix.ini, used on the next start
 static int L_GetRenderer(void* L) {
     char t[32]; GetPrivateProfileStringA("Video", "Renderer", "d3d9", t, sizeof t, g_iniPath);
-    auto nt = (IMAGE_NT_HEADERS*)((BYTE*)GetModuleHandleA(nullptr) + ((IMAGE_DOS_HEADER*)GetModuleHandleA(nullptr))->e_lfanew);
-    char p[MAX_PATH]; snprintf(p, sizeof p, "%sdxvk\\d3d9.dll", g_dir);
-    bool avail = (nt->FileHeader.Characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE) && GetFileAttributesA(p) != INVALID_FILE_ATTRIBUTES;
-    LPushNum(L, !_strnicmp(t, "dxvk", 4) ? 1.0f : 0.0f); LPushNum(L, (float)g_dxvkActive); LPushNum(L, avail ? 1.0f : 0.0f);
-    return 3;
+    int c = g_dxvkActive ? 0 : DxvkCheck();
+    LPushNum(L, !_strnicmp(t, "dxvk", 4) ? 1.0f : 0.0f); LPushNum(L, (float)g_dxvkActive); LPushNum(L, c ? 0.0f : 1.0f); LPushNum(L, (float)c);
+    return 4;
 }
 static int L_SetRenderer(void* L) {
     bool dx = LNum(L, 1) != 0;

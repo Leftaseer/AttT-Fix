@@ -1,8 +1,21 @@
-﻿AttTFix 1.3.1 — technical update for Ascension to the Throne
+﻿AttTFix 1.3.2 — technical update for Ascension to the Throne
 =============================================================
 
 An unofficial, non-commercial mod for the Steam version of the game. No game files are
-modified: the whole mod is a single dinput8.dll that the game loads by itself.
+modified: the mod is a dinput8.dll that the game loads by itself (plus an optional dxvk folder).
+
+
+WHAT'S NEW IN 1.3.2
+-------------------
+  * DXVK is included (dxvk folder, DXVK 3.1.1): no separate download any more.
+  * Before starting with DXVK the mod checks for Vulkan 1.3, dxvk\d3d9.dll and 4 GB of
+    memory (AttTFix_LAA.exe). If something is missing, a message names it, the game starts
+    with Direct3D 9 and the renderer setting goes back to Direct3D 9. The "Renderer" row on
+    the "ATTTFIX" page shows what is missing too.
+  * Texture mip levels (1.3.1) are built on all CPU cores: loading a map and switching MSAA
+    are almost as fast again as without them.
+  * Comparison mode: [Mod] Baseline=1 in AttTFix.ini - the original game with only the FPS
+    counter (F11) and the performance log of the mod. Handy for comparing FPS with the mod.
 
 
 WHAT'S NEW IN 1.3.1
@@ -10,7 +23,7 @@ WHAT'S NEW IN 1.3.1
   * The ground and objects far away no longer look grainy and shimmer while the camera
     moves, most visible with high-resolution (upscaled) texture packs. The game's textures
     had no smaller (mip) levels: the mod now builds them at load time, and the ground, sky
-    and water are drawn with trilinear filtering. Loading a map takes 2-4 seconds longer.
+    and water are drawn with trilinear filtering. Loading a map takes a little longer.
     [Video] Mipmaps=0 turns it off, WorldLodBias sets the softness.
 
 
@@ -139,7 +152,10 @@ INSTALLATION
    memory instead of 2 GB (useful at 4K, required for DXVK, see below). It keeps a backup,
    ATThrone.exe.noLAA.bak; to undo run "AttTFix_LAA.exe /undo". Run it again after a Steam
    update of the game.
-5. Start the game. A settings file, AttTFix.ini, is created next to it on the first start.
+5. (Optional, for the DXVK renderer) Copy the whole dxvk folder from the archive to the game
+   folder (you get dxvk\d3d9.dll next to ATThrone.exe). Needs step 4. Then choose the DXVK
+   renderer in Options -> "ATTTFIX" (see DXVK below).
+6. Start the game. A settings file, AttTFix.ini, is created next to it on the first start.
    The language is picked from your Windows language the first time and can be changed
    in Options.
 
@@ -153,7 +169,7 @@ Works together with mods that add their own Resource2.pak.
 
 UNINSTALL
 ---------
-Delete dinput8.dll, AttTFix.ini and the AttTFix*.log files from the game folder.
+Delete dinput8.dll, AttTFix.ini, the AttTFix*.log files and the dxvk folder (if copied) from the game folder.
 If you replaced launcher.ini, restore your copy or remove the line skip=true from it.
 If you ran AttTFix_LAA.exe, run "AttTFix_LAA.exe /undo" (or verify the game files in Steam:
 Properties -> Installed Files -> Verify integrity).
@@ -209,6 +225,7 @@ Most things are set in the game's Options. The rest is in AttTFix.ini (a text fi
 changes apply on the next start):
 
   [Mod]    Enabled=1           0 = the mod does nothing, the game runs as the original
+           Baseline=0          1 = the original game + only the FPS counter (F11) and the log, for comparisons
   [UI]     Widescreen=1        1 = menus centered in 4:3, 0 = original stretched menus
   [Video]  VSync=1             vertical sync
            FpsLimit=0          FPS limit when VSync=0 (0 = unlimited)
@@ -246,19 +263,24 @@ changes apply on the next start):
 
 DXVK (OPTIONAL)
 ---------------
-DXVK translates Direct3D 9 to Vulkan; it usually gives noticeably more FPS, and in 1.2 the
-tree instancing and the lazy state restore work only with it. Not included.
+DXVK translates Direct3D 9 to Vulkan; it usually gives noticeably more FPS, and the tree
+instancing and the lazy state restore work only with it. It needs a graphics card with a
+Vulkan 1.3 driver (usually cards from about 2016 on with a recent driver).
 1. Run AttTFix_LAA.exe (without it DXVK runs out of memory at high resolutions).
-2. Download DXVK (https://github.com/doitsujin/dxvk/releases) and put x32\d3d9.dll from its
-   archive into a "dxvk" subfolder of the game folder (dxvk\d3d9.dll).
+2. Copy the dxvk folder from the archive to the game folder (you get dxvk\d3d9.dll).
 3. In Options -> "ATTTFIX" pick the DXVK renderer and restart the game
    (or set [Video] Renderer=dxvk in AttTFix.ini). To go back: Direct3D 9.
-The active renderer is shown in the F11 counter (D3D9 or DXVK).
+The active renderer is shown in the F11 counter (D3D9 or DXVK). If DXVK cannot run, the mod
+shows a message with the reason at start and the game runs with Direct3D 9.
+DXVK (https://github.com/doitsujin/dxvk) is (c) Philip Rebohle and contributors, zlib/libpng
+license (text in dxvk\LICENSE.txt). It is included unmodified.
 
 
 TROUBLESHOOTING
 ---------------
 The mod keeps a log in AttTFix.log (the previous run is in AttTFix.prev.log). After a crash
 a .dmp dump file is saved next to it. To check whether the mod is the cause, set [Mod]
-Enabled=0 in AttTFix.ini (or rename dinput8.dll) and start the game again. Individual features can be switched off with the
-toggles (F11 + Ctrl+digit) or in AttTFix.ini.
+Enabled=0 in AttTFix.ini (or rename dinput8.dll) and start the game again. Individual
+features can be switched off with the toggles (F11 + Ctrl+digit) or in AttTFix.ini. On slow
+or old computers building mip levels can be switched off ([Video] Mipmaps=0): faster loading,
+but the ground far away may look grainy (mostly with high-resolution texture packs).

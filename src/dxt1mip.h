@@ -36,9 +36,10 @@ static void Dxt1Decode(const uint8_t* src, int pitch, int w, int h, uint8_t* rgb
 }
 
 // decode a DXT1 level and box-filter it 2x2 in one pass (w, h >= 4 and multiples of 4): output (w/2) x (h/2)
-static void Dxt1DecodeHalf(const uint8_t* src, int pitch, int w, int h, uint8_t* out) {
+static void Dxt1DecodeHalf(const uint8_t* src, int pitch, int w, int h, uint8_t* out, int by0 = 0, int by1 = -1) {
     int bw = w / 4, bh = h / 4, ow = w / 2;
-    for (int by = 0; by < bh; ++by) {
+    if (by1 < 0 || by1 > bh) by1 = bh;
+    for (int by = by0; by < by1; ++by) {
         const uint8_t* row = src + by * pitch;
         for (int bx = 0; bx < bw; ++bx) {
             const uint8_t* b = row + bx * 8;
@@ -65,8 +66,9 @@ static void Dxt1DecodeHalf(const uint8_t* src, int pitch, int w, int h, uint8_t*
     }
 }
 // 2x2 box filter (sizes halve, min 1); alpha averaged and thresholded later by the encoder
-static void Dxt1Down(const uint8_t* s, int w, int h, uint8_t* d, int nw, int nh) {
-    for (int y = 0; y < nh; ++y) for (int x = 0; x < nw; ++x) {
+static void Dxt1Down(const uint8_t* s, int w, int h, uint8_t* d, int nw, int nh, int y0 = 0, int y1 = -1) {
+    if (y1 < 0 || y1 > nh) y1 = nh;
+    for (int y = y0; y < y1; ++y) for (int x = 0; x < nw; ++x) {
         int x0 = x * 2, y0 = y * 2, x1 = x0 + 1 < w ? x0 + 1 : x0, y1 = y0 + 1 < h ? y0 + 1 : y0;
         const uint8_t* a = s + (y0 * w + x0) * 4; const uint8_t* b = s + (y0 * w + x1) * 4;
         const uint8_t* c = s + (y1 * w + x0) * 4; const uint8_t* e = s + (y1 * w + x1) * 4;
@@ -86,9 +88,10 @@ static void Dxt1Down(const uint8_t* s, int w, int h, uint8_t* d, int nw, int nh)
 static inline uint16_t Dxt1Pack565(int r, int g, int b) {
     return (uint16_t)((((r * 31 + 128) >> 8) << 11) | (((g * 63 + 128) >> 8) << 5) | ((b * 31 + 128) >> 8));
 }
-static void Dxt1Encode(const uint8_t* rgba, int w, int h, uint8_t* dst, int pitch) {
+static void Dxt1Encode(const uint8_t* rgba, int w, int h, uint8_t* dst, int pitch, int by0 = 0, int by1 = -1) {
     int bw = (w + 3) / 4, bh = (h + 3) / 4;
-    for (int by = 0; by < bh; ++by) for (int bx = 0; bx < bw; ++bx) {
+    if (by1 < 0 || by1 > bh) by1 = bh;
+    for (int by = by0; by < by1; ++by) for (int bx = 0; bx < bw; ++bx) {
         int px[16][4]; bool trans = false;
         for (int y = 0; y < 4; ++y) for (int x = 0; x < 4; ++x) {
             int sx = bx * 4 + x, sy = by * 4 + y; if (sx >= w) sx = w - 1; if (sy >= h) sy = h - 1;
@@ -146,16 +149,30 @@ static void Dxt1Encode(const uint8_t* rgba, int w, int h, uint8_t* dst, int pitc
 }
 
 // build levels 1..n-1 from level 0 (all DXT1). lv[i]/pitch[i]: locked level memory. tmp: >= (w/2)*(h/2)*4*2 bytes.
-static void Dxt1BuildChain(uint8_t** lv, const int* pitch, int n, int w, int h, uint8_t* tmp) {
+// pfor(count, fn, ctx): runs fn(ctx, i0, i1) over [0, count) split in pieces, possibly on several threads (nullptr:
+// serial). Work per row is the same, so equal pieces are fine.
+typedef void (*Dxt1RangeFn)(void* ctx, int i0, int i1);
+typedef void (*Dxt1PFor)(int count, Dxt1RangeFn fn, void* ctx);
+struct Dxt1Job { const uint8_t* s; uint8_t* d; int w, h, nw, nh, sp, dp; };
+static void Dxt1JobHalf(void* c, int a, int b) { Dxt1Job* j = (Dxt1Job*)c; Dxt1DecodeHalf(j->s, j->sp, j->w, j->h, j->d, a, b); }
+static void Dxt1JobEnc(void* c, int a, int b) { Dxt1Job* j = (Dxt1Job*)c; Dxt1Encode(j->s, j->w, j->h, j->d, j->dp, a, b); }
+static void Dxt1JobDown(void* c, int a, int b) { Dxt1Job* j = (Dxt1Job*)c; Dxt1Down(j->s, j->w, j->h, j->d, j->nw, j->nh, a, b); }
+static inline void Dxt1Run(Dxt1PFor pf, int count, Dxt1RangeFn fn, Dxt1Job* j) {
+    if (pf && count >= 32) pf(count, fn, j); else fn(j, 0, count);
+}
+static void Dxt1BuildChain(uint8_t** lv, const int* pitch, int n, int w, int h, uint8_t* tmp, Dxt1PFor pf = nullptr) {
     if (n < 2 || w < 4 || h < 4 || (w & 3) || (h & 3)) return;
     int cw = w / 2, ch = h / 2;
     uint8_t* cur = tmp; uint8_t* nxt = tmp + (size_t)cw * ch * 4;
-    Dxt1DecodeHalf(lv[0], pitch[0], w, h, cur);
+    Dxt1Job j = { lv[0], cur, w, h, 0, 0, pitch[0], 0 };
+    Dxt1Run(pf, h / 4, Dxt1JobHalf, &j);
     for (int i = 1; i < n; ++i) {
-        Dxt1Encode(cur, cw, ch, lv[i], pitch[i]);
+        Dxt1Job e = { cur, lv[i], cw, ch, 0, 0, 0, pitch[i] };
+        Dxt1Run(pf, (ch + 3) / 4, Dxt1JobEnc, &e);
         if (i + 1 >= n) break;
         int nw = cw > 1 ? cw / 2 : 1, nh = ch > 1 ? ch / 2 : 1;
-        Dxt1Down(cur, cw, ch, nxt, nw, nh);
+        Dxt1Job dn = { cur, nxt, cw, ch, nw, nh, 0, 0 };
+        Dxt1Run(pf, nh, Dxt1JobDown, &dn);
         uint8_t* t = cur; cur = nxt; nxt = t; cw = nw; ch = nh;
     }
 }
