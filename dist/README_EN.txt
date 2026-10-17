@@ -1,8 +1,25 @@
-﻿AttTFix 2.0.0 — technical update for Ascension to the Throne and Ascension to the Throne: Valkyrie
+﻿AttTFix 2.1.0 — technical update for Ascension to the Throne and Ascension to the Throne: Valkyrie
 ==================================================================================================
 
 An unofficial, non-commercial mod for the Steam version of the game. No game files are
 modified: the mod is a dinput8.dll that the game loads by itself (plus an optional dxvk folder).
+
+
+WHAT'S NEW IN 2.1.0
+-------------------
+  * Valkyrie: the English and German Steam versions are supported (before, only the
+    Russian one).
+  * German version of Ascension to the Throne: the mod recognizes the game's language.
+    The language choice in Options is now German / English (it was Russian / English, and
+    German players ended up with English); on the first start the game stays German.
+    The mod's own texts are in English there.
+  * Both games: butterflies flying up from the grass appear as often as intended at any
+    frame rate. The game rolled the dice every rendered frame, so the higher the FPS, the
+    more butterflies.
+  * Both games: water ripples around the hero in shallow water no longer slow down at a
+    high FPS (the game dropped fractions of a millisecond every frame: 10 % slower at
+    300 FPS, 30 % at 700, frozen above 1000). Butterflies and ripples are part of
+    [Game] AmbientRate, like the ambient sounds.
 
 
 WHAT'S NEW IN 2.0.0
@@ -190,7 +207,8 @@ Stability and convenience
   * Fixed crashes: Alt-Tab in fullscreen, returning to the main menu.
   * Cursor and camera sensitivity in Options.
   * "Intro videos" checkbox in Options: the game starts in a couple of seconds.
-  * Language choice, Russian or English (in Options, applied after a restart).
+  * Language choice, Russian or English (German or English in the German version;
+    in Options, applied after a restart).
     The fullscreen checkbox is also available in the English version.
   * Optional background mode ([Game] Background=1).
   * Starting from Steam opens the game directly, without the launcher (launcher.ini).
@@ -224,8 +242,8 @@ Valkyrie: the same in the "Ascension to the Throne Valkyrie" game folder: dinput
 optionally, AttTFix_LAA.exe and the dxvk folder. Step 3 is not needed - Valkyrie has no
 launcher. Each game keeps its own AttTFix.ini.
 
-Compatibility: Steam versions of Ascension to the Throne 1.1.128 and of Valkyrie
-(ATThrone.exe of 2008-07-21). If some part of the game differs, the mod disables
+Compatibility: Steam versions of Ascension to the Throne 1.1.128 (Russian, English,
+German) and of Valkyrie (Russian, English, German). If some part of the game differs, the mod disables
 that particular fix, writes a note to AttTFix.log, and the game keeps working.
 Works together with mods that add their own Resource2.pak.
 
@@ -325,10 +343,11 @@ changes apply on the next start):
            StreamLog=0         Valkyrie: 1 = log sound stream starts and stops
            ShowFps=0           counter: 0 = hidden, 1 = FPS, 2 = FPS + toggles (F11)
            Log=0               1 = write performance statistics to AttTFix_perf.log
-  [Game]   Language=en         ru or en (Valkyrie: ru only)
+  [Game]   Language=en         the game's language (ru / de) or en (Valkyrie: its own only)
            Background=0        1 = the game keeps running (and playing sound) when minimized
            BackgroundFps=30    FPS limit in the background (0 = unlimited)
-           AmbientRate=1       1 = random ambient sounds as often as intended at any FPS
+           AmbientRate=1       1 = random ambient sounds, butterflies and water ripples
+                               as often as intended at any FPS
            StreamFix=1         Valkyrie: 1 = music and ambient sounds without repeats / breaks
 
 

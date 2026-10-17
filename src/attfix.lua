@@ -182,8 +182,8 @@ local ok, err = pcall(function()
       -- row 3: language (applied on the next start)
       if AttTFix_GetLang then
         local ly = 432
-        local setting, active = AttTFix_GetLang()
-        local names = { [0] = "РУССКИЙ", [1] = "ENGLISH" }
+        local setting, active, native = AttTFix_GetLang()
+        local names = { [0] = (native == 2 and "DEUTSCH") or (native == 1 and "ENGLISH") or "РУССКИЙ", [1] = "ENGLISH" }
         local lval = Text:new(AX * sx, (ly + 6) * sy, 9.5 * sy, "", "fStylo", "|", "colorDarkRed.tga")
         local function lshow()
           local t = (ru and "ЯЗЫК: " or "LANGUAGE: ") .. names[setting]

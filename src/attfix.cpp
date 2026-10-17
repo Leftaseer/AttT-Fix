@@ -11,7 +11,8 @@
 #include <math.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
-#define ATTFIX_VERSION "2.0.0"
+#include <vector>
+#define ATTFIX_VERSION "2.1.0"
 
 // ---------------------------------------------------------------- exe profiles
 // The mod is written against the AttT exe (Steam build 2007-12-11, TimeDateStamp 475EABAF). The add-on
@@ -23,6 +24,7 @@
 enum { GAME_ATTT = 0, GAME_VALK = 1, GAME_OFF = 2 };
 #include "exeaddr.h"
 static DWORD g_exeStamp = 0;
+static int g_valkBuild = 0;                   // Valkyrie: 0 = Russian (4883FB4F), 1 = English (49D21BBA), 2 = German (482DD48F)
 static bool ExeImports(const char* dll) {
     BYTE* base = (BYTE*)GetModuleHandleA(nullptr);
     auto nt = (IMAGE_NT_HEADERS*)(base + ((IMAGE_DOS_HEADER*)base)->e_lfanew);
@@ -40,6 +42,8 @@ static int Game() {
         g_exeStamp = nt->FileHeader.TimeDateStamp;
         if (g_exeStamp == 0x475EABAF) g = GAME_ATTT;
         else if (g_exeStamp == 0x4883FB4F) g = GAME_VALK;
+        else if (g_exeStamp == 0x49D21BBA) { g = GAME_VALK; g_valkBuild = 1; }
+        else if (g_exeStamp == 0x482DD48F) { g = GAME_VALK; g_valkBuild = 2; }
         else g = ExeImports("mss32.dll") ? GAME_ATTT : GAME_OFF;   // unknown build: AttT ones use Miles, Valkyrie does not
     }
     return g;
@@ -48,14 +52,31 @@ static inline bool IsValk() { return Game() == GAME_VALK; }
 static DWORD g_adMiss = 0;
 static DWORD ADTry(DWORD a) {
     if (!IsValk()) return a;
+    if (g_valkBuild == 2) {
+        int lo = 0, hi = (int)(sizeof g_valkDeMap / sizeof g_valkDeMap[0]) - 1;
+        while (lo <= hi) { int m = (lo + hi) / 2; if (g_valkDeMap[m].o == a) return g_valkDeMap[m].v; if (g_valkDeMap[m].o < a) lo = m + 1; else hi = m - 1; }
+        return 0;
+    }
     int lo = 0, hi = (int)(sizeof g_valkMap / sizeof g_valkMap[0]) - 1;
-    while (lo <= hi) { int m = (lo + hi) / 2; if (g_valkMap[m].o == a) return g_valkMap[m].v; if (g_valkMap[m].o < a) lo = m + 1; else hi = m - 1; }
+    while (lo <= hi) {
+        int m = (lo + hi) / 2;
+        if (g_valkMap[m].o == a) {
+            DWORD v = g_valkMap[m].v;
+            if (g_valkBuild == 1) for (auto& f : g_valkEnFix) if (f.v == v) return f.e;
+            return v;
+        }
+        if (g_valkMap[m].o < a) lo = m + 1; else hi = m - 1;
+    }
     return 0;
 }
 static DWORD AD(DWORD a) { DWORD v = ADTry(a); if (!v && !g_adMiss) g_adMiss = a; return v; }
+static DWORD VV(DWORD v) {      // address in the Russian Valkyrie build -> this Valkyrie build (Valkyrie-only patches)
+    if (g_valkBuild == 2) { for (auto& e : g_valkDeVV) if (e.v == v) return e.d; if (!g_adMiss) g_adMiss = v; return 0; }
+    return v;                   // English: the same code
+}
 static DWORD ADRev(DWORD v) {   // Valkyrie address -> AttT address (exact entries only)
     if (!IsValk()) return v;
-    for (auto& e : g_valkMap) if (e.v == v) return e.o;
+    for (auto& e : g_valkMap) if (ADTry(e.o) == v) return e.o;
     return 0;
 }
 // compare code at 'at' (an AD() address) with bytes copied from the AttT exe; 0 = equal (like memcmp)
@@ -119,7 +140,7 @@ static DWORD g_listenerSkipped = 0, g_listenerDone = 0;
 static int L_GetVideo(void* L);
 static int L_SetFps(void* L);
 static int g_samplerOn = 1;
-static volatile DWORD g_curFrame = 0;
+static volatile DWORD g_curFrame = 0; static bool g_frameHooked = false;
 static double g_frameMs = 0;
 static FILE* g_atr = nullptr; static double g_atrUntil = 0; static bool g_atrOn = false;   // timestamp of the current frame (ms)
 static int g_profileEvery = 20;
@@ -728,9 +749,34 @@ static int L_SetIntro(void* L) {
     LOG("options: intro videos %s (next start)", g_skipIntro ? "skipped" : "shown");
     return 0;
 }
-// ---- language: the Russian localization is Resource1.pak (overrides Resource0), Localization.pak is the same set
-// of 53 files in English (normally swapped in by the Steam launcher). Language=en opens Localization.pak instead.
-static int g_langSetting = 0, g_langActive = 0;   // 0 = ru, 1 = en
+// ---- language: the localization chosen in Steam is Resource1.pak (overrides Resource0): Russian or German; Localization.pak
+// is the same set of 53 files in English. Language=en opens Localization.pak instead. Which language Resource1.pak holds
+// is read from its localtexts.lua ("GRAFIK" = German, "ВИДЕО" = Russian, "VIDEO" = English).
+static int g_langSetting = 0, g_langActive = 0;   // 0 = Resource1.pak (the game's own), 1 = en (Localization.pak)
+enum { LANG_RU = 0, LANG_EN = 1, LANG_DE = 2 };
+static int g_nativeLang = LANG_RU;                 // language of Resource1.pak
+static const char* const g_langCode[] = { "ru", "en", "de" };
+static int DetectNativeLang() {
+    char p[MAX_PATH]; snprintf(p, sizeof p, "%sResource1.pak", g_dir);
+    FILE* f = fopen(p, "rb"); if (!f) return LANG_RU;
+    int lang = LANG_RU; BYTE h[12];
+    if (fread(h, 1, 12, f) == 12 && !memcmp(h, "GRES", 4)) {
+        int n = *(int*)(h + 8); long off = -1, len = 0; BYTE e[136];
+        for (int i = 0; i < n && i < 100000 && fread(e, 1, 136, f) == 136; ++i)
+            if (!_stricmp((const char*)e, "localtexts.lua")) { off = *(int*)(e + 128); len = *(int*)(e + 132); break; }
+        if (off > 0 && len > 0 && len < (8 << 20)) {
+            std::vector<char> d(len);
+            if (!fseek(f, off, SEEK_SET) && fread(d.data(), 1, len, f) == (size_t)len) {
+                auto has = [&](const char* s) { size_t l = strlen(s); for (long i = 0; i + (long)l <= len; ++i) if (!memcmp(&d[i], s, l)) return true; return false; };
+                if (has("GRAFIK")) lang = LANG_DE;
+                else if (has("\xC2\xC8\xC4\xC5\xCE")) lang = LANG_RU;         // "ВИДЕО" in cp1251
+                else if (has("VIDEO")) lang = LANG_EN;
+            }
+        }
+    }
+    fclose(f);
+    return lang;
+}
 static bool LangEn() { return g_langSetting != 0; }
 static DWORD g_langRedirects = 0;
 #include "wsart.inc"
@@ -804,7 +850,7 @@ static void InstallLanguage() {
     if (g_wsEnabled && !IsValk()) wsart::Make();   // Valkyrie: other menu art (.bmp), not done yet
     snprintf(g_extraPakPath, sizeof g_extraPakPath, "%sAttTFix.pak", g_dir);
     g_extraPak = !IsValk() && GetFileAttributesA(g_extraPakPath) != INVALID_FILE_ATTRIBUTES ? 1 : 0;
-    if (g_langActive != 1) LOG("language: ru (Resource1.pak)");
+    if (g_langActive != 1) LOG("language: %s (Resource1.pak)", g_langCode[g_nativeLang]);
     else {
         char p[MAX_PATH]; snprintf(p, sizeof p, "%sLocalization.pak", g_dir);
         if (GetFileAttributesA(p) == INVALID_FILE_ATTRIBUTES) { LOG("language en requested but %s is missing -> ru", p); g_langActive = 0; }
@@ -830,11 +876,12 @@ static void InstallLanguage() {
     if (g_extraPak) LOG("pak: %s will be read after the last ResourceN.pak (%d modules hooked)", g_extraPakPath, patched);
 }
 static int L_WsArt(void* L) { LPushNum(L, (float)(g_extraPak == 2 ? 1 : 0)); return 1; }
-static int L_GetLang(void* L) { LPushNum(L, (float)g_langSetting); LPushNum(L, (float)g_langActive); return 2; }
+static int L_GetLang(void* L) { LPushNum(L, (float)g_langSetting); LPushNum(L, (float)g_langActive); LPushNum(L, (float)g_nativeLang); return 3; }
 static int L_SetLang(void* L) {
     g_langSetting = LNum(L, 1) != 0 ? 1 : 0;
-    WritePrivateProfileStringA("Game", "Language", g_langSetting ? "en" : "ru", g_iniPath);
-    LOG("options: language -> %s (next start)", g_langSetting ? "en" : "ru");
+    const char* code = g_langSetting ? "en" : g_langCode[g_nativeLang];
+    WritePrivateProfileStringA("Game", "Language", code, g_iniPath);
+    LOG("options: language -> %s (next start)", code);
     return 0;
 }
 static int L_Canvas(void* L) {
@@ -2300,7 +2347,7 @@ static void InstallFrameRewrite() {
     BYTE* t = (BYTE*)AD(0x0044A9C0);
     if (CodeCmp(t, expect, 8)) { LOG("frame rewrite: unexpected bytes, profiler disabled"); return; }
     BYTE j[5] = { 0xE9 }; *(DWORD*)(j + 1) = (DWORD)(void*)h_Frame - (DWORD)(t + 5);
-    PatchBytes(t, j, 5);
+    PatchBytes(t, j, 5); g_frameHooked = true;
     LARGE_INTEGER f; QueryPerformanceFrequency(&f); g_tickMs = 1000.0 / (double)f.QuadPart;
     if (g_perfOn) {
         char p[MAX_PATH]; snprintf(p, sizeof p, "%sAttTFix_perf.log", g_dir);
@@ -2661,14 +2708,14 @@ static void InstallStreamFix(const char* path) {
     g_streamFix = GetPrivateProfileIntA("Game", "StreamFix", 1, path);
     g_streamLog = GetPrivateProfileIntA("Perf", "StreamLog", 0, path);
     static const BYTE sig[16] = { 0x3B, 0xF8, 0x76, 0x04, 0x2B, 0xF8, 0xEB, 0x08, 0x2B, 0xF8, 0x81, 0xC7, 0x40, 0xC4, 0x0A, 0x00 };
-    BYTE* at = (BYTE*)0x006F1404;
+    BYTE* at = (BYTE*)VV(0x006F1404);
     bool mf = at[2] == 0x72 && !memcmp(at, sig, 2) && !memcmp(at + 3, sig + 3, 13);   // exe patched by MusicFix: undo
     if (mf) { static const BYTE jbe = 0x76; PatchBytes(at + 2, &jbe, 1); LOG("stream fix: MusicFix byte found in the exe, undone in memory (it stops the music)"); }
     if (g_streamLog) {
         static const BYTE po[5] = { 0x83, 0xEC, 0x08, 0x53, 0x56 };
         static const BYTE ps[7] = { 0x56, 0x8B, 0xF1, 0x80, 0x7E, 0x7C, 0x00 };
-        o_StreamOpen = (StreamOpen_t)Detour((BYTE*)0x006F1130, po, 5, (void*)h_StreamOpen);
-        o_StreamStop = (StreamStop_t)Detour((BYTE*)0x006F1300, ps, 7, (void*)h_StreamStop);
+        o_StreamOpen = (StreamOpen_t)Detour((BYTE*)VV(0x006F1130), po, 5, (void*)h_StreamOpen);
+        o_StreamStop = (StreamStop_t)Detour((BYTE*)VV(0x006F1300), ps, 7, (void*)h_StreamStop);
     }
     if (!g_streamFix) { LOG("stream fix: off ([Game] StreamFix=0)"); return; }
     if (memcmp(at, sig, 16)) { LOG("stream fix: unexpected bytes, not applied"); return; }
@@ -2690,9 +2737,9 @@ static void InstallStreamFix(const char* path) {
                  0x2B, 0xF8,                               // diff: sub edi, eax
                  0xE9, 0, 0, 0, 0 };                       //       jmp 0x6F1414
     *(DWORD*)(c + 9) = (DWORD)(void*)StreamEqualSkip - (DWORD)(st + 13);
-    *(DWORD*)(c + 21) = 0x006F1490 - (DWORD)(st + 25);
-    *(DWORD*)(c + 34) = 0x006F1414 - (DWORD)(st + 38);
-    *(DWORD*)(c + 41) = 0x006F1414 - (DWORD)(st + 45);
+    *(DWORD*)(c + 21) = VV(0x006F1490) - (DWORD)(st + 25);
+    *(DWORD*)(c + 34) = VV(0x006F1414) - (DWORD)(st + 38);
+    *(DWORD*)(c + 41) = VV(0x006F1414) - (DWORD)(st + 45);
     memcpy(st, c, sizeof c); FlushInstructionCache(GetCurrentProcess(), st, sizeof c);
     BYTE j[16]; memset(j, 0x90, sizeof j); j[0] = 0xE9; *(DWORD*)(j + 1) = (DWORD)st - (DWORD)(at + 5);
     PatchBytes(at, j, 16);
@@ -2715,13 +2762,61 @@ static void __fastcall h_AmbientUpdate(void* mgr, void* edx, void* pos) {
     g_ambNextMs = (now - g_ambNextMs > 100.0) ? now + 1000.0 / 30.0 : g_ambNextMs + 1000.0 / 30.0;
     ((AmbUpd_t)AD(0x00428350))(mgr, edx, pos);
 }
+// The butterflies that fly up from the grass: CButterflyManger::Update (vtable slot 1, 0x434550) is called every frame
+// and rolls the same dice (MaxRandomEmitRange 10, RandomEmitKeyValue 4 in Butterfly.lua: ~1 in 10 per call) - at
+// 300 fps ten times as many butterflies as at the 30 Hz tick. Same switch as above.
+typedef void (__fastcall *BflyUpd_t)(void*, void*, float);
+static BflyUpd_t o_BflyUpdate = nullptr;
+static double g_bflyNextMs = 0;
+static void __fastcall h_BflyUpdate(void* mgr, void* edx, float dt) {
+    LARGE_INTEGER t; QueryPerformanceCounter(&t);
+    double now = (double)t.QuadPart * g_tickMs;
+    if (now < g_bflyNextMs) return;
+    g_bflyNextMs = (now - g_bflyNextMs > 100.0) ? now + 1000.0 / 30.0 : g_bflyNextMs + 1000.0 / 30.0;
+    o_BflyUpdate(mgr, edx, dt);
+}
+// Water ripples around a hero wading in shallow water: CWaterCircleManager::Update (0x4F91D0) adds the frame time
+// to a 64-bit millisecond counter and spawns a ripple each interval, and every CWaterCircle::Update (0x4F8CB0) ages
+// its ripple the same way - both through _ftol2, which drops the fraction of a millisecond each frame (300 fps:
+// 3.33 ms counts as 3, 10 % slower; 700 fps: 1.43 -> 1, 30 %; above 1000 fps the ripples freeze). The two calls
+// get whole milliseconds with the fraction carried from frame to frame instead (all callers of one frame get the
+// same count, so the counters still move together).
+static DWORD g_wmsFrame = ~0u; static double g_wmsDt = 0, g_wmsAcc = 0; static long long g_wmsInc = 0;
+static long long __cdecl WaterMs(double dt) {
+    if (g_wmsFrame != g_curFrame) {
+        g_wmsFrame = g_curFrame; g_wmsDt = dt;
+        g_wmsAcc += dt; if (g_wmsAcc < 0 || g_wmsAcc > 1e6) g_wmsAcc = dt > 0 ? dt : 0;
+        g_wmsInc = (long long)g_wmsAcc; g_wmsAcc -= (double)g_wmsInc;
+        return g_wmsInc;
+    }
+    return dt == g_wmsDt ? g_wmsInc : (long long)dt;    // another time step in the same frame: as the game did
+}
+static void InstallWaterMs() {
+    static const BYTE ftol[11] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x20, 0x83, 0xE4, 0xF0, 0xD9, 0xC0 };
+    if (!g_frameHooked) { LOG("ambient rate: water ripples unchanged (no frame counter)"); return; }
+    BYTE* site[2] = { (BYTE*)AD(0x004F91F6), (BYTE*)AD(0x004F8CC9) };
+    for (BYTE* s : site) {
+        if (!s || s[0] != 0xE8 || memcmp(s + 5 + *(int*)(s + 1), ftol, sizeof ftol)) { LOG("ambient rate: water ripples unchanged (unexpected code)"); return; }
+    }
+    // stub: sub esp,8 / fstp qword [esp] / call WaterMs / add esp,8 / ret   (st0 popped, result in edx:eax like _ftol2)
+    BYTE* st = (BYTE*)VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!st) return;
+    BYTE code[15] = { 0x83, 0xEC, 0x08, 0xDD, 0x1C, 0x24, 0xE8, 0, 0, 0, 0, 0x83, 0xC4, 0x08, 0xC3 };
+    *(DWORD*)(code + 7) = (DWORD)(void*)WaterMs - (DWORD)(st + 11);
+    memcpy(st, code, sizeof code);
+    for (BYTE* s : site) { BYTE c[5] = { 0xE8 }; *(DWORD*)(c + 1) = (DWORD)st - (DWORD)(s + 5); PatchBytes(s, c, 5); }
+    LOG("ambient rate: water ripples timed with fractions of a millisecond kept");
+}
 static void InstallAmbientRate(const char* path) {
     char tmp[16];
     if (!GetPrivateProfileStringA("Game", "AmbientRate", "", tmp, sizeof tmp, path))
-        WritePrivateProfileStringA("Game", "AmbientRate", "1  ; 1 = random ambient sounds (birds, wolves) as often as intended at any frame rate, 0 = original (more often the higher the fps)", path);
+        WritePrivateProfileStringA("Game", "AmbientRate", "1  ; 1 = random ambient sounds (birds, wolves), butterflies and water ripples as often as intended at any frame rate, 0 = original (depends on the fps)", path);
     g_ambRate = GetPrivateProfileIntA("Game", "AmbientRate", 1, path);
     if (!g_ambRate) return;
     if (g_tickMs == 0) { LARGE_INTEGER f; QueryPerformanceFrequency(&f); g_tickMs = 1000.0 / (double)f.QuadPart; }
+    static const BYTE pb[6] = { 0x83, 0xEC, 0x10, 0x56, 0x8B, 0xF1 };   // sub esp,10h / push esi / mov esi,ecx
+    o_BflyUpdate = (BflyUpd_t)Detour((BYTE*)AD(0x00434550), pb, 6, (void*)h_BflyUpdate);
+    LOG("ambient rate: butterflies from the grass %s", o_BflyUpdate ? "at most 30 rolls per second" : "unchanged (unexpected code)");
     BYTE* at = (BYTE*)AD(0x00528A34);
     if (!at || at[0] != 0xE8 || (DWORD)at + 5 + *(int*)(at + 1) != AD(0x00428350)) { g_ambRate = 0; LOG("ambient rate: unexpected code, not installed"); return; }
     BYTE c[5] = { 0xE8 }; *(DWORD*)(c + 1) = (DWORD)(void*)h_AmbientUpdate - (DWORD)(at + 5);
@@ -2766,8 +2861,9 @@ static void Init() {
     BYTE* base = (BYTE*)GetModuleHandleA(nullptr);
     auto nt = (IMAGE_NT_HEADERS*)(base + ((IMAGE_DOS_HEADER*)base)->e_lfanew);
     static const char* const gameName[] = { "Ascension to the Throne", "Ascension to the Throne: Valkyrie", "unknown build" };
-    LOG("exe timestamp %08lX: %s, LAA=%d", nt->FileHeader.TimeDateStamp, gameName[Game()], (nt->FileHeader.Characteristics & 0x20) != 0);
-    if (Game() == GAME_OFF) { g_modOff = true; LOG("this exe is not known to AttTFix (AttT 475EABAF, Valkyrie 4883FB4F): the mod does nothing"); return; }
+    static const char* const valkName[] = { "", " (English)", " (German)" };
+    LOG("exe timestamp %08lX: %s%s, LAA=%d", nt->FileHeader.TimeDateStamp, gameName[Game()], IsValk() ? valkName[g_valkBuild] : "", (nt->FileHeader.Characteristics & 0x20) != 0);
+    if (Game() == GAME_OFF) { g_modOff = true; LOG("this exe is not known to AttTFix (AttT 475EABAF, Valkyrie 4883FB4F / English 49D21BBA / German 482DD48F): the mod does nothing"); return; }
     // command line + graphic.cfg
     LOG("cmdline: %s", GetCommandLineA());
     snprintf(path, sizeof path, "%sgraphic.cfg", g_dir);
@@ -2860,18 +2956,23 @@ static void Init() {
         WritePrivateProfileStringA("Game", "BackgroundFps", "30  ; frame limit while running in the background (0 = no limit)", path);
     g_bgFps = GetPrivateProfileIntA("Game", "BackgroundFps", 30, path);
     if (g_bgRun) InstallSoundGlobalFocus();
-    if (!GetPrivateProfileStringA("Game", "Language", "", tmp, sizeof tmp, path))   // first start: follow the Windows UI language
-        WritePrivateProfileStringA("Game", "Language", PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_RUSSIAN ? "ru" : "en", path);
+    if (!IsValk()) g_nativeLang = DetectNativeLang();
+    if (!GetPrivateProfileStringA("Game", "Language", "", tmp, sizeof tmp, path)) {  // first start: the game's own language
+        WORD ui = PRIMARYLANGID(GetUserDefaultUILanguage());                         // if Windows speaks it, else English
+        int win = ui == LANG_RUSSIAN ? LANG_RU : ui == LANG_GERMAN ? LANG_DE : LANG_EN;
+        WritePrivateProfileStringA("Game", "Language", (win == g_nativeLang || IsValk()) ? g_langCode[g_nativeLang] : "en", path);
+    }
     GetPrivateProfileStringA("Game", "Language", "ru", tmp, sizeof tmp, path);
-    g_langSetting = g_langActive = !_strnicmp(tmp, "en", 2) ? 1 : 0;
+    g_langSetting = g_langActive = (!_strnicmp(tmp, "en", 2) && g_nativeLang != LANG_EN) ? 1 : 0;
+    LOG("language: game files %s, setting %s", g_langCode[g_nativeLang], tmp);
     InstallLanguage();
     if (IsValk()) InstallStreamFix(path);
     InstallAmbientRate(path);
     {   // startup videos (1CLogo, logo, intro): the engine skips them with "-nologo"; "test al,al" -> "xor al,al"
         static const BYTE p[8] = { 0x84, 0xC0, 0x0F, 0x84, 0xE5, 0x00, 0x00, 0x00 };
-        static const BYTE pv[8] = { 0x84, 0xC0, 0x0F, 0x84, 0xC1, 0x00, 0x00, 0x00 };   // Valkyrie
+        static const BYTE pv[8] = { 0x84, 0xC0, 0x0F, 0x84, 0xC1, 0x00, 0x00, 0x00 };   // Valkyrie (jump length differs between its builds: 4 bytes compared)
         if (g_skipIntro) {
-            if (!memcmp((void*)AD(0x0044F75E), IsValk() ? pv : p, 8)) { static const BYTE x[2] = { 0x32, 0xC0 }; PatchBytes((void*)AD(0x0044F75E), x, 2); LOG("startup videos skipped (SkipIntro=1)");
+            if (!memcmp((void*)AD(0x0044F75E), IsValk() ? pv : p, IsValk() ? 4 : 8)) { static const BYTE x[2] = { 0x32, 0xC0 }; PatchBytes((void*)AD(0x0044F75E), x, 2); LOG("startup videos skipped (SkipIntro=1)");
                 // Valkyrie: [0x87E009] = "no video playing" starts at 0 and is set only when a video ends; the music and
                 // the ambient sound stay muted while it is 0 (0x62ECF0) - with no startup video the music never started
                 if (IsValk() && *(volatile BYTE*)0x0087E009 == 0) { *(volatile BYTE*)0x0087E009 = 1; LOG("Valkyrie: 'video playing' flag cleared (music and ambient were muted without the startup video)"); } }
@@ -2916,6 +3017,7 @@ static void Init() {
     o_SPAM = (SPAM_t)PatchIAT("KERNEL32.dll", "SetProcessAffinityMask", (void*)h_SPAM);
     if (IsValk() && g_allCores) KeepGameThreadsTogether();
     InstallPerfPatches();
+    if (GetPrivateProfileIntA("Game", "AmbientRate", 1, path)) InstallWaterMs();   // needs the frame counter
     if (!GetPrivateProfileStringA("Perf", "AsyncSunCheck", "", tmp, sizeof tmp, path)) {
         WritePrivateProfileStringA("Perf", "AsyncSunCheck", "1  ; 1 = sun/lens flare visibility read without stalling the GPU, 0 = original (F7 toggles)", path);
         WritePrivateProfileStringA("Perf", "TreeBatch", "1  ; 1 = forest trees without per-tree render state save/restore, 0 = original (F7 toggles)", path);
