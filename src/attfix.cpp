@@ -1,4 +1,5 @@
 // AttTFix — proxy dinput8.dll for Ascension to the Throne (ATThrone.exe, Steam build 2007-12-11)
+// and its add-on Valkyrie (Steam build 2008-07-21; addresses translated by AD(), see "exe profiles")
 // Stage 1: diagnostics (log, engine exception texts, D3D device params, device-lost, minidumps), DPI awareness.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -10,7 +11,72 @@
 #include <math.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
-#define ATTFIX_VERSION "1.4.0"
+#define ATTFIX_VERSION "2.0.0"
+
+// ---------------------------------------------------------------- exe profiles
+// The mod is written against the AttT exe (Steam build 2007-12-11, TimeDateStamp 475EABAF). The add-on
+// "Ascension to the Throne: Valkyrie" (4883FB4F, 2008-07-21) has the same engine, rebuilt: its code is moved by
+// ~0x137000 and its data by ~0x1B5000. Every engine address in the sources is the AttT one and goes through AD(),
+// which gives the Valkyrie address from exeaddr.h (matched by code bytes, checked against callers and references).
+// Expected code bytes are compared with CodeCmp(): the AttT bytes, with absolute addresses and call/jump targets
+// translated the same way.
+enum { GAME_ATTT = 0, GAME_VALK = 1, GAME_OFF = 2 };
+#include "exeaddr.h"
+static DWORD g_exeStamp = 0;
+static bool ExeImports(const char* dll) {
+    BYTE* base = (BYTE*)GetModuleHandleA(nullptr);
+    auto nt = (IMAGE_NT_HEADERS*)(base + ((IMAGE_DOS_HEADER*)base)->e_lfanew);
+    auto& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (!dir.VirtualAddress) return false;
+    for (auto imp = (IMAGE_IMPORT_DESCRIPTOR*)(base + dir.VirtualAddress); imp->Name; ++imp)
+        if (!_stricmp((char*)(base + imp->Name), dll)) return true;
+    return false;
+}
+static int Game() {
+    static int g = -1;
+    if (g < 0) {
+        BYTE* base = (BYTE*)GetModuleHandleA(nullptr);
+        auto nt = (IMAGE_NT_HEADERS*)(base + ((IMAGE_DOS_HEADER*)base)->e_lfanew);
+        g_exeStamp = nt->FileHeader.TimeDateStamp;
+        if (g_exeStamp == 0x475EABAF) g = GAME_ATTT;
+        else if (g_exeStamp == 0x4883FB4F) g = GAME_VALK;
+        else g = ExeImports("mss32.dll") ? GAME_ATTT : GAME_OFF;   // unknown build: AttT ones use Miles, Valkyrie does not
+    }
+    return g;
+}
+static inline bool IsValk() { return Game() == GAME_VALK; }
+static DWORD g_adMiss = 0;
+static DWORD ADTry(DWORD a) {
+    if (!IsValk()) return a;
+    int lo = 0, hi = (int)(sizeof g_valkMap / sizeof g_valkMap[0]) - 1;
+    while (lo <= hi) { int m = (lo + hi) / 2; if (g_valkMap[m].o == a) return g_valkMap[m].v; if (g_valkMap[m].o < a) lo = m + 1; else hi = m - 1; }
+    return 0;
+}
+static DWORD AD(DWORD a) { DWORD v = ADTry(a); if (!v && !g_adMiss) g_adMiss = a; return v; }
+static DWORD ADRev(DWORD v) {   // Valkyrie address -> AttT address (exact entries only)
+    if (!IsValk()) return v;
+    for (auto& e : g_valkMap) if (e.v == v) return e.o;
+    return 0;
+}
+// compare code at 'at' (an AD() address) with bytes copied from the AttT exe; 0 = equal (like memcmp)
+static int CodeCmp(const void* at, const void* expect, int n) {
+    if (!IsValk()) return memcmp(at, expect, n);
+    const BYTE* p = (const BYTE*)at; const BYTE* e = (const BYTE*)expect;
+    for (int i = 0; i < n; ) {
+        if (p[i] == e[i]) { ++i; continue; }
+        bool ok = false;
+        for (int s = i < 3 ? 0 : i - 3; s <= i && !ok; ++s) {            // a 4-byte operand covering byte i
+            if (s + 4 > n) break;
+            DWORD eo = *(const DWORD*)(e + s), ev = *(const DWORD*)(p + s);
+            if (eo >= 0x401000 && eo < 0x900000 && ADTry(eo) == ev) { i = s + 4; ok = true; break; }
+            bool rel = (s >= 1 && (e[s - 1] == 0xE8 || e[s - 1] == 0xE9)) || (s >= 2 && e[s - 2] == 0x0F && (e[s - 1] & 0xF0) == 0x80);
+            DWORD ao = ADRev((DWORD)p);
+            if (rel && ao && ADTry(ao + s + 4 + eo) == (DWORD)p + s + 4 + ev) { i = s + 4; ok = true; break; }
+        }
+        if (!ok) return 1;
+    }
+    return 0;
+}
 
 // ---------------------------------------------------------------- log
 static FILE* g_log = nullptr;
@@ -127,7 +193,7 @@ static void WriteDump(EXCEPTION_POINTERS* ep, const char* tag) {
 
 // ---------------------------------------------------------------- engine exceptions (_CxxThrowException)
 // Engine exception object = VC8 std::string (28 bytes): +4 union{char buf[16]; char* ptr}, +20 size, +24 capacity
-static const DWORD ENGINE_THROWINFO = 0x0069916C;
+static const DWORD ENGINE_THROWINFO = AD(0x0069916C);
 typedef void (__stdcall *CxxThrow_t)(void*, void*);
 static CxxThrow_t o_CxxThrow;
 static void __stdcall h_CxxThrow(void* obj, void* ti) {
@@ -158,7 +224,7 @@ static LONG WINAPI OurFilter(EXCEPTION_POINTERS* ep) {
     // short stack scan: return addresses inside exe .text
     DWORD* sp = (DWORD*)c->Esp; char buf[512]; int len = 0, n = 0;
     for (int i = 0; i < 2048 && n < 24 && !IsBadReadPtr(sp + i, 4); ++i) {
-        DWORD v = sp[i]; if (v >= 0x401000 && v < 0x607000) { len += snprintf(buf + len, sizeof buf - len, " %08lX", v); ++n; }
+        DWORD v = sp[i]; if (v >= AD(0x401000) && v < AD(0x607000)) { len += snprintf(buf + len, sizeof buf - len, " %08lX", v); ++n; }
     }
     LOG("  stack:%s", n ? buf : " -");
     WriteDump(ep, "crash");
@@ -433,7 +499,7 @@ static UINT MaxRefresh(UINT w, UINT h) { EnumModes(); for (int i = 0; i < g_nmod
 // Lua output: engine routes print(), Lua PANIC messages and the debug console through a
 // function pointer at 0x8D1208 (void(const char*)); by default it points to a no-op.
 typedef void (*LuaOut_t)(const char*);
-static LuaOut_t* const pLuaOut = (LuaOut_t*)0x008D1208;
+static LuaOut_t* const pLuaOut = (LuaOut_t*)AD(0x008D1208);
 static LuaOut_t o_LuaOut = nullptr;
 static char g_outBuf[2048]; static size_t g_outLen = 0;
 static void FlushLuaOut() { if (g_outLen) { g_outBuf[g_outLen] = 0; LOG("lua out: %s", g_outBuf); g_outLen = 0; } }
@@ -453,7 +519,7 @@ static void LogCallerStack(const char* tag) {
     DWORD* sp; __asm__ volatile("movl %%esp, %0" : "=r"(sp));
     char buf[512]; int len = 0, n = 0;
     for (int i = 0; i < 4096 && n < 20 && !IsBadReadPtr(sp + i, 4); ++i) {
-        DWORD v = sp[i]; if (v >= 0x401000 && v < 0x607000) { len += snprintf(buf + len, sizeof buf - len, " %08lX", v); ++n; }
+        DWORD v = sp[i]; if (v >= AD(0x401000) && v < AD(0x607000)) { len += snprintf(buf + len, sizeof buf - len, " %08lX", v); ++n; }
     }
     LOG("  %s stack:%s", tag, n ? buf : " -");
 }
@@ -487,9 +553,9 @@ static LRESULT CALLBACK h_WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         // Background=1: let the game handle the deactivation (frees the cursor clip, input), then undo the pause:
         // main loop "active" flag [0x6BF6E0] stays set, sound volume and game timer are resumed (0x449F80(true)).
         LRESULT r = CallWindowProcW(o_WndProc, h, m, w, l);
-        *(volatile BYTE*)0x006BF6E0 = 1; g_bgInactive = true;
-        void* eng = *(void**)0x006C88A8;
-        if (eng) ((void (__fastcall*)(void*, void*, int))0x00449F80)(eng, nullptr, 1);
+        *(volatile BYTE*)AD(0x006BF6E0) = 1; g_bgInactive = true;
+        void* eng = *(void**)AD(0x006C88A8);
+        if (eng) ((void (__fastcall*)(void*, void*, int))AD(0x00449F80))(eng, nullptr, 1);
         ClipCursor(nullptr);
         LOG("background: game keeps running (limit %d fps)", g_bgFps);
         return r; }
@@ -498,7 +564,7 @@ static LRESULT CALLBACK h_WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_SYSCOMMAND:  if ((w & 0xFFF0) == SC_MINIMIZE || (w & 0xFFF0) == SC_RESTORE || (w & 0xFFF0) == SC_MAXIMIZE) LOG("wnd: WM_SYSCOMMAND %04X", (UINT)(w & 0xFFF0)); break;
     case WM_DISPLAYCHANGE: LOG("wnd: WM_DISPLAYCHANGE %ux%u bpp=%u", LOWORD(l), HIWORD(l), (UINT)w); break;
     case WM_SETCURSOR:   // the game hides the Windows cursor only on activation; keep it hidden over the game area
-        if (LOWORD(l) == HTCLIENT && *(volatile BYTE*)0x006BF6E0 && GetForegroundWindow() == h) {
+        if (LOWORD(l) == HTCLIENT && *(volatile BYTE*)AD(0x006BF6E0) && GetForegroundWindow() == h) {
             SetCursor(nullptr);
             static bool clipped = false;                                // first activation can be missed at start-up
             if (!clipped) { clipped = true; RECT r; if (GetWindowRect(h, &r)) ClipCursor(&r); }
@@ -573,11 +639,11 @@ static void SubclassWindow(HWND h) {
 // ---------------------------------------------------------------- engine Lua bridge
 // Lua 5.1 (float lua_Number) statically linked into ATThrone.exe
 typedef int (*lua_CFunction)(void* L);
-static void** const pLuaState = (void**)0x008D122C;            // lua_State* used by the engine
+static void** const pLuaState = (void**)AD(0x008D122C);            // lua_State* used by the engine
 typedef void (*lua_pushcclosure_t)(void* L, lua_CFunction f, int n);
 typedef void (*lua_setfield_t)(void* L, int idx, const char* k);
-static const lua_pushcclosure_t e_pushcclosure = (lua_pushcclosure_t)0x004031F0;
-static const lua_setfield_t     e_setfield     = (lua_setfield_t)0x004034F0;
+static const lua_pushcclosure_t e_pushcclosure = (lua_pushcclosure_t)AD(0x004031F0);
+static const lua_setfield_t     e_setfield     = (lua_setfield_t)AD(0x004034F0);
 #define LUA_GLOBALSINDEX (-10002)
 // direct stack access: L->top at +8, L->base at +12; TValue = {value(4), tt(4)}; TString chars at +16
 struct TV { union { float n; void* p; int b; } v; int tt; };
@@ -591,7 +657,7 @@ static void Register(const char* name, lua_CFunction f) { void* L = *pLuaState; 
 static int L_Log(void* L) { const char* m = LStr(L, 1); LOG("lua: %s", m); if (!strncmp(m, "scene ", 6)) FrameEvent("%s", m); return 0; }
 static int L_ModeCount(void* L) { EnumModes(); LPushNum(L, (float)g_nmodes); return 1; }
 static int L_Mode(void* L) { int i = (int)LNum(L, 1); if (i < 0 || i >= g_nmodes) { LPushNum(L, 0); LPushNum(L, 0); return 2; } LPushNum(L, (float)g_modes[i].w); LPushNum(L, (float)g_modes[i].h); return 2; }
-static int* const g_scrW = (int*)0x006C8964; static int* const g_scrH = (int*)0x006C8960;
+static int* const g_scrW = (int*)AD(0x006C8964); static int* const g_scrH = (int*)AD(0x006C8960);
 static int L_Current(void* L) { LPushNum(L, (float)*g_scrW); LPushNum(L, (float)*g_scrH); return 2; }
 static int L_SetResolution(void* L) {
     int wh[2] = { (int)LNum(L, 1), (int)LNum(L, 2) };
@@ -623,12 +689,12 @@ static int h_ChangeSettings(void* L) {
     bool hb = ReadCfg(before);
     typedef void* (*GetEngine_t)();
     typedef void (__fastcall *Method_t)(void* self, void* edx);
-    void* eng = ((GetEngine_t)0x0042F160)();
+    void* eng = ((GetEngine_t)AD(0x0042F160))();
     void* lvl = *(void**)((BYTE*)eng + 0x70);
     LOG("ChangeSettings (%s)", lvl ? "in game" : "main menu");
     // in game the writer also takes the forest distances from the level: the game's own values while it runs
     // (our Tree3DDistance was saved as the game's crossfade, 1500..1500 in graphic.cfg)
-    if (lvl) { TreeDistGameValues(); ((Method_t)0x005406F0)(lvl, nullptr); TreeDistOurValues(); } else ((Method_t)0x0044D0C0)(eng, nullptr);
+    if (lvl) { TreeDistGameValues(); ((Method_t)AD(0x005406F0))(lvl, nullptr); TreeDistOurValues(); } else ((Method_t)AD(0x0044D0C0))(eng, nullptr);
     if (ReadCfg(after)) {
         if (hb) LogCfg("  cfg before", before);
         LogCfg("  cfg engine", after);
@@ -735,9 +801,9 @@ static void* HotPatch(void* fn, void* hook) {
     return f + 2;
 }
 static void InstallLanguage() {
-    if (g_wsEnabled) wsart::Make();
+    if (g_wsEnabled && !IsValk()) wsart::Make();   // Valkyrie: other menu art (.bmp), not done yet
     snprintf(g_extraPakPath, sizeof g_extraPakPath, "%sAttTFix.pak", g_dir);
-    g_extraPak = GetFileAttributesA(g_extraPakPath) != INVALID_FILE_ATTRIBUTES ? 1 : 0;
+    g_extraPak = !IsValk() && GetFileAttributesA(g_extraPakPath) != INVALID_FILE_ATTRIBUTES ? 1 : 0;
     if (g_langActive != 1) LOG("language: ru (Resource1.pak)");
     else {
         char p[MAX_PATH]; snprintf(p, sizeof p, "%sLocalization.pak", g_dir);
@@ -786,7 +852,7 @@ static const char g_script[] =
 typedef void (__fastcall *DoFile_t)(void* vm, void* edx, const char* name);
 typedef void (__fastcall *RunBuf_t)(void* vm, void* edx, const char* buf, int len, const char* name);
 static DoFile_t o_DoFile;
-static const RunBuf_t e_RunBuf = (RunBuf_t)0x0057D220;
+static const RunBuf_t e_RunBuf = (RunBuf_t)AD(0x0057D220);
 static int g_modeStack[64]; static int g_modeDepth = 0;
 static void SetLuaScreen(void* vm, int canvas) {
     Canvas c = GetCanvas();
@@ -875,9 +941,9 @@ static void __fastcall h_DoFile(void* vm, void* edx, const char* name) {
         Register("AttTFix_SetFps", L_SetFps);
         Register("AttTFix_GetIntro", L_GetIntro);
         Register("AttTFix_SetIntro", L_SetIntro);
-        Register("AttTFix_GetLang", L_GetLang);
+        if (!IsValk()) Register("AttTFix_GetLang", L_GetLang);     // Valkyrie: Russian only (no Localization.pak)
         Register("AttTFix_WsArt", L_WsArt);
-        Register("AttTFix_SetLang", L_SetLang);
+        if (!IsValk()) Register("AttTFix_SetLang", L_SetLang);
         Register("AttTFix_GetQuality", L_GetQuality);
         Register("AttTFix_SetQuality", L_SetQuality);
         Register("AttTFix_GetRenderer", L_GetRenderer);
@@ -895,7 +961,7 @@ static void __fastcall h_DoFile(void* vm, void* edx, const char* name) {
     }
 }
 static void* Detour(BYTE* target, const BYTE* expect, int len, void* hook) {
-    if (memcmp(target, expect, len)) { LOG("detour %p: unexpected bytes, skipped", target); return nullptr; }
+    if (CodeCmp(target, expect, len)) { LOG("detour %p: unexpected bytes, skipped", target); return nullptr; }
     BYTE* tramp = (BYTE*)VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     memcpy(tramp, target, len);
     tramp[len] = 0xE9; *(DWORD*)(tramp + len + 1) = (DWORD)(target + len) - (DWORD)(tramp + len + 5);
@@ -914,8 +980,8 @@ static void* Detour(BYTE* target, const BYTE* expect, int len, void* hook) {
 static int g_fpsLimit = 0, g_allCores = 1, g_fpsTitle = 1;
 static double g_cursorMul = 2.0;                 // engine constant: cursor px per mouse count (orig 2.0)
 static float  g_cursorSpeed = 1.0f, g_cameraSpeed = 1.0f;
-static float* const g_camRotBattle = (float*)0x006C344C;   // orig 0.5
-static float* const g_camRotWorld  = (float*)0x006C3DB8;   // orig 0.5
+static float* const g_camRotBattle = (float*)AD(0x006C344C);   // orig 0.5
+static float* const g_camRotWorld  = (float*)AD(0x006C3DB8);   // orig 0.5
 
 static void ApplyInputSettings() {
     g_cursorMul = 2.0 * g_cursorSpeed;
@@ -929,8 +995,38 @@ static float ReadIniFloat(const char* sec, const char* key, float def) { char b[
 typedef BOOL (WINAPI *SPAM_t)(HANDLE, DWORD_PTR);
 static SPAM_t o_SPAM;
 static BOOL WINAPI h_SPAM(HANDLE h, DWORD_PTR mask) {
-    if (g_allCores) { LOG("SetProcessAffinityMask(%lx) ignored: game may use all CPU cores", (DWORD)mask); return TRUE; }
+    if (g_allCores) { LOG("SetProcessAffinityMask(%lx) ignored: game may use all CPU cores%s", (DWORD)mask, IsValk() ? " (its own threads stay on one core)" : ""); return TRUE; }
     return o_SPAM(h, mask);
+}
+// Valkyrie streams its Ogg music / speech on a thread of its own (_beginthread) that is not properly synchronized
+// with the main thread: the game pins the whole process to core 0, which hides it. With all cores both threads ran
+// at once and the game often crashed at start (Vorbis header read from a stream with no data yet, 0x48030F). The
+// game's threads (main + those it starts) are kept together on one core; the driver, DXVK and our workers are free.
+static DWORD_PTR g_gameCoreMask = 0;
+typedef uintptr_t (__cdecl *BeginThread_t)(void (__cdecl*)(void*), unsigned, void*);
+static BeginThread_t o_BeginThread = nullptr;
+struct ThreadStart { void (__cdecl* fn)(void*); void* arg; };
+static void __cdecl GameThreadShim(void* p) {
+    ThreadStart s = *(ThreadStart*)p; free(p);
+    if (g_gameCoreMask) SetThreadAffinityMask(GetCurrentThread(), g_gameCoreMask);
+    s.fn(s.arg);
+}
+static uintptr_t __cdecl h_BeginThread(void (__cdecl* fn)(void*), unsigned stack, void* arg) {
+    ThreadStart* s = (ThreadStart*)malloc(sizeof(ThreadStart));
+    if (!s || !g_gameCoreMask) { free(s); return o_BeginThread(fn, stack, arg); }
+    s->fn = fn; s->arg = arg;
+    uintptr_t r = o_BeginThread(GameThreadShim, stack, s);
+    if (r == (uintptr_t)-1) free(s);
+    LOG("game thread %p started on the game's core (mask %lx)", (void*)fn, (DWORD)g_gameCoreMask);
+    return r;
+}
+static void KeepGameThreadsTogether() {
+    DWORD_PTR pm = 0, sm = 0;
+    if (!GetProcessAffinityMask(GetCurrentProcess(), &pm, &sm) || !pm) return;
+    g_gameCoreMask = pm & (~pm + 1);            // lowest allowed core, like the game's own SetProcessAffinityMask(1)
+    SetThreadAffinityMask(GetCurrentThread(), g_gameCoreMask);   // Init runs on the main thread
+    o_BeginThread = (BeginThread_t)PatchIAT("MSVCR80.dll", "_beginthread", (void*)h_BeginThread);
+    LOG("Valkyrie: main thread and game threads on core mask %lx, everything else on all cores", (DWORD)g_gameCoreMask);
 }
 
 // Frame limiter: called once per frame from the main loop instead of the frame timer (0x4E4220)
@@ -1011,7 +1107,7 @@ static void PatchBytes(void* at, const void* src, int n) {
 static void InstallPerfPatches() {
     // cursor speed: operand of "fld qword ptr [0x60A308]" at 0x442AEE -> &g_cursorMul
     static const BYTE cur[6] = { 0xDD, 0x05, 0x08, 0xA3, 0x60, 0x00 };
-    if (!memcmp((void*)0x00442AEE, cur, 6)) { DWORD a = (DWORD)&g_cursorMul; PatchBytes((BYTE*)0x00442AF0, &a, 4); LOG("cursor speed patch installed"); }
+    if (!CodeCmp((void*)AD(0x00442AEE), cur, 6)) { DWORD a = (DWORD)&g_cursorMul; PatchBytes((BYTE*)AD(0x00442AF0), &a, 4); LOG("cursor speed patch installed"); }
     else LOG("cursor speed patch: unexpected bytes");
     InstallFrameRewrite();
     ApplyInputSettings();
@@ -1164,13 +1260,13 @@ static void __fastcall h_Frame(BYTE* e, void* /*edx*/) {
     LONGLONG a = t0, b;
     *(DWORD*)(e + 0xAC) = 2;
     BYTE* timers = *(BYTE**)(e + 0x7C);
-    ((TimerTick_t)0x004E4220)(timers + 8, nullptr);
+    ((TimerTick_t)AD(0x004E4220))(timers + 8, nullptr);
     float dt = *(float*)(timers + 0x1C); g_lastDt = dt;
     *(DWORD*)(e + 0xA8) += 1;
     b = Now(); g_sec[S_TIMER] = (b - a) * g_tickMs; a = b;
 
-    void* sys = *(void**)0x006C8C24;
-    ((Upd_t)0x004DEED0)(sys, nullptr, dt);
+    void* sys = *(void**)AD(0x006C8C24);
+    ((Upd_t)AD(0x004DEED0))(sys, nullptr, dt);
     b = Now(); g_sec[S_SYS] = (b - a) * g_tickMs; a = b;
 
     BYTE* input = *(BYTE**)(e + 0x80);
@@ -1178,7 +1274,7 @@ static void __fastcall h_Frame(BYTE* e, void* /*edx*/) {
     DWORD cnt = *(DWORD*)(input + 0x664); BYTE* keys = *(BYTE**)(input + 0x660);
     for (DWORD i = 0; i < cnt; ++i) {
         if (!keys[i * 2 + 1] || keys[i * 2] == 0x3D) continue;
-        if (keys[i * 2] == 0xB7) ((Method0_t)0x00449FE0)(e, nullptr);                 // PrintScreen -> screenshot
+        if (keys[i * 2] == 0xB7) ((Method0_t)AD(0x00449FE0))(e, nullptr);                 // PrintScreen -> screenshot
         else if (keys[i * 2] == 0xC5) { BYTE* p = timers + 8 + 0x10; *p = (*p == 0); }  // Pause
     }
     b = Now(); g_sec[S_INPUT] = (b - a) * g_tickMs; a = b;
@@ -1215,7 +1311,7 @@ static void __fastcall h_Frame(BYTE* e, void* /*edx*/) {
 // Original: state=1; camera->flag208=0; Clear(target|z, engine+0xA0, 1.0); BeginScene; scene->vf6(); cursor->vf2();
 // EndScene; if (Present() < 0) { if (TestCooperativeLevel() == D3DERR_DEVICENOTRESET) Restore(); else throw "D3DERR_DEVICENOTRESET"; }
 // The original throws (crash) on plain D3DERR_DEVICELOST, i.e. right after Alt-Tab in fullscreen. Fixed here.
-static void** const pDevice = (void**)0x006C8C10;
+static void** const pDevice = (void**)AD(0x006C8C10);
 typedef HRESULT (__stdcall *Clear_t)(void*, DWORD, const void*, DWORD, DWORD, float, DWORD);
 typedef HRESULT (__stdcall *Dev0_t)(void*);
 typedef HRESULT (__stdcall *Present_t2)(void*, const void*, const void*, HWND, const void*);
@@ -1475,7 +1571,7 @@ static Restore_t o_Restore = nullptr;
 static void __fastcall h_Restore(BYTE* e, void* edx) { LOG("engine device restore: releasing AttTFix device resources"); ReleaseDeviceResources(); o_Restore(e, edx); }
 static void InstallRestoreGuard() {
     static const BYTE p[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF8 };
-    o_Restore = (Restore_t)Detour((BYTE*)0x0044DD20, p, 6, (void*)h_Restore);
+    o_Restore = (Restore_t)Detour((BYTE*)AD(0x0044DD20), p, 6, (void*)h_Restore);
 }
 // ---- 3D proportions on widescreen screens
 // The battle camera takes its aspect ratio from Camera.TacticLevel.Aspect (set to the screen's by this mod), but
@@ -1494,7 +1590,7 @@ static inline float ScreenAspect() {
 static void AspectConstPatch() {
     if (!g_worldAspect) return;
     float a = ScreenAspect(); if (!a || fabsf(a - g_aspectConst) < 1e-4f) return;
-    static const DWORD at[2] = { 0x0060B07C, 0x0060B870 };
+    static const DWORD at[2] = { AD(0x0060B07C), AD(0x0060B870) };
     for (DWORD p : at) {
         float* f = (float*)p; DWORD old;
         if (g_aspectConst == 0 && fabsf(*f - 4.0f / 3.0f) > 1e-3f) { LOG("aspect: unexpected value at %08lx, not patched", p); g_worldAspect = 0; return; }
@@ -1508,7 +1604,7 @@ static void AspectCameraFix() {
     if (!g_worldAspect) return;
     AspectConstPatch();
     float a = ScreenAspect(); if (!a || fabsf(a - 4.0f / 3.0f) < 1e-3f) return;
-    BYTE* cam = *(BYTE**)0x006CA2C4;
+    BYTE* cam = *(BYTE**)AD(0x006CA2C4);
     if (!cam || !Writable(cam + 0x80)) return;
     float* asp = (float*)(cam + 0x80);
     if (fabsf(*asp - 4.0f / 3.0f) < 2e-3f) {
@@ -1530,7 +1626,7 @@ static void __fastcall h_Render(BYTE* e, void* /*edx*/) {
         if (g_vsyncResetPending) LOG("vsync: switching %s via engine device restore", g_vsync ? "on" : "off");
         g_msaaResetPending = false; g_vsyncResetPending = false;
         FontRelease();
-        ((VM0_t)0x0044DD20)(e, nullptr);
+        ((VM0_t)AD(0x0044DD20))(e, nullptr);
         FrameEvent("device re-created (msaa / vsync)");
     }
     *(DWORD*)(e + 0xAC) = 1;
@@ -1561,7 +1657,7 @@ static void __fastcall h_Render(BYTE* e, void* /*edx*/) {
         if (tcl == (HRESULT)0x88760869) {                    // D3DERR_DEVICENOTRESET: restore (engine code)
             FontRelease();
             LOG("device restore (engine 0x44DD20)");
-            ((VM0_t)0x0044DD20)(e, nullptr);
+            ((VM0_t)AD(0x0044DD20))(e, nullptr);
             lastTcl = 0;
             FrameEvent("device restored");
         } else {                                             // D3DERR_DEVICELOST etc.: wait until it can be reset
@@ -1573,8 +1669,8 @@ static void __fastcall h_Render(BYTE* e, void* /*edx*/) {
 }
 static void InstallRenderRewrite() {
     static const BYTE expect[6] = { 0x64, 0xA1, 0x00, 0x00, 0x00, 0x00 };
-    BYTE* t = (BYTE*)0x0044E480;
-    if (memcmp(t, expect, 6)) { LOG("render rewrite: unexpected bytes"); return; }
+    BYTE* t = (BYTE*)AD(0x0044E480);
+    if (CodeCmp(t, expect, 6)) { LOG("render rewrite: unexpected bytes"); return; }
     BYTE j[5] = { 0xE9 }; *(DWORD*)(j + 1) = (DWORD)(void*)h_Render - (DWORD)(t + 5);
     PatchBytes(t, j, 5);
     DEVMODEA dm; ZeroMemory(&dm, sizeof dm); dm.dmSize = sizeof dm;
@@ -1677,19 +1773,19 @@ static void __fastcall h_ListenerUpdate(void* self, void* edx, float dt) {
     LONGLONG now = Now();
     if (g_listenerHz > 0 && g_lastListener && (now - g_lastListener) * g_tickMs < 1000.0 / g_listenerHz) { ++g_listenerSkipped; return; }
     g_lastListener = now; ++g_listenerDone;
-    BYTE* cam = ((BYTE* (*)())0x00424E70)();
+    BYTE* cam = ((BYTE* (*)())AD(0x00424E70))();
     float* pos = (float*)(cam + 0x44);
-    ((void (*)(float*, int))0x004C19A0)(pos, 1);                       // SetPosition (deferred)
+    ((void (*)(float*, int))AD(0x004C19A0))(pos, 1);                       // SetPosition (deferred)
     float dir[3] = { *(float*)(cam + 0x21C) - pos[0], *(float*)(cam + 0x220) - pos[1], *(float*)(cam + 0x224) - pos[2] };
-    float up[3] = { 0.0f, *(float*)0x0068AE40, 0.0f };
-    ((void (*)(float*, float*, int))0x004C1AA0)(dir, up, 1);           // SetOrientation (deferred)
-    ((void (*)())0x004C18F0)();                                         // CommitDeferredSettings (+1 s housekeeping)
+    float up[3] = { 0.0f, *(float*)AD(0x0068AE40), 0.0f };
+    ((void (*)(float*, float*, int))AD(0x004C1AA0))(dir, up, 1);           // SetOrientation (deferred)
+    ((void (*)())AD(0x004C18F0))();                                         // CommitDeferredSettings (+1 s housekeeping)
 }
 static void InstallOptimizations() {
     if (g_tickMs == 0) { LARGE_INTEGER f; QueryPerformanceFrequency(&f); g_tickMs = 1000.0 / (double)f.QuadPart; }
     static const BYTE p[8] = { 0x83, 0xEC, 0x18, 0xD9, 0x44, 0x24, 0x1C, 0x56 };
-    BYTE* t = (BYTE*)0x00518D90;
-    if (g_listenerHz > 0 && !memcmp(t, p, 8)) {
+    BYTE* t = (BYTE*)AD(0x00518D90);
+    if (g_listenerHz > 0 && !CodeCmp(t, p, 8)) {
         BYTE j[5] = { 0xE9 }; *(DWORD*)(j + 1) = (DWORD)(void*)h_ListenerUpdate - (DWORD)(t + 5);
         PatchBytes(t, j, 5); LOG("optimization: 3D sound listener updated at %d Hz instead of every frame", g_listenerHz);
     } else LOG("optimization: sound listener patch %s", g_listenerHz > 0 ? "skipped (unexpected bytes)" : "disabled");
@@ -1754,7 +1850,7 @@ static inline void InterpBeforeTicks(BYTE* self, bool willTick, UpdInfo* u) {
     else if (e->lastUpd + 1 < g_curFrame) e->valid = 0;   // new / reused / not updated last frame
     e->vt = vt; e->lastUpd = g_curFrame;
     if (willTick) { memcpy(e->prevM, self + 0x168, 64); e->valid = MatSane(e->prevM); }
-    if (vt == (void*)0x0060C1AC) { g_hero = self; g_heroFrame = g_curFrame; }
+    if (vt == (void*)AD(0x0060C1AC)) { g_hero = self; g_heroFrame = g_curFrame; }
 }
 static void InterpApply() {
     g_nApplied = 0; g_camSaved = false;
@@ -1811,14 +1907,14 @@ static void InterpApply() {
     }
     g_iObjs += g_nApplied;
     // camera follows the hero's rendered position (the engine copies it before the tick -> 1 frame lag)
-    BYTE* hero = g_hero; BYTE* cam = *(BYTE**)0x006CA2C4;
-    if (hero && g_heroFrame == g_curFrame && cam && *(void**)cam == (void*)0x006097FC && *(void**)hero == (void*)0x0060C1AC
+    BYTE* hero = g_hero; BYTE* cam = *(BYTE**)AD(0x006CA2C4);
+    if (hero && g_heroFrame == g_curFrame && cam && *(void**)cam == (void*)AD(0x006097FC) && *(void**)hero == (void*)AD(0x0060C1AC)
         && *(BYTE*)(hero + 0x4B4)) {
         float* M = (float*)(hero + 0x168);
         g_camObj = cam; g_camSaved = true;
         g_camSave[0] = *(float*)(cam + 0x50); g_camSave[1] = *(float*)(cam + 0x58);
         *(float*)(cam + 0x50) = M[12]; *(float*)(cam + 0x58) = M[14]; *(BYTE*)(cam + 0x70) = 1;
-        ((void (__fastcall*)(void*, void*, int))0x004363D0)(cam, nullptr, 1);   // rebuild view + frustum now
+        ((void (__fastcall*)(void*, void*, int))AD(0x004363D0))(cam, nullptr, 1);   // rebuild view + frustum now
         ++g_iCam;
         static bool once = false; if (!once) { once = true; LOG("smooth: camera %p follows hero %p", cam, hero); }
     }
@@ -1830,10 +1926,10 @@ static void InterpRestore() {
         e->posApplied = 0;
     }
     g_nApplied = 0;
-    if (g_camSaved && *(BYTE**)0x006CA2C4 == g_camObj) {
+    if (g_camSaved && *(BYTE**)AD(0x006CA2C4) == g_camObj) {
         BYTE* hero = g_hero; BYTE* cam = g_camObj;
         // the logic state: hero's real position (what the engine would have copied after the tick)
-        if (hero && *(void**)hero == (void*)0x0060C1AC) { *(float*)(cam + 0x50) = *(float*)(hero + 0x64); *(float*)(cam + 0x58) = *(float*)(hero + 0x6C); }
+        if (hero && *(void**)hero == (void*)AD(0x0060C1AC)) { *(float*)(cam + 0x50) = *(float*)(hero + 0x64); *(float*)(cam + 0x58) = *(float*)(hero + 0x6C); }
         else { *(float*)(cam + 0x50) = g_camSave[0]; *(float*)(cam + 0x58) = g_camSave[1]; }
         *(BYTE*)(cam + 0x70) = 1;
     }
@@ -2096,35 +2192,35 @@ static void SkinDiag(BYTE* m, void* lod) {   // log the structure of the first f
 static void __fastcall h_SkinDraw(BYTE* m, void*, unsigned lod) {           // 0x4C0DE0
     SKIN_BEGIN(m)
     void* l = SkinLod(m, lod); SkinDiag(m, l);
-    ((Method0_t)0x004AC890)(m, nullptr);
-    ((SkinDraw4_t)0x004C0620)(l, nullptr, *(void**)(m + 0x1EC), *(int*)(m + 0x1D8), m + 0x238, *(void**)(m + 0x3C));
+    ((Method0_t)AD(0x004AC890))(m, nullptr);
+    ((SkinDraw4_t)AD(0x004C0620))(l, nullptr, *(void**)(m + 0x1EC), *(int*)(m + 0x1D8), m + 0x238, *(void**)(m + 0x3C));
     SKIN_END()
 }
 static void __fastcall h_SkinDrawNoWorld(BYTE* m, void*, unsigned lod) {    // 0x4C0EA0
     SKIN_BEGIN(m)
     SkinDiag(m, SkinLod(m, lod));
-    ((SkinDraw4_t)0x004C0620)(SkinLod(m, lod), nullptr, *(void**)(m + 0x1EC), *(int*)(m + 0x1D8), m + 0x238, *(void**)(m + 0x3C));
+    ((SkinDraw4_t)AD(0x004C0620))(SkinLod(m, lod), nullptr, *(void**)(m + 0x1EC), *(int*)(m + 0x1D8), m + 0x238, *(void**)(m + 0x3C));
     SKIN_END()
 }
 static void __fastcall h_SkinDraw3(BYTE* m, void*, unsigned lod) {          // 0x4C0E60
     SKIN_BEGIN(m)
-    ((SkinDraw3_t)0x004C0680)(SkinLod(m, lod), nullptr, *(void**)(m + 0x1EC), *(int*)(m + 0x1D8), m + 0x238);
+    ((SkinDraw3_t)AD(0x004C0680))(SkinLod(m, lod), nullptr, *(void**)(m + 0x1EC), *(int*)(m + 0x1D8), m + 0x238);
     SKIN_END()
 }
 static void __fastcall h_SkinDraw3Cur(BYTE* m, void*) {                     // 0x4C0E30 (lod = +0x1D0, unclamped)
     SKIN_BEGIN(m)
     void* l = (*(void***)(m + 0x1E0))[*(unsigned*)(m + 0x1D0)];
-    ((SkinDraw3_t)0x004C0680)(l, nullptr, *(void**)(m + 0x1EC), *(int*)(m + 0x1D8), m + 0x238);
+    ((SkinDraw3_t)AD(0x004C0680))(l, nullptr, *(void**)(m + 0x1EC), *(int*)(m + 0x1D8), m + 0x238);
     SKIN_END()
 }
 static void InstallAnimBlend() {
     struct { DWORD at; BYTE b[6]; void* fn; } fns[] = {
-        { 0x004C0DE0, { 0x56, 0x8B, 0xF1, 0x8B, 0x86, 0xCC }, (void*)h_SkinDraw },
-        { 0x004C0E30, { 0x8B, 0x91, 0xD8, 0x01, 0x00, 0x00 }, (void*)h_SkinDraw3Cur },
-        { 0x004C0E60, { 0x8B, 0x81, 0xCC, 0x01, 0x00, 0x00 }, (void*)h_SkinDraw3 },
-        { 0x004C0EA0, { 0x8B, 0x81, 0xCC, 0x01, 0x00, 0x00 }, (void*)h_SkinDrawNoWorld },
+        { AD(0x004C0DE0), { 0x56, 0x8B, 0xF1, 0x8B, 0x86, 0xCC }, (void*)h_SkinDraw },
+        { AD(0x004C0E30), { 0x8B, 0x91, 0xD8, 0x01, 0x00, 0x00 }, (void*)h_SkinDraw3Cur },
+        { AD(0x004C0E60), { 0x8B, 0x81, 0xCC, 0x01, 0x00, 0x00 }, (void*)h_SkinDraw3 },
+        { AD(0x004C0EA0), { 0x8B, 0x81, 0xCC, 0x01, 0x00, 0x00 }, (void*)h_SkinDrawNoWorld },
     };
-    for (auto& f : fns) if (memcmp((void*)f.at, f.b, 6)) { LOG("animation blending: unexpected bytes at %08lX, disabled", f.at); return; }
+    for (auto& f : fns) if (CodeCmp((void*)f.at, f.b, 6)) { LOG("animation blending: unexpected bytes at %08lX, disabled", f.at); return; }
     for (auto& f : fns) { BYTE j[5] = { 0xE9 }; *(DWORD*)(j + 1) = (DWORD)f.fn - (f.at + 5); PatchBytes((BYTE*)f.at, j, 5); }
     LOG("animation blending installed (skinned meshes, max %.2f rad per tick)", g_animMaxRad);
 }
@@ -2147,7 +2243,7 @@ static UpdInfo* UpdFor(BYTE* self) {
     UpdInfo* u = &g_upd[g_nupd++]; u->vt = vt; snprintf(u->name, 48, "%s", RttiName(self)); u->step = *(float*)(self + 0x24);
     u->calls = u->ticks = u->frameTicks = 0;
     u->interp = 0;
-    if (ClassListed(u->name)) u->interp = (*(void***)self)[10] == (void*)0x004AB7D0 ? 1 : -1;
+    if (ClassListed(u->name)) u->interp = (*(void***)self)[10] == (void*)AD(0x004AB7D0) ? 1 : -1;
     LOG("updater: %s vt=%p step=%.2f ms%s", u->name, vt, u->step,
         u->interp > 0 ? " [smooth]" : u->interp < 0 ? " [smooth: not a render object, skipped]" : "");
     return u;
@@ -2193,16 +2289,16 @@ static void TraceFrame(DWORD frame, double nowMs, double ft, const char* sceneCl
 }
 static void InstallUpdaterRewrite() {
     static const BYTE p[8] = { 0xD9, 0x44, 0x24, 0x04, 0x56, 0x8B, 0xF1, 0xD8 };
-    BYTE* t = (BYTE*)0x00424D90;
-    if (memcmp(t, p, 8)) { LOG("updater rewrite: unexpected bytes"); return; }
+    BYTE* t = (BYTE*)AD(0x00424D90);
+    if (CodeCmp(t, p, 8)) { LOG("updater rewrite: unexpected bytes"); return; }
     BYTE j[5] = { 0xE9 }; *(DWORD*)(j + 1) = (DWORD)(void*)h_UpdaterUpdate - (DWORD)(t + 5);
     PatchBytes(t, j, 5); LOG("updater loop replaced (trace %d s)", g_traceSec);
 }
 
 static void InstallFrameRewrite() {
     static const BYTE expect[8] = { 0x51, 0x53, 0x55, 0x56, 0x8B, 0xF1, 0x8B, 0x4E };
-    BYTE* t = (BYTE*)0x0044A9C0;
-    if (memcmp(t, expect, 8)) { LOG("frame rewrite: unexpected bytes, profiler disabled"); return; }
+    BYTE* t = (BYTE*)AD(0x0044A9C0);
+    if (CodeCmp(t, expect, 8)) { LOG("frame rewrite: unexpected bytes, profiler disabled"); return; }
     BYTE j[5] = { 0xE9 }; *(DWORD*)(j + 1) = (DWORD)(void*)h_Frame - (DWORD)(t + 5);
     PatchBytes(t, j, 5);
     LARGE_INTEGER f; QueryPerformanceFrequency(&f); g_tickMs = 1000.0 / (double)f.QuadPart;
@@ -2229,7 +2325,8 @@ static void InstallFrameRewrite() {
 #include "funcs_table.h"
 static const int NF = sizeof(g_funcStarts) / sizeof(g_funcStarts[0]);
 static int FuncIndex(DWORD a) {
-    if (a < 0x401000 || a >= 0x607000) return -1;
+    if (IsValk()) return -1;                    // funcs_table.h lists AttT functions only
+    if (a < AD(0x401000) || a >= AD(0x607000)) return -1;
     int lo = 0, hi = NF - 1;
     while (lo < hi) { int mid = (lo + hi + 1) / 2; if (g_funcStarts[mid] <= a) lo = mid; else hi = mid - 1; }
     return lo;
@@ -2265,7 +2362,7 @@ static volatile LONG g_samplerRun = 0;
 struct Sample { DWORD frame; int excl; short ninc; int inc[20]; };
 static Sample g_ring[1024]; static volatile LONG g_ringPos = 0;
 static bool IsReturnAddr(DWORD v) {
-    if (v < 0x401006 || v >= 0x607000) return false;
+    if (v < AD(0x401006) || v >= AD(0x607000)) return false;
     const BYTE* p = (const BYTE*)v;
     if (p[-5] == 0xE8) return true;                               // call rel32
     if (p[-2] == 0xFF && (p[-1] & 0xF8) == 0xD0) return true;      // call reg
@@ -2409,7 +2506,7 @@ static void HitchProfile(DWORD frame, char* out, int outSize) {   // top functio
 // Null-"this" guard: stub = test ecx,ecx / jnz orig / inc [counter] / ret N ; orig: <prolog> / jmp target+len
 static volatile LONG g_guardHits[8]; static const char* g_guardName[8]; static int g_nGuards = 0;
 static bool GuardNullThis(const char* nameTag, BYTE* target, const BYTE* expect, int len, WORD retImm) {
-    if (memcmp(target, expect, len)) { LOG("guard %s: unexpected bytes, skipped", nameTag); return false; }
+    if (CodeCmp(target, expect, len)) { LOG("guard %s: unexpected bytes, skipped", nameTag); return false; }
     int id = g_nGuards++; g_guardName[id] = nameTag;
     BYTE* st = (BYTE*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     BYTE* p = st;
@@ -2434,7 +2531,7 @@ static LONG CALLBACK VectoredAV(EXCEPTION_POINTERS* ep) {
     auto er = ep->ExceptionRecord;
     if (er->ExceptionCode != 0xC0000005) return EXCEPTION_CONTINUE_SEARCH;
     DWORD a = (DWORD)er->ExceptionAddress;
-    if (a < 0x401000 || a >= 0x607000) return EXCEPTION_CONTINUE_SEARCH;
+    if (a < AD(0x401000) || a >= AD(0x607000)) return EXCEPTION_CONTINUE_SEARCH;
     LONG n = InterlockedIncrement(&g_avCount);
     if (n > 20) return EXCEPTION_CONTINUE_SEARCH;
     auto c = ep->ContextRecord;
@@ -2443,7 +2540,7 @@ static LONG CALLBACK VectoredAV(EXCEPTION_POINTERS* ep) {
         c->Eax, c->Ebx, c->Ecx, c->Edx, c->Esi, c->Edi, c->Ebp, c->Esp);
     DWORD* sp = (DWORD*)c->Esp; char buf[512]; int len = 0, k = 0;
     for (int i = 0; i < 2048 && k < 24 && !IsBadReadPtr(sp + i, 4); ++i) {
-        DWORD v = sp[i]; if (v >= 0x401000 && v < 0x607000) { len += snprintf(buf + len, sizeof buf - len, " %08lX", v); ++k; }
+        DWORD v = sp[i]; if (v >= AD(0x401000) && v < AD(0x607000)) { len += snprintf(buf + len, sizeof buf - len, " %08lX", v); ++k; }
     }
     LOG("  stack:%s", k ? buf : " -");
     FrameEvent("access violation at %08lX", a);
@@ -2513,6 +2610,148 @@ extern "C" __declspec(dllexport) HRESULT WINAPI DirectInput8Create(HINSTANCE h, 
     return hr;
 }
 
+// ---------------------------------------------------------------- Valkyrie: streamed sound
+// The streaming thread wakes every 10 ms (0x6F1360): free space in the 4 s ring buffer (0xAC440) = play cursor - last
+// write position; when they are equal the game takes the whole buffer as free and overwrites the part still playing.
+// On today's Windows the play cursor moves in ~10 ms steps, so equal values are common: ambient loops (.wav, 10-60 s)
+// stuttered. MusicFix (github.com/Woodeess/MusicFix-ATThrone-Valkyrie) turns that "jbe" into "jb", which stopped the
+// music here: a 0-byte first fill ends a non-looped stream at once. (The music was silent for another reason too: see
+// SkipIntro.) Equal and nothing written yet ([+0x80] = 0): whole buffer (the original first fill); equal later: this
+// update is skipped. Stream object: +0x08 IDirectSoundBuffer, +0x10 last write,
+// +0x34 length, +0x55 / +0x88 flags, +0x60 std::string file name, +0x7C playing, +0x80 written.
+static int g_streamFix = 1, g_streamLog = 0;
+static volatile LONG g_stEqWav = 0, g_stEqOther = 0, g_stFirst = 0;
+static const char* StreamName(const BYTE* o) {   // MSVC 8 std::string at +0x60: buffer/pointer at +4, size +0x14, capacity +0x18
+    DWORD size = *(const DWORD*)(o + 0x74), cap = *(const DWORD*)(o + 0x78);
+    if (size > 512 || cap < size) return "";
+    const char* p = cap >= 16 ? *(const char* const*)(o + 0x64) : (const char*)(o + 0x64);
+    if (!p || IsBadReadPtr(p, size + 1) || p[size]) return "";
+    return p;
+}
+static bool StreamIsWav(const BYTE* o) {
+    const char* n = StreamName(o); size_t l = strlen(n);
+    return l > 4 && !_stricmp(n + l - 4, ".wav");
+}
+extern "C" int __cdecl StreamEqualSkip(BYTE* o) {     // called from the stub when play cursor == last write position
+    if (*(DWORD*)(o + 0x80) == 0) { InterlockedIncrement(&g_stFirst); return 0; }
+    if (StreamIsWav(o)) InterlockedIncrement(&g_stEqWav); else InterlockedIncrement(&g_stEqOther);
+    return 1;
+}
+typedef int (__fastcall *StreamOpen_t)(BYTE*, void*, int);
+static StreamOpen_t o_StreamOpen = nullptr;
+static int __fastcall h_StreamOpen(BYTE* o, void* edx, int arg) {
+    BYTE f55 = o[0x55], f88 = o[0x88]; DWORD len = *(DWORD*)(o + 0x34);
+    int r = o_StreamOpen(o, edx, arg);
+    LOG("stream open %p \"%s\" arg=%d loop55=%d f88=%d->%d len=%lu -> %d, last=%lu playing=%d | equal events so far: first %ld, skipped wav %ld / other %ld",
+        o, StreamName(o), arg, f55, f88, o[0x88], len, r, *(DWORD*)(o + 0x10), o[0x7C], g_stFirst, g_stEqWav, g_stEqOther);
+    return r;
+}
+typedef void (__fastcall *StreamStop_t)(BYTE*, void*);
+static StreamStop_t o_StreamStop = nullptr;
+static void __fastcall h_StreamStop(BYTE* o, void* edx) {
+    if (o[0x7C]) LOG("stream stop %p \"%s\" written=%lu (from %p)", o, StreamName(o), *(DWORD*)(o + 0x80), __builtin_return_address(0));
+    o_StreamStop(o, edx);
+}
+static void InstallStreamFix(const char* path) {
+    char tmp[16];
+    if (!GetPrivateProfileStringA("Game", "StreamFix", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Game", "StreamFix", "1  ; Valkyrie: 1 = music and ambient loops no longer repeat fragments / break off, 0 = original", path);
+    if (!GetPrivateProfileStringA("Perf", "StreamLog", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Perf", "StreamLog", "0  ; Valkyrie: 1 = log sound stream opens / stops (diagnostics)", path);
+    g_streamFix = GetPrivateProfileIntA("Game", "StreamFix", 1, path);
+    g_streamLog = GetPrivateProfileIntA("Perf", "StreamLog", 0, path);
+    static const BYTE sig[16] = { 0x3B, 0xF8, 0x76, 0x04, 0x2B, 0xF8, 0xEB, 0x08, 0x2B, 0xF8, 0x81, 0xC7, 0x40, 0xC4, 0x0A, 0x00 };
+    BYTE* at = (BYTE*)0x006F1404;
+    bool mf = at[2] == 0x72 && !memcmp(at, sig, 2) && !memcmp(at + 3, sig + 3, 13);   // exe patched by MusicFix: undo
+    if (mf) { static const BYTE jbe = 0x76; PatchBytes(at + 2, &jbe, 1); LOG("stream fix: MusicFix byte found in the exe, undone in memory (it stops the music)"); }
+    if (g_streamLog) {
+        static const BYTE po[5] = { 0x83, 0xEC, 0x08, 0x53, 0x56 };
+        static const BYTE ps[7] = { 0x56, 0x8B, 0xF1, 0x80, 0x7E, 0x7C, 0x00 };
+        o_StreamOpen = (StreamOpen_t)Detour((BYTE*)0x006F1130, po, 5, (void*)h_StreamOpen);
+        o_StreamStop = (StreamStop_t)Detour((BYTE*)0x006F1300, ps, 7, (void*)h_StreamStop);
+    }
+    if (!g_streamFix) { LOG("stream fix: off ([Game] StreamFix=0)"); return; }
+    if (memcmp(at, sig, 16)) { LOG("stream fix: unexpected bytes, not applied"); return; }
+    BYTE* st = (BYTE*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!st) return;
+    BYTE c[] = { 0x3B, 0xF8,                               // cmp edi, eax          (play, last write)
+                 0x77, 0x22,                               // ja  diff
+                 0x72, 0x13,                               // jb  wrap
+                 0x60,                                     // pushad                (equal)
+                 0x56,                                     // push esi              (stream object)
+                 0xE8, 0, 0, 0, 0,                         // call StreamEqualSkip
+                 0x83, 0xC4, 0x04,                         // add esp, 4
+                 0x85, 0xC0,                               // test eax, eax
+                 0x61,                                     // popad
+                 0x0F, 0x85, 0, 0, 0, 0,                   // jnz 0x6F1490          (skip this update)
+                 0x2B, 0xF8,                               // wrap: sub edi, eax
+                 0x81, 0xC7, 0x40, 0xC4, 0x0A, 0x00,       //       add edi, 0AC440h
+                 0xE9, 0, 0, 0, 0,                         //       jmp 0x6F1414
+                 0x2B, 0xF8,                               // diff: sub edi, eax
+                 0xE9, 0, 0, 0, 0 };                       //       jmp 0x6F1414
+    *(DWORD*)(c + 9) = (DWORD)(void*)StreamEqualSkip - (DWORD)(st + 13);
+    *(DWORD*)(c + 21) = 0x006F1490 - (DWORD)(st + 25);
+    *(DWORD*)(c + 34) = 0x006F1414 - (DWORD)(st + 38);
+    *(DWORD*)(c + 41) = 0x006F1414 - (DWORD)(st + 45);
+    memcpy(st, c, sizeof c); FlushInstructionCache(GetCurrentProcess(), st, sizeof c);
+    BYTE j[16]; memset(j, 0x90, sizeof j); j[0] = 0xE9; *(DWORD*)(j + 1) = (DWORD)st - (DWORD)(at + 5);
+    PatchBytes(at, j, 16);
+    LOG("stream fix: streams no longer refilled whole on an unchanged play cursor%s", g_streamLog ? ", stream log on" : "");
+}
+
+// ---------------------------------------------------------------- random ambient sounds at the game tick
+// The continent (CContinent::Update, called every rendered frame) updates the ambient sound manager with the camera
+// position (0x528A34 -> 0x428350; Valkyrie 0x660BB4 -> 0x55F710). That update also rolls the dice for every random
+// sound of the zone (birds, wolves): it plays when rand() * MaxRandomEmitRange / RAND_MAX == RandomEmitKeyValue, i.e.
+// ~1 / MaxRandomEmitRange per call - balanced for the 30 Hz game tick. At 300 fps the wolves of Valkyrie howled every
+// second or two, several at once. [Game] AmbientRate=1: this update runs at most 30 times per second.
+static int g_ambRate = 1;
+static double g_ambNextMs = 0;
+typedef void (__fastcall *AmbUpd_t)(void*, void*, void*);
+static void __fastcall h_AmbientUpdate(void* mgr, void* edx, void* pos) {
+    LARGE_INTEGER t; QueryPerformanceCounter(&t);
+    double now = (double)t.QuadPart * g_tickMs;
+    if (g_ambRate && now < g_ambNextMs) return;
+    g_ambNextMs = (now - g_ambNextMs > 100.0) ? now + 1000.0 / 30.0 : g_ambNextMs + 1000.0 / 30.0;
+    ((AmbUpd_t)AD(0x00428350))(mgr, edx, pos);
+}
+static void InstallAmbientRate(const char* path) {
+    char tmp[16];
+    if (!GetPrivateProfileStringA("Game", "AmbientRate", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Game", "AmbientRate", "1  ; 1 = random ambient sounds (birds, wolves) as often as intended at any frame rate, 0 = original (more often the higher the fps)", path);
+    g_ambRate = GetPrivateProfileIntA("Game", "AmbientRate", 1, path);
+    if (!g_ambRate) return;
+    if (g_tickMs == 0) { LARGE_INTEGER f; QueryPerformanceFrequency(&f); g_tickMs = 1000.0 / (double)f.QuadPart; }
+    BYTE* at = (BYTE*)AD(0x00528A34);
+    if (!at || at[0] != 0xE8 || (DWORD)at + 5 + *(int*)(at + 1) != AD(0x00428350)) { g_ambRate = 0; LOG("ambient rate: unexpected code, not installed"); return; }
+    BYTE c[5] = { 0xE8 }; *(DWORD*)(c + 1) = (DWORD)(void*)h_AmbientUpdate - (DWORD)(at + 5);
+    PatchBytes(at, c, 5);
+    LOG("ambient rate: random ambient sounds rolled at most 30 times per second instead of every frame (AmbientRate=1)");
+}
+
+// ---------------------------------------------------------------- first start with the mod
+// The game's default graphic.cfg is a small fullscreen mode (1024x768 / 1280x960), which on today's monitors is
+// stretched, slow to switch or refused. On the first start with AttTFix (no AttTFix.ini yet) the game starts in a
+// window at the desktop resolution; when the desktop mode cannot be read, at least in a window.
+static void FirstStartGraphics() {
+    char p[MAX_PATH]; snprintf(p, sizeof p, "%sgraphic.cfg", g_dir);
+    FILE* f = fopen(p, "r+b");
+    if (!f) { LOG("first start: no graphic.cfg, left to the game"); return; }
+    BYTE c[66]; size_t n = fread(c, 1, sizeof c, f);
+    if (n < 17) { fclose(f); LOG("first start: graphic.cfg too short (%u bytes), not changed", (unsigned)n); return; }
+    int w0 = *(int*)c, h0 = *(int*)(c + 4); BYTE fs0 = c[16];
+    DEVMODEA dm; ZeroMemory(&dm, sizeof dm); dm.dmSize = sizeof dm;
+    int w = 0, h = 0;
+    if (EnumDisplaySettingsA(nullptr, ENUM_CURRENT_SETTINGS, &dm)) { w = (int)dm.dmPelsWidth; h = (int)dm.dmPelsHeight; }
+    if (w < 800 || h < 600) { w = GetSystemMetrics(SM_CXSCREEN); h = GetSystemMetrics(SM_CYSCREEN); }
+    bool res = w >= 800 && h >= 600 && w <= 16384 && h <= 16384;
+    if (res) { *(int*)c = w; *(int*)(c + 4) = h; }
+    c[16] = 0;                                    // windowed
+    fseek(f, 0, SEEK_SET); fwrite(c, 1, n, f); fclose(f);
+    if (res) LOG("first start: graphic.cfg %dx%d %s -> %dx%d in a window (desktop resolution)", w0, h0, fs0 ? "fullscreen" : "windowed", w, h);
+    else LOG("first start: desktop resolution unknown, graphic.cfg %dx%d -> in a window", w0, h0);
+}
+
 // ---------------------------------------------------------------- init
 static void Init() {
     GetModuleFileNameA(nullptr, g_dir, MAX_PATH);
@@ -2526,7 +2765,9 @@ static void Init() {
     // sanity: is this the expected exe?
     BYTE* base = (BYTE*)GetModuleHandleA(nullptr);
     auto nt = (IMAGE_NT_HEADERS*)(base + ((IMAGE_DOS_HEADER*)base)->e_lfanew);
-    LOG("exe timestamp %08lX (expected 475EABAF), LAA=%d", nt->FileHeader.TimeDateStamp, (nt->FileHeader.Characteristics & 0x20) != 0);
+    static const char* const gameName[] = { "Ascension to the Throne", "Ascension to the Throne: Valkyrie", "unknown build" };
+    LOG("exe timestamp %08lX: %s, LAA=%d", nt->FileHeader.TimeDateStamp, gameName[Game()], (nt->FileHeader.Characteristics & 0x20) != 0);
+    if (Game() == GAME_OFF) { g_modOff = true; LOG("this exe is not known to AttTFix (AttT 475EABAF, Valkyrie 4883FB4F): the mod does nothing"); return; }
     // command line + graphic.cfg
     LOG("cmdline: %s", GetCommandLineA());
     snprintf(path, sizeof path, "%sgraphic.cfg", g_dir);
@@ -2535,8 +2776,10 @@ static void Init() {
     if (auto u = GetModuleHandleA("user32.dll")) if (auto f = (BOOL (WINAPI*)())GetProcAddress(u, "SetProcessDPIAware")) LOG("SetProcessDPIAware -> %d", f());
     LOG("screen metrics %dx%d", GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN));
     snprintf(path, sizeof path, "%sAttTFix.ini", g_dir);
-    if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES)
+    if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) {
         WritePrivateProfileStringA("UI", "Widescreen", "1  ; 1 = UI on a centered 4:3 canvas, 0 = original stretched UI", path);
+        FirstStartGraphics();
+    }
     g_wsEnabled = GetPrivateProfileIntA("UI", "Widescreen", 1, path);
     { char tmp0[8]; if (!GetPrivateProfileStringA("UI", "WorldAspect", "", tmp0, sizeof tmp0, path))
         WritePrivateProfileStringA("UI", "WorldAspect", "1  ; 1 = 3D world in its true proportions on widescreen screens, 0 = original (stretched 1.33x on 16:9)", path);
@@ -2622,10 +2865,16 @@ static void Init() {
     GetPrivateProfileStringA("Game", "Language", "ru", tmp, sizeof tmp, path);
     g_langSetting = g_langActive = !_strnicmp(tmp, "en", 2) ? 1 : 0;
     InstallLanguage();
+    if (IsValk()) InstallStreamFix(path);
+    InstallAmbientRate(path);
     {   // startup videos (1CLogo, logo, intro): the engine skips them with "-nologo"; "test al,al" -> "xor al,al"
         static const BYTE p[8] = { 0x84, 0xC0, 0x0F, 0x84, 0xE5, 0x00, 0x00, 0x00 };
+        static const BYTE pv[8] = { 0x84, 0xC0, 0x0F, 0x84, 0xC1, 0x00, 0x00, 0x00 };   // Valkyrie
         if (g_skipIntro) {
-            if (!memcmp((void*)0x0044F75E, p, 8)) { static const BYTE x[2] = { 0x32, 0xC0 }; PatchBytes((void*)0x0044F75E, x, 2); LOG("startup videos skipped (SkipIntro=1)"); }
+            if (!memcmp((void*)AD(0x0044F75E), IsValk() ? pv : p, 8)) { static const BYTE x[2] = { 0x32, 0xC0 }; PatchBytes((void*)AD(0x0044F75E), x, 2); LOG("startup videos skipped (SkipIntro=1)");
+                // Valkyrie: [0x87E009] = "no video playing" starts at 0 and is set only when a video ends; the music and
+                // the ambient sound stay muted while it is 0 (0x62ECF0) - with no startup video the music never started
+                if (IsValk() && *(volatile BYTE*)0x0087E009 == 0) { *(volatile BYTE*)0x0087E009 = 1; LOG("Valkyrie: 'video playing' flag cleared (music and ambient were muted without the startup video)"); } }
             else LOG("SkipIntro: unexpected bytes");
         }
     }
@@ -2665,6 +2914,7 @@ static void Init() {
     o_MBW = (MBW_t)PatchIAT("USER32.dll", "MessageBoxW", (void*)h_MBW);
     AddVectoredExceptionHandler(1, VectoredAV);
     o_SPAM = (SPAM_t)PatchIAT("KERNEL32.dll", "SetProcessAffinityMask", (void*)h_SPAM);
+    if (IsValk() && g_allCores) KeepGameThreadsTogether();
     InstallPerfPatches();
     if (!GetPrivateProfileStringA("Perf", "AsyncSunCheck", "", tmp, sizeof tmp, path)) {
         WritePrivateProfileStringA("Perf", "AsyncSunCheck", "1  ; 1 = sun/lens flare visibility read without stalling the GPU, 0 = original (F7 toggles)", path);
@@ -2698,6 +2948,7 @@ static void Init() {
     if (!GetPrivateProfileStringA("Perf", "AsyncSound", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Perf", "AsyncSound", "1  ; 1 = 3D sound positions/commits on a worker thread, 0 = on the game thread (original)", path);
     g_asyncSnd = GetPrivateProfileIntA("Perf", "AsyncSound", 1, path) != 0;
+    if (g_asyncSnd && IsValk()) { g_asyncSnd = 0; LOG("async sound: off in Valkyrie (its sound system is not thread-safe)"); }
     if (g_asyncSnd) InstallAsyncSound();
     if (!GetPrivateProfileStringA("Perf", "FastSkin", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Perf", "FastSkin", "1  ; 1 = character skinning with SSE, kept when the pose did not change (same result, checked against the original), 0 = original", path);
@@ -2755,20 +3006,21 @@ static void Init() {
     InstallParticleSmooth();
     {   // Sound: stopping a 3D sound after the sound manager [0x6CA4B4] is gone (return to main menu) -> null this
         static const BYTE p[7] = { 0x83, 0xEC, 0x0C, 0x8B, 0x54, 0x24, 0x10 };
-        GuardNullThis("Sound3D.Stop(0x4C53A0)", (BYTE*)0x004C53A0, p, 7, 0x0C);
+        GuardNullThis("Sound3D.Stop(0x4C53A0)", (BYTE*)AD(0x004C53A0), p, 7, 0x0C);
     }
     static const BYTE doFileProlog[7] = { 0x6A, 0xFF, 0x68, 0x5A, 0x63, 0x5E, 0x00 };
-    o_DoFile = (DoFile_t)Detour((BYTE*)0x00432620, doFileProlog, 7, (void*)h_DoFile);
+    o_DoFile = (DoFile_t)Detour((BYTE*)AD(0x00432620), doFileProlog, 7, (void*)h_DoFile);
     {   // replace ChangeSettings (0x44D9D0) entirely: "call 0x42F160 / mov ecx,[eax+70h]"
         static const BYTE expect[8] = { 0xE8, 0x8B, 0x17, 0xFE, 0xFF, 0x8B, 0x48, 0x70 };
-        BYTE* t = (BYTE*)0x0044D9D0;
-        if (!memcmp(t, expect, 8)) {
+        BYTE* t = (BYTE*)AD(0x0044D9D0);
+        if (!CodeCmp(t, expect, 8)) {
             DWORD old; VirtualProtect(t, 5, PAGE_EXECUTE_READWRITE, &old);
             t[0] = 0xE9; *(DWORD*)(t + 1) = (DWORD)(void*)h_ChangeSettings - (DWORD)(t + 5);
             VirtualProtect(t, 5, old, &old); FlushInstructionCache(GetCurrentProcess(), t, 5);
             LOG("ChangeSettings replaced");
         } else LOG("ChangeSettings: unexpected bytes, not replaced");
     }
+    if (g_adMiss) LOG("WARNING: no Valkyrie address for %08lX", g_adMiss);
 }
 BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) { DisableThreadLibraryCalls(h); Init(); }

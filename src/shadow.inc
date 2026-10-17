@@ -90,7 +90,7 @@ static DWORD g_shCullIn = 0, g_shCullOut = 0;
 static void ShLight() {
     if (g_shLFrame == g_curFrame) return;
     g_shLFrame = g_curFrame; g_shLOk = false;
-    void* dev = *(void**)0x006C8C10; if (!dev) return;
+    void* dev = *(void**)AD(0x006C8C10); if (!dev) return;
     BYTE l[104] = {};
     if (((HRESULT (__stdcall*)(void*, DWORD, void*))(*(void***)dev)[52])(dev, 0, l) < 0) return;   // GetLight(0)
     const float* d = (const float*)(l + 0x40);                                                       // D3DLIGHT9.Direction
@@ -121,7 +121,7 @@ static bool ShadowBoxVisible(const float* fr, const float* c) {
     ++g_shCullIn; return true;
 }
 static bool __attribute__((thiscall)) h_CullCell(const float* frustum, const float* corners) { return ShadowBoxVisible(frustum, corners); }
-static bool __attribute__((thiscall)) h_CullObj(const BYTE* obj) { return ShadowBoxVisible(*(const float**)0x006CA2C8, (const float*)(obj + 0x244)); }
+static bool __attribute__((thiscall)) h_CullObj(const BYTE* obj) { return ShadowBoxVisible(*(const float**)AD(0x006CA2C8), (const float*)(obj + 0x244)); }
 static void ShadowDeviceReset() { g_shTexN = 0; g_shFilt = false; g_shTci = false; ShadowMsaaRelease(); }   // textures are re-created after a reset
 static void ShadowDeviceHooks(void* dev) {
     if (g_shadowSize <= 0) return;
@@ -136,8 +136,8 @@ static void ShadowDeviceHooks(void* dev) {
     if (!patched) {
         patched = true;
         static DWORD target; target = (DWORD)g_shadowSize;
-        BYTE* at = (BYTE*)0x0052919D;
-        if (memcmp(at, "\x8B\x8E\xD4\x02\x00\x00\x6A\x00\x6A\x17", 10) || memcmp((void*)0x0052A47A, "\x8B\x86\xD4\x02\x00\x00", 6)) {
+        BYTE* at = (BYTE*)AD(0x0052919D);
+        if (CodeCmp(at, "\x8B\x8E\xD4\x02\x00\x00\x6A\x00\x6A\x17", 10) || CodeCmp((void*)AD(0x0052A47A), "\x8B\x86\xD4\x02\x00\x00", 6)) {
             LOG("shadows: unexpected code, shadow size not changed"); g_shadowSize = 1024;
         } else if (g_shadowSize != 1024) {
             BYTE* st = (BYTE*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -152,6 +152,7 @@ static void ShadowDeviceHooks(void* dev) {
                              0x68, 0xA3, 0x91, 0x52, 0x00,           // push 0x5291A3
                              0xC3 };                                 // ret
                 *(DWORD*)(c + 2) = (DWORD)&target;
+                *(DWORD*)(c + 28) = AD(0x005291A3);
                 memcpy(st, c, sizeof c); FlushInstructionCache(GetCurrentProcess(), st, sizeof c);
                 BYTE j[6] = { 0xE9, 0, 0, 0, 0, 0x90 }; *(DWORD*)(j + 1) = (DWORD)st - (DWORD)(at + 5);
                 PatchBytes(at, j, 6);
@@ -164,8 +165,8 @@ static void ShadowDeviceHooks(void* dev) {
         // the four frustum tests of shadow casters call our shadow-aware tests instead (same calling conventions:
         // 0x458120 thiscall(frustum, corners) ret 4; 0x58EB50 thiscall(object))
         static const struct { DWORD at, to; void* fn; } cs[4] = {
-            { 0x004B6BC5, 0x00458120, (void*)h_CullCell }, { 0x004B6BEF, 0x00458120, (void*)h_CullCell },
-            { 0x004B6DA8, 0x0058EB50, (void*)h_CullObj },  { 0x004B6DE6, 0x0058EB50, (void*)h_CullObj } };
+            { AD(0x004B6BC5), AD(0x00458120), (void*)h_CullCell }, { AD(0x004B6BEF), AD(0x00458120), (void*)h_CullCell },
+            { AD(0x004B6DA8), AD(0x0058EB50), (void*)h_CullObj },  { AD(0x004B6DE6), AD(0x0058EB50), (void*)h_CullObj } };
         bool ok = true;
         for (auto& c : cs) if (*(BYTE*)c.at != 0xE8 || c.at + 5 + *(int*)(c.at + 1) != c.to) ok = false;
         if (ok) {
@@ -178,8 +179,8 @@ static void ShadowDeviceHooks(void* dev) {
     if (!unitPatched && g_unitShadowSize > 256) {
         unitPatched = true;
         int us = 256; while (us * 2 <= g_unitShadowSize && us * 2 <= lim) us *= 2;
-        static const DWORD ua[6] = { 0x004EC793, 0x004EC798, 0x004EC7C4, 0x004EC7C9, 0x004ECF43, 0x004ECF48 };
-        bool ok = true; for (DWORD a : ua) if (memcmp((void*)a, "\x68\x00\x01\x00\x00", 5)) ok = false;
+        static const DWORD ua[6] = { AD(0x004EC793), AD(0x004EC798), AD(0x004EC7C4), AD(0x004EC7C9), AD(0x004ECF43), AD(0x004ECF48) };
+        bool ok = true; for (DWORD a : ua) if (CodeCmp((void*)a, "\x68\x00\x01\x00\x00", 5)) ok = false;
         if (ok) { DWORD v = (DWORD)us; for (DWORD a : ua) PatchBytes((void*)(a + 1), &v, 4); g_unitShadowSize = us; LOG("shadows: unit shadow texture %dx%d (original 256)", us, us); }
         else { g_unitShadowSize = 256; LOG("shadows: unexpected code, unit shadow size unchanged"); }
     }
@@ -233,7 +234,7 @@ static void __fastcall h_ShCasters(void* self, void*) {                // 0x4B6E
     GetXf_t gx = dev ? (GetXf_t)(*(void***)dev)[45] : nullptr;
     bool ok = false;
     if (gx) { gx(dev, 2, g_shV); gx(dev, 3, g_shP); ok = fabsf(g_shP[11]) < 1e-6f && fabsf(g_shP[15] - 1.0f) < 1e-4f; if (ok) ++g_shCapBefore; }
-    ((void (__fastcall*)(void*, void*))0x004B6E70)(self, nullptr);
+    ((void (__fastcall*)(void*, void*))AD(0x004B6E70))(self, nullptr);
     if (!ok && gx) { gx(dev, 2, g_shV); gx(dev, 3, g_shP); ok = fabsf(g_shP[11]) < 1e-6f && fabsf(g_shP[15] - 1.0f) < 1e-4f; if (ok) ++g_shCapAfter; }
     if (ok) g_shCamFrame = g_curFrame;
     else {
@@ -256,9 +257,9 @@ static void __cdecl ShSetMShadow(float* m) {                            // from 
 }
 static void InstallShadowProjection() {
     if (!g_shadowProj) return;
-    BYTE* c1 = (BYTE*)0x0052818E; BYTE* c2 = (BYTE*)0x0052A04A;
-    if (memcmp((void*)0x00528188, "\x8B\x8E\x74\x02\x00\x00\xE8", 7) || (DWORD)c1 + 5 + *(int*)(c1 + 1) != 0x004B6E70 ||
-        memcmp(c2, "\x8B\x4B\x3C\x8B\x11\x8B\x42\x50\x55\x68\xE4\x2B\x61\x00", 14)) {
+    BYTE* c1 = (BYTE*)AD(0x0052818E); BYTE* c2 = (BYTE*)AD(0x0052A04A);
+    if (CodeCmp((void*)AD(0x00528188), "\x8B\x8E\x74\x02\x00\x00\xE8", 7) || (DWORD)c1 + 5 + *(int*)(c1 + 1) != AD(0x004B6E70) ||
+        CodeCmp(c2, "\x8B\x4B\x3C\x8B\x11\x8B\x42\x50\x55\x68\xE4\x2B\x61\x00", 14)) {
         g_shadowProj = 0; LOG("shadows: unexpected code, shadow projection unchanged"); return;
     }
     BYTE* st = (BYTE*)VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
@@ -271,6 +272,7 @@ static void InstallShadowProjection() {
                  0x8B, 0x4B, 0x3C, 0x8B, 0x11,           // mov ecx,[ebx+3Ch] / mov edx,[ecx]   (replaced)
                  0x68, 0x4F, 0xA0, 0x52, 0x00, 0xC3 };   // push 0x52A04F / ret
     *(DWORD*)(s + 3) = (DWORD)(void*)ShSetMShadow - (DWORD)(st + 7);
+    *(DWORD*)(s + 17) = AD(0x0052A04F);
     memcpy(st, s, sizeof s); FlushInstructionCache(GetCurrentProcess(), st, sizeof s);
     BYTE j[5] = { 0xE9 }; *(DWORD*)(j + 1) = (DWORD)st - (DWORD)(c2 + 5); PatchBytes(c2, j, 5);
     BYTE k[5] = { 0xE8 }; *(DWORD*)(k + 1) = (DWORD)(void*)h_ShCasters - (DWORD)(c1 + 5); PatchBytes(c1, k, 5);

@@ -137,7 +137,7 @@ static inline bool MipFmtOk(DWORD f) {
     return f == 0x31545844 /*DXT1*/ || f == 20 /*R8G8B8*/ || f == 22 /*X8R8G8B8*/ || f == 23 /*R5G6B5*/ || f == 24 /*X1R5G5B5*/ || f == 50 /*L8*/;
 }
 static HRESULT WINAPI h_D3DXCTFM(void* dev, const void* src, UINT len, UINT w, UINT h, UINT mips, DWORD usage, DWORD fmt, DWORD pool, DWORD filt, DWORD mipf, DWORD ck, void* info, void* pal, void** out) {
-    if (g_mipFix && mips == 1 && __builtin_return_address(0) == (void*)0x4E0708 && !(usage & 0x203 /*RT|DS|DYNAMIC*/)) {
+    if (g_mipFix && mips == 1 && __builtin_return_address(0) == (void*)AD(0x4E0708) && !(usage & 0x203 /*RT|DS|DYNAMIC*/)) {
         if (MipFmtOk(fmt)) {
             LARGE_INTEGER t0, t1, fq; QueryPerformanceCounter(&t0);
             HRESULT hr = o_D3DXCTFM(dev, src, len, w, h, 0 /*full chain*/, usage, fmt, pool, filt, mipf, ck, info, pal, out);
@@ -179,7 +179,7 @@ struct MipCre { void* ret; UINT w, h, lv; DWORD usage, fmt, pool, n; };
 static MipCre g_mipCre[24]; static int g_mipCreN = 0;
 static void MipNoteCreate(void* ret, UINT w, UINT h, UINT lv, DWORD usage, DWORD fmt, DWORD pool) {
     if (w < 1024 && h < 1024) return;
-    if ((DWORD)ret < 0x401000 || (DWORD)ret > 0x5F0000) ret = nullptr;     // created inside D3DX / a DLL
+    if ((DWORD)ret < AD(0x401000) || (DWORD)ret > AD(0x5F0000)) ret = nullptr;     // created inside D3DX / a DLL
     for (int i = 0; i < g_mipCreN; ++i) { MipCre& c = g_mipCre[i]; if (c.ret == ret && c.lv == lv && c.fmt == fmt && c.pool == pool && c.usage == usage) { ++c.n; return; } }
     if (g_mipCreN < 24) { g_mipCre[g_mipCreN++] = { ret, w, h, lv, usage, fmt, pool, 1 };
         LOG("mipmaps: texture %ux%u levels %u usage %lx fmt %lx pool %lu created from %p", w, h, lv, usage, fmt, pool, ret); }
@@ -223,7 +223,7 @@ static void MipTraceFlush() {
 static void* g_mipSys[64]; static int g_mipSysN = 0; static CRITICAL_SECTION g_mipCs; static bool g_mipCsInit = false;
 static UINT MipCreateLevels(void* ret, UINT w, UINT h, UINT lv, DWORD usage, DWORD fmt, DWORD pool) {
     if (!g_mipFix || lv != 1 || fmt != 0x31545844 /*DXT1*/ || usage) return lv;
-    if (ret != (void*)0x4E02E6 && ret != (void*)0x4E0321) return lv;
+    if (ret != (void*)AD(0x4E02E6) && ret != (void*)AD(0x4E0321)) return lv;
     if (w < 8 || h < 8 || (w & (w - 1)) || (h & (h - 1))) return lv;
     return 0;   // full chain
 }

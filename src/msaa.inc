@@ -51,7 +51,7 @@ static void* MsaaChooseDS(void* ds) {
     if (dsMS == g_rt0MS || !dsMS) return ds;
     for (int i = 0; i < g_dsSubN; ++i) if (g_dsSub[i].orig == ds) return g_dsSub[i].sub;
     SDesc d; if (!MsSurfDesc(ds, &d) || g_dsSubN >= 8) return ds;
-    void* dev = *(void**)0x006C8C10; void* sub = nullptr;
+    void* dev = *(void**)AD(0x006C8C10); void* sub = nullptr;
     // CreateDepthStencilSurface(W, H, Format, MultiSample, Quality, Discard, pp, pShared) = 29
     HRESULT hr = ((HRESULT (__stdcall*)(void*, UINT, UINT, DWORD, DWORD, DWORD, BOOL, void**, void*))(*(void***)dev)[29])(dev, d.W, d.H, d.Format, 0, 0, FALSE, &sub, nullptr);
     if (hr < 0 || !sub) { LOG("msaa: depth substitute %ux%u fmt %lu failed %08lX", d.W, d.H, d.Format, hr); return ds; }
@@ -82,7 +82,7 @@ static HRESULT __stdcall h_SetDS(void* dev, void* ds) {
 }
 // resolved copy of a multisampled surface (back buffer size), lockable
 static void* MsaaResolve(void* src) {
-    void* dev = *(void**)0x006C8C10; SDesc d;
+    void* dev = *(void**)AD(0x006C8C10); SDesc d;
     if (!MsSurfDesc(src, &d)) return nullptr;
     if (g_bbCopy && (g_bbW != d.W || g_bbH != d.H || g_bbFmt != d.Format)) { Rel(g_bbCopy); g_bbCopy = nullptr; }
     if (!g_bbCopy) {
@@ -96,7 +96,7 @@ static void* MsaaResolve(void* src) {
 }
 // the sun code reads exactly one pixel (y*pitch + x*4): resolve only that pixel and hand out a pointer with pitch 0
 static HRESULT SunPixelLock(void* s, void* lr) {
-    void* dev = *(void**)0x006C8C10; SDesc d;
+    void* dev = *(void**)AD(0x006C8C10); SDesc d;
     if (!MsSurfDesc(s, &d)) return -1;
     if (!g_px1 && ((HRESULT (__stdcall*)(void*, UINT, UINT, DWORD, DWORD, DWORD, BOOL, void**, void*))(*(void***)dev)[28])(dev, 1, 1, d.Format, 0, 0, TRUE, &g_px1, nullptr) < 0) { g_px1 = nullptr; return -1; }
     int x = *(int*)(g_sunLockCtx + 0x88), y = *(int*)(g_sunLockCtx + 0x8C);
@@ -191,7 +191,7 @@ struct RTRec { void* rt; void* ds; DWORD draws; };
 static RTRec g_rtRec[64]; static int g_rtRecN = 0;
 static void RTCount() {
     if (!g_rtTraceOn) return;
-    void* dev = *(void**)0x006C8C10; void* rt = nullptr; void* ds = nullptr;
+    void* dev = *(void**)AD(0x006C8C10); void* rt = nullptr; void* ds = nullptr;
     MipTraceDraw(dev);
     ((HRESULT (__stdcall*)(void*, DWORD, void**))(*(void***)dev)[38])(dev, 0, &rt);
     ((HRESULT (__stdcall*)(void*, void**))(*(void***)dev)[40])(dev, &ds);
@@ -263,5 +263,5 @@ static void __fastcall h_SunPos(BYTE* sun, void* edx) { g_sunLockCtx = sun; o_Su
 static void* Detour(BYTE* target, const BYTE* expect, int len, void* hook);
 static void InstallSunLockCtx() {
     static const BYTE p[6] = { 0x81, 0xEC, 0xE0, 0x01, 0x00, 0x00 };
-    o_SunPos = (SunPos_t)Detour((BYTE*)0x005352E0, p, 6, (void*)h_SunPos);
+    o_SunPos = (SunPos_t)Detour((BYTE*)AD(0x005352E0), p, 6, (void*)h_SunPos);
 }

@@ -16,7 +16,7 @@ static TsRec g_tsTmp[TS_CAP];
 static DWORD g_tsKey[TS_CAP], g_tsKey2[TS_CAP];
 static inline DWORD TsFlip(DWORD k) { return k ^ ((DWORD)((int)k >> 31) | 0x80000000u); }   // float order -> uint order
 static void __cdecl h_TreeQsort(void* base, size_t n, size_t sz, int (__cdecl* cmp)(const void*, const void*)) {
-    if (!g_optSort || sz != 16 || (DWORD)(void*)cmp != 0x0055C500 || n > TS_CAP) { ++g_sortFallback; o_qsort(base, n, sz, cmp); return; }
+    if (!g_optSort || sz != 16 || (DWORD)(void*)cmp != AD(0x0055C500) || n > TS_CAP) { ++g_sortFallback; o_qsort(base, n, sz, cmp); return; }
     ++g_sortCalls; g_sortElems += (DWORD)n;
     if (n < 2) return;
     TsRec* a = (TsRec*)base;
@@ -47,10 +47,10 @@ static void __cdecl h_TreeQsort(void* base, size_t n, size_t sz, int (__cdecl* c
     if (src != a) memcpy(a, src, n * sizeof(TsRec));
 }
 static void InstallTreeSort() {
-    BYTE* at = (BYTE*)0x0055EA6B;
+    BYTE* at = (BYTE*)AD(0x0055EA6B);
     static const BYTE c[6] = { 0xFF, 0x15, 0x88, 0x74, 0x60, 0x00 };   // call [__imp_qsort]
-    if (memcmp(at, c, 6) || memcmp((void*)0x0055EA5D, "\x68\x00\xC5\x55\x00\x6A\x10", 7)) { g_optSort = 0; LOG("tree sort: unexpected code, not installed"); return; }
-    o_qsort = *(qsort_t*)0x00607488;
+    if (CodeCmp(at, c, 6) || CodeCmp((void*)AD(0x0055EA5D), "\x68\x00\xC5\x55\x00\x6A\x10", 7)) { g_optSort = 0; LOG("tree sort: unexpected code, not installed"); return; }
+    o_qsort = *(qsort_t*)AD(0x00607488);
     BYTE b[6]; b[0] = 0xE8; *(DWORD*)(b + 1) = (DWORD)(void*)h_TreeQsort - (DWORD)(at + 5); b[5] = 0x90;
     PatchBytes(at, b, 6);
     LOG("tree sort: radix sort installed (TreeSort=%d)", g_optSort);

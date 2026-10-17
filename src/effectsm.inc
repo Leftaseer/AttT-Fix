@@ -394,9 +394,9 @@ static void InstallEffectStates() {
     memcpy(g_fxVtbl, v, sizeof v);
     static const BYTE pb[7] = { 0x8B, 0x54, 0x24, 0x08, 0x8B, 0x41, 0x20 };
     static const BYTE pe[5] = { 0x8B, 0x41, 0x20, 0x8B, 0x08 };
-    if (memcmp((void*)0x004480C0, pb, 7) || memcmp((void*)0x004480F0, pe, 5)) { g_optFx = 0; LOG("effect states: unexpected code, not installed"); return; }
-    o_CEBegin = (CEBegin_t)Detour((BYTE*)0x004480C0, pb, 7, (void*)h_CEBegin);
-    o_CEEnd = (CEEnd_t)Detour((BYTE*)0x004480F0, pe, 5, (void*)h_CEEnd);
+    if (CodeCmp((void*)AD(0x004480C0), pb, 7) || CodeCmp((void*)AD(0x004480F0), pe, 5)) { g_optFx = 0; LOG("effect states: unexpected code, not installed"); return; }
+    o_CEBegin = (CEBegin_t)Detour((BYTE*)AD(0x004480C0), pb, 7, (void*)h_CEBegin);
+    o_CEEnd = (CEEnd_t)Detour((BYTE*)AD(0x004480F0), pe, 5, (void*)h_CEEnd);
     g_fxInstalled = o_CEBegin && o_CEEnd;
     LOG("effect states: lazy save/restore installed (EffectStates=%d)", g_optFx);
 }

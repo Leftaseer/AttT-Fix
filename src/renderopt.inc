@@ -242,7 +242,7 @@ static void __fastcall h_FadingTree(BYTE* T, void* edx, void* mat, float a, DWOR
         g_dissolveRef = v >= 1.0f ? 0xFF : v <= 0.0f ? 0 : (DWORD)(int)(v * 255.0f + 0.5f);
         g_treeDissolve = true; ++g_dissolveN;
     }
-    ((ForestTree_t)0x00455CF0)(T, edx, mat, a, s, sh);
+    ((ForestTree_t)AD(0x00455CF0))(T, edx, mat, a, s, sh);
     g_treeDissolve = false;
 }
 // Opaque trees grouped by part (1.1.1): the opaque list is drawn twice - all trunks, then all foliage (both
@@ -266,7 +266,7 @@ static void TreeBatchEnd() {
     g_tbActive = false; g_tbCe = nullptr;
 }
 static void TreePart(BYTE* T, void* mat, DWORD tech, void* mesh, DWORD frame) {
-    ((VM0_t)0x00435640)(*(void**)(T + 0x228), nullptr);                 // camera view/projection (once per frame)
+    ((VM0_t)AD(0x00435640))(*(void**)(T + 0x228), nullptr);                 // camera view/projection (once per frame)
     void* dev = *pDevice; DEVF(44, D_u_p)(dev, 0x100 /*WORLD*/, mat);
     void* ce = *(void**)(T + 0x3C); void** cvt = *(void***)ce;
     void* fx = *(void**)((BYTE*)ce + 0x20);
@@ -281,7 +281,7 @@ static void TreePart(BYTE* T, void* mat, DWORD tech, void* mesh, DWORD frame) {
                 ++g_tbFadeGrouped;
             }
             g_instMat = (const float*)mat; g_instCapture = g_instGroupOk && !g_treeDissolve;
-            ((Mesh_t)0x004773F0)(mesh, nullptr, frame, 0);
+            ((Mesh_t)AD(0x004773F0))(mesh, nullptr, frame, 0);
             g_instCapture = false;
             ++g_treeDraws; ++g_tbGrouped;
             return;
@@ -303,7 +303,7 @@ static void TreePart(BYTE* T, void* mat, DWORD tech, void* mesh, DWORD frame) {
         }
         if (!g_treeDissolve) InstGroupBegin(); else g_instGroupOk = false;
         g_instMat = (const float*)mat; g_instCapture = g_instGroupOk;
-        ((Mesh_t)0x004773F0)(mesh, nullptr, frame, 0);
+        ((Mesh_t)AD(0x004773F0))(mesh, nullptr, frame, 0);
         g_instCapture = false;
         g_tbActive = true; g_tbCe = ce; g_tbTech = tech; g_tbDissolve = g_treeDissolve; ++g_tbStarts; ++g_treeDraws;
         return;
@@ -318,7 +318,7 @@ static void TreePart(BYTE* T, void* mat, DWORD tech, void* mesh, DWORD frame) {
             SM_SetRenderState(nullptr, 24 /*ALPHAREF*/, g_dissolveRef);
             DEVF(57, D_u_u)(dev, 14 /*ZWRITEENABLE*/, TRUE);             // the tree code restores it after the tree
         }
-        ((Mesh_t)0x004773F0)(mesh, nullptr, frame, 0);
+        ((Mesh_t)AD(0x004773F0))(mesh, nullptr, frame, 0);
         ((CE0_t)cvt[9])(ce, nullptr);                                   // EndPass
     }
     ((CE0_t)cvt[7])(ce, nullptr);                                       // End
@@ -326,13 +326,13 @@ static void TreePart(BYTE* T, void* mat, DWORD tech, void* mesh, DWORD frame) {
 }
 static void __fastcall h_TreeTrunk(BYTE* T, void* edx, void* mat, DWORD z) {
     if (g_treePhase == 2) return;                                       // grouped drawing: foliage phase
-    if (!g_treeLoop) { ((TreePart_t)0x004558C0)(T, edx, mat, z); return; }
+    if (!g_treeLoop) { ((TreePart_t)AD(0x004558C0))(T, edx, mat, z); return; }
     TreePart(T, mat, *(DWORD*)(T + 0x22C), *(void**)(*(BYTE**)(T + 0x1C4) + 0x34), 0);
 }
 static void __fastcall h_TreeFoliage(BYTE* T, void* edx, void* mat, DWORD z) {
     if (g_treePhase == 1) return;                                       // grouped drawing: trunk phase
     CtxGuard g((int*)(T + 0x1D8));                                      // foliage sway smoothing (smoothanim.inc)
-    if (!g_treeLoop) { ((TreePart_t)0x00455960)(T, edx, mat, z); return; }
+    if (!g_treeLoop) { ((TreePart_t)AD(0x00455960))(T, edx, mat, z); return; }
     TreePart(T, mat, *(DWORD*)(T + 0x230), *(void**)(*(BYTE**)(*(BYTE**)(T + 0x1C4) + 0x34) + 0x40), *(DWORD*)(T + 0x1D8));
 }
 // 0x55C690 reimplemented. List entries are 16 bytes: +8 tree matrix (16 floats; fade at +0x60), +0xC holder ->
@@ -357,13 +357,13 @@ static inline void TreeFading(BYTE* e, float* mat) {
 }
 static inline void TreeOpaque(BYTE* e, float* mat) {
     memcpy(mat, *(float**)(e + 8), 64);
-    ((ForestTree_t)0x00455CF0)(TreeOf(e), nullptr, mat, 1.0f, 0, 0);
+    ((ForestTree_t)AD(0x00455CF0))(TreeOf(e), nullptr, mat, 1.0f, 0, 0);
 }
 static void TreeDrawGrouped() {
     float mat[16];
     static int ord[32768];
-    int nf = *(int*)0x008CF05C; BYTE* bf = *(BYTE**)0x008CF054;
-    int no = *(int*)0x008CF050; BYTE* bo = *(BYTE**)0x008CF04C;
+    int nf = *(int*)AD(0x008CF05C); BYTE* bf = *(BYTE**)AD(0x008CF054);
+    int no = *(int*)AD(0x008CF050); BYTE* bo = *(BYTE**)AD(0x008CF04C);
     bool fadeGrouped = g_dissolve != 0;
     if (!fadeGrouped) for (int i = nf - 1; i >= 0; --i) TreeFading(bf + i * 16, mat);
     g_treePhase = 1;                                                    // trunks: opaque, order does not matter
@@ -382,10 +382,10 @@ static void TreeDistApply(BYTE* tm);
 static void __fastcall h_TreeLoop(void* self) {
     TreeDistApply((BYTE*)self);
     LONGLONG t0 = Now();
-    int n = *(int*)0x008CF05C + *(int*)0x008CF050;                      // fading + opaque trees
+    int n = *(int*)AD(0x008CF05C) + *(int*)AD(0x008CF050);                      // fading + opaque trees
     if (g_optTrees && n > 0) { g_treeLoop = true; g_smN = 0; g_smOverflow = false; g_smFxN = 0; }
     if (g_treeLoop && g_treeParts) TreeDrawGrouped();
-    else ((void (*)())0x0055C690)();
+    else ((void (*)())AD(0x0055C690))();
     if (g_treeLoop) {
         TreeBatchEnd();
         SMEndLoop(); SMDetachAll(); g_treeLoop = false; ++g_treeLoops;
@@ -397,20 +397,20 @@ static void __fastcall h_TreeLoop(void* self) {
 static void InstallRenderOpt() {
     if (g_optSun >= 0) {
         static const BYTE p[6] = { 0x83, 0xEC, 0x0C, 0x56, 0x8B, 0xF1 };
-        o_SunTest = (SunTest_t)Detour((BYTE*)0x00535850, p, 6, (void*)h_SunTest);
+        o_SunTest = (SunTest_t)Detour((BYTE*)AD(0x00535850), p, 6, (void*)h_SunTest);
         if (!o_SunTest) g_sunBroken = true;
     }
     static const BYTE c1[5] = { 0xE8, 0x2C, 0xF9, 0xFF, 0xFF }, c2[5] = { 0xE8, 0xC2, 0xF9, 0xFF, 0xFF }, j[5] = { 0xE9, 0x89, 0xD8, 0xFF, 0xFF };
-    BYTE* a1 = (BYTE*)0x00455F8F; BYTE* a2 = (BYTE*)0x00455F99; BYTE* a3 = (BYTE*)0x0055EE02;
-    if (!memcmp(a1, c1, 5) && !memcmp(a2, c2, 5) && !memcmp(a3, j, 5) && !memcmp((void*)0x00435640, "\x81\xEC\xA4\x00\x00\x00", 6)) {
+    BYTE* a1 = (BYTE*)AD(0x00455F8F); BYTE* a2 = (BYTE*)AD(0x00455F99); BYTE* a3 = (BYTE*)AD(0x0055EE02);
+    if (!CodeCmp(a1, c1, 5) && !CodeCmp(a2, c2, 5) && !CodeCmp(a3, j, 5) && !CodeCmp((void*)AD(0x00435640), "\x81\xEC\xA4\x00\x00\x00", 6)) {
         BYTE b[5];
         b[0] = 0xE8; *(DWORD*)(b + 1) = (DWORD)(void*)h_TreeTrunk - (DWORD)(a1 + 5);   PatchBytes(a1, b, 5);
         b[0] = 0xE8; *(DWORD*)(b + 1) = (DWORD)(void*)h_TreeFoliage - (DWORD)(a2 + 5); PatchBytes(a2, b, 5);
         b[0] = 0xE9; *(DWORD*)(b + 1) = (DWORD)(void*)h_TreeLoop - (DWORD)(a3 + 5);    PatchBytes(a3, b, 5);
         LOG("render opt: forest tree batching installed (TreeBatch=%d)", g_optTrees);
         static const BYTE cf[5] = { 0xE8, 0x04, 0x96, 0xEF, 0xFF };   // fading loop: call 0x455CF0 at 0x55C6E7
-        BYTE* a4 = (BYTE*)0x0055C6E7;
-        if (!memcmp(a4, cf, 5)) { b[0] = 0xE8; *(DWORD*)(b + 1) = (DWORD)(void*)h_FadingTree - (DWORD)(a4 + 5); PatchBytes(a4, b, 5); }
+        BYTE* a4 = (BYTE*)AD(0x0055C6E7);
+        if (!CodeCmp(a4, cf, 5)) { b[0] = 0xE8; *(DWORD*)(b + 1) = (DWORD)(void*)h_FadingTree - (DWORD)(a4 + 5); PatchBytes(a4, b, 5); }
         else LOG("render opt: fading tree call differs, TreeDissolve unavailable");
     } else { g_optTrees = 0; LOG("render opt: forest tree code differs, TreeBatch unavailable"); }
     LOG("render opt: async sun test %s (AsyncSunCheck=%d)", o_SunTest ? "installed" : "unavailable", g_optSun);
@@ -460,7 +460,7 @@ static int __cdecl h_PointInPolyGate(const float* A, const float* B, BYTE* it, f
 }
 static void InstallPolyOpt() {
     static const BYTE p[5] = { 0x83, 0xEC, 0x14, 0xD9, 0xEE };          // sub esp,14h / fldz
-    o_PointInPoly = (PIP_t)Detour((BYTE*)0x0043F2F0, p, 5, (void*)h_PointInPolyGate);
+    o_PointInPoly = (PIP_t)Detour((BYTE*)AD(0x0043F2F0), p, 5, (void*)h_PointInPolyGate);
     LOG("point-in-polygon test %s (FastPolygonTest=%d)", o_PointInPoly ? "replaced" : "unavailable", g_optPoly);
 }
 
@@ -492,7 +492,7 @@ static bool g_shadowDistOk = false;
 static void ObjDistApplyShadows() {
     if (!g_shadowDistOk) return;
     double nd = 250000.0 * ObjDist() * ObjDist(); float nf = (float)nd;
-    PatchBytes((void*)0x00615808, &nd, 8); PatchBytes((void*)0x00615B28, &nf, 4);
+    PatchBytes((void*)AD(0x00615808), &nd, 8); PatchBytes((void*)AD(0x00615B28), &nf, 4);
 }
 typedef int (__cdecl *LodLevel_t)(void* a, float* b, float* c);
 static LodLevel_t o_LodLevel = nullptr;
@@ -504,10 +504,10 @@ static int __cdecl h_LodLevel(void* a, float* b, float* c) {
 static void InstallObjDistance() {
     // installed also at 1.0 (= original behaviour) so that the in-game quality page can change it at run time
     static const BYTE p[5] = { 0x83, 0xEC, 0x70, 0x8B, 0xC1 };
-    o_GizmoRange = (GizmoRange_t)Detour((BYTE*)0x0045C3E0, p, 5, (void*)h_GizmoRange);
+    o_GizmoRange = (GizmoRange_t)Detour((BYTE*)AD(0x0045C3E0), p, 5, (void*)h_GizmoRange);
     static const BYTE pl[7] = { 0x83, 0xEC, 0x18, 0x8B, 0x44, 0x24, 0x20 };
-    o_LodLevel = (LodLevel_t)Detour((BYTE*)0x00463E20, pl, 7, (void*)h_LodLevel);
-    double* sd = (double*)0x00615808; float* sf = (float*)0x00615B28;
+    o_LodLevel = (LodLevel_t)Detour((BYTE*)AD(0x00463E20), pl, 7, (void*)h_LodLevel);
+    double* sd = (double*)AD(0x00615808); float* sf = (float*)AD(0x00615B28);
     if (*sd == 250000.0 && *sf == 250000.0f) { g_shadowDistOk = true; ObjDistApplyShadows(); }
     else LOG("object shadow distance: unexpected constants, unchanged");
     LOG("object view distance x%.2f (gizmo %s, LOD %s, shadows %.0f units)", g_objDist, o_GizmoRange ? "ok" : "n/a", o_LodLevel ? "ok" : "n/a", 500.0 * g_objDist);
@@ -553,7 +553,7 @@ static void TreeDistApply(BYTE* tm) {
         // (saved with the next Apply).
         float st = r->orig[2] * 0.1f; if (st > 500) st = 500; if (st < 50) st = 50;
         LOG("trees: crossfade %.1f..%.1f has no band -> %.0f..%.0f", r->orig[0], r->orig[1], st, st + 200);
-        BYTE* eng = ((BYTE* (*)())0x0042F160)();
+        BYTE* eng = ((BYTE* (*)())AD(0x0042F160))();
         if (eng) { float* es = (float*)(eng + 0x2C);
             if (fabsf(es[0] - r->orig[0]) < 1.0f && fabsf(es[1] - r->orig[1]) < 1.0f) { es[0] = st; es[1] = st + 200; LOG("trees: engine tree settings repaired too"); } }
         r->orig[0] = st; r->orig[1] = st + 200; chg = true;
@@ -578,7 +578,7 @@ static void TreeDistApply(BYTE* tm) {
 // and computed the option level from it (levels skipped, the band grew with every click, trees popped). While one
 // of them runs, the game's own values are put back; afterwards ours are applied again.
 static bool TreeDistIsCurrent(BYTE* tm) {
-    BYTE* eng = ((BYTE* (*)())0x0042F160)(); if (!eng) return false;
+    BYTE* eng = ((BYTE* (*)())AD(0x0042F160))(); if (!eng) return false;
     BYTE* lvl = *(BYTE**)(eng + 0x70); if (!lvl) return false;
     BYTE* c = *(BYTE**)(lvl + 0x78); if (!c) return false;
     BYTE** b = *(BYTE***)(c + 0x68); BYTE** e = *(BYTE***)(c + 0x6C);
@@ -597,7 +597,7 @@ static void TreeDistOurValues() {    // whatever the game changed becomes its va
     for (int i = 0; i < g_tdrN; ++i) if (TreeDistIsCurrent(g_tdr[i].tm)) TreeDistApply(g_tdr[i].tm);
 }
 static float TreeViewDistance() {    // the game's own "visible trees" distance of the current level (0 = none)
-    BYTE* eng = ((BYTE* (*)())0x0042F160)(); if (!eng) return 0;
+    BYTE* eng = ((BYTE* (*)())AD(0x0042F160))(); if (!eng) return 0;
     BYTE* lvl = *(BYTE**)(eng + 0x70); if (!lvl) return 0;
     BYTE* c = *(BYTE**)(lvl + 0x78); if (!c) return 0;
     BYTE** b = *(BYTE***)(c + 0x68); BYTE** e = *(BYTE***)(c + 0x6C);
@@ -607,8 +607,8 @@ static float TreeViewDistance() {    // the game's own "visible trees" distance 
 }
 typedef int (__cdecl *LuaCF_t)(void* L);
 #define TD_WRAP(name, addr) static int __cdecl name(void* L) { TreeDistGameValues(); int r = ((LuaCF_t)(addr))(L); TreeDistOurValues(); return r; }
-TD_WRAP(L_TreeDistUp, 0x0044C5A0)
-TD_WRAP(L_TreeDistDown, 0x0044C840)
-TD_WRAP(L_TreeDistCoef, 0x0044CAE0)
-TD_WRAP(L_TreeDistSave, 0x0044B610)
-TD_WRAP(L_TreeDistCancel, 0x0044CCF0)
+TD_WRAP(L_TreeDistUp, AD(0x0044C5A0))
+TD_WRAP(L_TreeDistDown, AD(0x0044C840))
+TD_WRAP(L_TreeDistCoef, AD(0x0044CAE0))
+TD_WRAP(L_TreeDistSave, AD(0x0044B610))
+TD_WRAP(L_TreeDistCancel, AD(0x0044CCF0))

@@ -70,7 +70,7 @@ static void __fastcall h_SndSetPos(BYTE* s, void*, const float* pos, char deferr
 }
 // 0x4C19A0 listener SetPosition(const float* pos, bool deferred)  (cdecl)
 static void __cdecl h_SndListenerPos(const float* pos, char deferred) {
-    void* l = *(void**)0x006CA4AC; if (!l) return;
+    void* l = *(void**)AD(0x006CA4AC); if (!l) return;
     if (!SndAsync()) { ((SndPos_t)(*(void***)l)[14])(l, pos[0], pos[1], pos[2], deferred ? 1 : 0); return; }
     EnterCriticalSection(&g_sndCs);
     SndListenerRef(l); memcpy(g_sndLp, pos, 12); g_sndLpA = deferred ? 1 : 0; g_sndLPos = true;
@@ -79,7 +79,7 @@ static void __cdecl h_SndListenerPos(const float* pos, char deferred) {
 }
 // 0x4C1AA0 listener SetOrientation(const float* front, const float* top, bool deferred)  (cdecl)
 static void __cdecl h_SndListenerOri(const float* f, const float* t, char deferred) {
-    void* l = *(void**)0x006CA4AC; if (!l) return;
+    void* l = *(void**)AD(0x006CA4AC); if (!l) return;
     if (!SndAsync()) { ((SndOri_t)(*(void***)l)[13])(l, f[0], f[1], f[2], t[0], t[1], t[2], deferred ? 1 : 0); return; }
     EnterCriticalSection(&g_sndCs);
     SndListenerRef(l); memcpy(g_sndLo, f, 12); memcpy(g_sndLo + 3, t, 12); g_sndLoA = deferred ? 1 : 0; g_sndLOri = true;
@@ -88,7 +88,7 @@ static void __cdecl h_SndListenerOri(const float* f, const float* t, char deferr
 }
 // 0x4C18F0 listener CommitDeferredSettings (+ a once-per-second GetCaps on an uninitialized struct, dropped)
 static void __cdecl h_SndCommit() {
-    void* l = *(void**)0x006CA4AC; if (!l) return;
+    void* l = *(void**)AD(0x006CA4AC); if (!l) return;
     if (!SndAsync()) { ((SndCommit_t)(*(void***)l)[17])(l); return; }
     EnterCriticalSection(&g_sndCs);
     SndListenerRef(l); g_sndCommit = true;
@@ -103,13 +103,13 @@ static void SndStop() {                         // process exit: let the worker 
 }
 static void InstallAsyncSound() {
     struct { DWORD at; const char* b; int n; void* fn; } p[4] = {
-        { 0x004C18F0, "\xA1\xAC\xA4\x6C\x00\x83\xEC\x60", 8, (void*)h_SndCommit },
-        { 0x004C19A0, "\x8B\x0D\xAC\xA4\x6C\x00\x85\xC9", 8, (void*)h_SndListenerPos },
-        { 0x004C1AA0, "\x8B\x0D\xAC\xA4\x6C\x00\x85\xC9", 8, (void*)h_SndListenerOri },
-        { 0x004C2E10, "\x56\x8B\xF1\x80\x7E\x08\x00\x74\x34\xE8", 10, (void*)h_SndSetPos },
+        { AD(0x004C18F0), "\xA1\xAC\xA4\x6C\x00\x83\xEC\x60", 8, (void*)h_SndCommit },
+        { AD(0x004C19A0), "\x8B\x0D\xAC\xA4\x6C\x00\x85\xC9", 8, (void*)h_SndListenerPos },
+        { AD(0x004C1AA0), "\x8B\x0D\xAC\xA4\x6C\x00\x85\xC9", 8, (void*)h_SndListenerOri },
+        { AD(0x004C2E10), "\x56\x8B\xF1\x80\x7E\x08\x00\x74\x34\xE8", 10, (void*)h_SndSetPos },
     };
-    for (auto& e : p) if (memcmp((void*)e.at, e.b, e.n)) { g_asyncSnd = 0; LOG("async sound: unexpected code at %08lX, not installed", e.at); return; }
-    if (memcmp((void*)0x004C2E1E, "\x8B\x46\x60\x8B\x10\x8B\x52\x4C", 8) || memcmp((void*)0x004C18FC, "\x8B\x08\x8B\x51\x44", 5)) {
+    for (auto& e : p) if (CodeCmp((void*)e.at, e.b, e.n)) { g_asyncSnd = 0; LOG("async sound: unexpected code at %08lX, not installed", e.at); return; }
+    if (CodeCmp((void*)AD(0x004C2E1E), "\x8B\x46\x60\x8B\x10\x8B\x52\x4C", 8) || CodeCmp((void*)AD(0x004C18FC), "\x8B\x08\x8B\x51\x44", 5)) {
         g_asyncSnd = 0; LOG("async sound: unexpected vtable use, not installed"); return;
     }
     InitializeCriticalSection(&g_sndCs);

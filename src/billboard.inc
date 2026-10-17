@@ -40,24 +40,24 @@ static void __fastcall h_CESetTech(BYTE* ce, void* edx, UINT t) {
     o_CESetTech(ce, edx, t);
 }
 static void __fastcall h_BBRender(BYTE* T, void* edx) {
-    if (!g_optTrees) { ((BBRender_t)0x0055DF60)(T, edx); return; }
+    if (!g_optTrees) { ((BBRender_t)AD(0x0055DF60))(T, edx); return; }
     ++g_bbCalls;
     g_bbMode = true;
-    ((BBRender_t)0x0055DF60)(T, edx);
+    ((BBRender_t)AD(0x0055DF60))(T, edx);
     BBClose();
     g_bbMode = false;
 }
 static void InstallBillboards() {
     static const BYTE bp[7] = { 0x8B, 0x41, 0x20, 0x8B, 0x54, 0x24, 0x04 };   // BeginPass / SetTechnique
     static const BYTE ep[5] = { 0x8B, 0x41, 0x20, 0x8B, 0x08 };               // EndPass
-    BYTE* call = (BYTE*)0x0055EDFA;
-    if (!g_fxInstalled || call[0] != 0xE8 || (DWORD)(call + 5) + *(int*)(call + 1) != 0x0055DF60 ||
-        memcmp((void*)0x00448110, bp, 7) || memcmp((void*)0x00448180, bp, 7) || memcmp((void*)0x00448140, ep, 5)) {
+    BYTE* call = (BYTE*)AD(0x0055EDFA);
+    if (!g_fxInstalled || call[0] != 0xE8 || (DWORD)(call + 5) + *(int*)(call + 1) != AD(0x0055DF60) ||
+        CodeCmp((void*)AD(0x00448110), bp, 7) || CodeCmp((void*)AD(0x00448180), bp, 7) || CodeCmp((void*)AD(0x00448140), ep, 5)) {
         LOG("billboards: unexpected code, batching not installed"); return;
     }
-    o_CEBeginPass = (CEPass_t)Detour((BYTE*)0x00448110, bp, 7, (void*)h_CEBeginPass);
-    o_CEEndPass = (CEVoid_t)Detour((BYTE*)0x00448140, ep, 5, (void*)h_CEEndPass);
-    o_CESetTech = (CEPass_t)Detour((BYTE*)0x00448180, bp, 7, (void*)h_CESetTech);
+    o_CEBeginPass = (CEPass_t)Detour((BYTE*)AD(0x00448110), bp, 7, (void*)h_CEBeginPass);
+    o_CEEndPass = (CEVoid_t)Detour((BYTE*)AD(0x00448140), ep, 5, (void*)h_CEEndPass);
+    o_CESetTech = (CEPass_t)Detour((BYTE*)AD(0x00448180), bp, 7, (void*)h_CESetTech);
     if (!o_CEBeginPass || !o_CEEndPass || !o_CESetTech) { LOG("billboards: detours failed"); return; }
     BYTE b[5]; b[0] = 0xE8; *(DWORD*)(b + 1) = (DWORD)(void*)h_BBRender - (DWORD)(call + 5);
     PatchBytes(call, b, 5);

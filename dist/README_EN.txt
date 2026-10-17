@@ -1,8 +1,36 @@
-﻿AttTFix 1.4.0 — technical update for Ascension to the Throne
-=============================================================
+﻿AttTFix 2.0.0 — technical update for Ascension to the Throne and Ascension to the Throne: Valkyrie
+==================================================================================================
 
 An unofficial, non-commercial mod for the Steam version of the game. No game files are
 modified: the mod is a dinput8.dll that the game loads by itself (plus an optional dxvk folder).
+
+
+WHAT'S NEW IN 2.0.0
+-------------------
+  * Support for Ascension to the Throne: Valkyrie (Steam). Everything works there as in
+    the first game (resolutions, proportions, smoothness, graphics, shadows, DXVK,
+    optimizations) except the blurred menu backdrop on wide screens (menus are 4:3 in
+    the centre with bars at the sides) and the language switch (Valkyrie is Russian only).
+    The same dinput8.dll works in both games; the mod detects which one is running.
+  * Valkyrie: fixed frequent crashes at start. The thread that streams the music is not
+    properly synchronized with the main thread; the game hid that by running on a single
+    CPU core. Now the game's own threads stay together on one core while the graphics
+    driver, DXVK and the mod still use all cores.
+  * Valkyrie: music and long ambient sounds (wind, surf) no longer repeat fragments or
+    break off. A bug in the sound streaming on today's Windows, first found by MusicFix
+    (Woodeess); fixed here in memory, without patching the exe and without losing the
+    music. [Game] StreamFix=0 switches it off.
+  * Valkyrie: with the intro videos skipped the music never played and the ambient sound
+    was muted - a bug of the game itself (it waits for the end of a video); fixed.
+  * Both games: random ambient sounds (birds, howling wolves) play as often as intended at
+    any frame rate. The game rolled the dice every rendered frame, so at a high FPS
+    (especially with DXVK) the wolves howled every couple of seconds, several at once.
+    [Game] AmbientRate=0 restores the original behaviour.
+  * Both games: on the first start with the mod (no AttTFix.ini yet) the game starts in a
+    window at the desktop resolution instead of a small fullscreen mode. Resolution and
+    fullscreen can be changed in Options afterwards.
+  * An unknown game build (neither Steam version): the mod changes nothing, so as not to
+    break the game, and says so in AttTFix.log.
 
 
 WHAT'S NEW IN 1.4.0
@@ -184,14 +212,20 @@ INSTALLATION
 5. (Optional, for the DXVK renderer) Copy the whole dxvk folder from the archive to the game
    folder (you get dxvk\d3d9.dll next to ATThrone.exe). Needs step 4. Then choose the DXVK
    renderer in Options -> "ATTTFIX" (see DXVK below).
-6. Start the game. A settings file, AttTFix.ini, is created next to it on the first start.
+6. Start the game. A settings file, AttTFix.ini, is created next to it on the first start,
+   and the game starts in a window at the desktop resolution (change it in Options).
    The language is picked from your Windows language the first time and can be changed
    in Options.
 
 Updating from 1.1: you can keep AttTFix.ini. If it has ObjectDistance=2.0 from the old
 version, the prop distance stays extended; change it on the new page.
 
-Compatibility: Steam version 1.1.128. If some part of the game differs, the mod disables
+Valkyrie: the same in the "Ascension to the Throne Valkyrie" game folder: dinput8.dll and,
+optionally, AttTFix_LAA.exe and the dxvk folder. Step 3 is not needed - Valkyrie has no
+launcher. Each game keeps its own AttTFix.ini.
+
+Compatibility: Steam versions of Ascension to the Throne 1.1.128 and of Valkyrie
+(ATThrone.exe of 2008-07-21). If some part of the game differs, the mod disables
 that particular fix, writes a note to AttTFix.log, and the game keeps working.
 Works together with mods that add their own Resource2.pak.
 
@@ -286,12 +320,16 @@ changes apply on the next start):
            Particles=1         particle smoothing
   [Perf]   AsyncSunCheck, TreeBatch, TreeGroupParts, TreeInstancing, TreeSort,
            EffectStates, EffectDeferRestore, FastSkin, AsyncSound, FastPolygonTest
-                               optimizations, all =1 (0 = original)
+                               optimizations, all =1 (0 = original; AsyncSound is
+                               always off in Valkyrie)
+           StreamLog=0         Valkyrie: 1 = log sound stream starts and stops
            ShowFps=0           counter: 0 = hidden, 1 = FPS, 2 = FPS + toggles (F11)
            Log=0               1 = write performance statistics to AttTFix_perf.log
-  [Game]   Language=en         ru or en
+  [Game]   Language=en         ru or en (Valkyrie: ru only)
            Background=0        1 = the game keeps running (and playing sound) when minimized
            BackgroundFps=30    FPS limit in the background (0 = unlimited)
+           AmbientRate=1       1 = random ambient sounds as often as intended at any FPS
+           StreamFix=1         Valkyrie: 1 = music and ambient sounds without repeats / breaks
 
 
 DXVK (OPTIONAL)

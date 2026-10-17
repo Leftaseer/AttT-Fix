@@ -104,7 +104,7 @@ static void __fastcall h_Skin(BYTE* sub, void* edx, const float* keys) {
 static void SkinToggle(int on) { if (on != g_optSkin) { g_optSkin = on; ++g_skGen; } }
 static void InstallSkin() {
     static const BYTE c[6] = { 0x81, 0xEC, 0x0C, 0x01, 0x00, 0x00 };   // sub esp, 0x10C
-    o_Skin = (Skin_t)Detour((BYTE*)0x004B9110, c, 6, (void*)h_Skin);
+    o_Skin = (Skin_t)Detour((BYTE*)AD(0x004B9110), c, 6, (void*)h_Skin);
     if (!o_Skin) { g_optSkin = 0; LOG("skinning: unexpected code, not installed"); return; }
     LOG("skinning: SSE skinning installed (FastSkin=%d)", g_optSkin);
 }

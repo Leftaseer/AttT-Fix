@@ -75,11 +75,11 @@ struct TweenKey { int key; float t; };
 static void __fastcall h_DrawPart(BYTE* part, void* edx, DWORD frame, DWORD lod) {
     BYTE* sub = *(BYTE**)(part + 0x2C);
     void* vt = sub ? *(void**)sub : nullptr;
-    if (vt == (void*)0x0060EAA4 || vt == (void*)0x0060EACC || vt == (void*)0x0060EAF4) ++g_msAnyTween;
+    if (vt == (void*)AD(0x0060EAA4) || vt == (void*)AD(0x0060EACC) || vt == (void*)AD(0x0060EAF4)) ++g_msAnyTween;
     if (g_actx.frameVar) ++g_msCtx;
     if (!g_actx.frameVar || (int)frame != *g_actx.frameVar) { o_DrawPart(part, edx, frame, lod); return; }
     UINT cnt = *(UINT*)(part + 0x28);
-    if ((vt != (void*)0x0060EAA4 && vt != (void*)0x0060EACC && vt != (void*)0x0060EAF4) || cnt < 2 || frame >= cnt) { o_DrawPart(part, edx, frame, lod); return; }
+    if ((vt != (void*)AD(0x0060EAA4) && vt != (void*)AD(0x0060EACC) && vt != (void*)AD(0x0060EAF4)) || cnt < 2 || frame >= cnt) { o_DrawPart(part, edx, frame, lod); return; }
     TweenKey* tab = *(TweenKey**)(sub + 0x3C);
     int f1 = (int)frame + g_actx.n;
     if (f1 >= (int)cnt) f1 -= cnt; else if (f1 < 0) f1 += cnt;
@@ -108,12 +108,12 @@ typedef void (__fastcall *MeshDraw_t)(void* mesh, void* edx, DWORD frame, DWORD 
 static void __fastcall h_MeshRender50(BYTE* obj, void*) {               // 0x4305F0, rewritten (short jump in the prologue)
     if (!obj[0x49]) return;
     CtxGuard g((int*)(obj + 0x1D8));
-    ((MeshDraw_t)0x00477610)(*(void**)(obj + 0x1C4), nullptr, *(DWORD*)(obj + 0x1D8), *(DWORD*)(obj + 0x1D0));
+    ((MeshDraw_t)AD(0x00477610))(*(void**)(obj + 0x1C4), nullptr, *(DWORD*)(obj + 0x1D8), *(DWORD*)(obj + 0x1D0));
 }
 static void __fastcall h_MeshRender49(BYTE* obj, void*, DWORD lod) {    // 0x430610, rewritten
     if (!obj[0x49]) return;
     CtxGuard g((int*)(obj + 0x1D8));
-    ((MeshDraw_t)0x00477610)(*(void**)(obj + 0x1C4), nullptr, *(DWORD*)(obj + 0x1D8), lod);
+    ((MeshDraw_t)AD(0x00477610))(*(void**)(obj + 0x1C4), nullptr, *(DWORD*)(obj + 0x1D8), lod);
 }
 typedef void (__fastcall *ObjDraw0_t)(BYTE* obj, void* edx);
 static ObjDraw0_t o_WaterRender = nullptr;
@@ -127,15 +127,15 @@ static void InstallMeshSmooth() {
     static const BYTE pWater[7] = { 0x51, 0x66, 0xA1, 0xA8, 0xA8, 0x6C, 0x00 };
     static const BYTE p50[16] = { 0x80, 0x79, 0x49, 0x00, 0x74, 0x19, 0x8B, 0x81, 0xD0, 0x01, 0x00, 0x00, 0x8B, 0x91, 0xD8, 0x01 };
     static const BYTE p49[16] = { 0x80, 0x79, 0x49, 0x00, 0x74, 0x17, 0x8B, 0x44, 0x24, 0x04, 0x8B, 0x91, 0xD8, 0x01, 0x00, 0x00 };
-    if (memcmp((void*)0x004306D0, pAdv, 6) || memcmp((void*)0x004773F0, pPart, 5)) { LOG("object animation smoothing: unexpected code, not installed"); g_meshSmooth = 0; return; }
-    o_FrameAdv = (FrameAdv_t)Detour((BYTE*)0x004306D0, pAdv, 6, (void*)h_FrameAdv);
-    o_DrawPart = (DrawPart_t)Detour((BYTE*)0x004773F0, pPart, 5, (void*)h_DrawPart);
-    o_MeshRender48 = (ObjDraw1_t)Detour((BYTE*)0x00430570, pR48, 8, (void*)h_MeshRender48);
-    o_MeshRender51 = (ObjDraw1_t)Detour((BYTE*)0x00430650, pR48, 8, (void*)h_MeshRender51);
-    o_CTreeFoliage = (ObjDraw1_t)Detour((BYTE*)0x004E9C10, pTree, 10, (void*)h_CTreeFoliage);
-    o_WaterRender = (ObjDraw0_t)Detour((BYTE*)0x004F8AE0, pWater, 7, (void*)h_WaterRender);
-    if (!memcmp((void*)0x004305F0, p50, 16)) { BYTE j[5] = { 0xE9 }; *(DWORD*)(j + 1) = (DWORD)(void*)h_MeshRender50 - (0x004305F0 + 5); PatchBytes((void*)0x004305F0, j, 5); }
-    if (!memcmp((void*)0x00430610, p49, 16)) { BYTE j[5] = { 0xE9 }; *(DWORD*)(j + 1) = (DWORD)(void*)h_MeshRender49 - (0x00430610 + 5); PatchBytes((void*)0x00430610, j, 5); }
+    if (CodeCmp((void*)AD(0x004306D0), pAdv, 6) || CodeCmp((void*)AD(0x004773F0), pPart, 5)) { LOG("object animation smoothing: unexpected code, not installed"); g_meshSmooth = 0; return; }
+    o_FrameAdv = (FrameAdv_t)Detour((BYTE*)AD(0x004306D0), pAdv, 6, (void*)h_FrameAdv);
+    o_DrawPart = (DrawPart_t)Detour((BYTE*)AD(0x004773F0), pPart, 5, (void*)h_DrawPart);
+    o_MeshRender48 = (ObjDraw1_t)Detour((BYTE*)AD(0x00430570), pR48, 8, (void*)h_MeshRender48);
+    o_MeshRender51 = (ObjDraw1_t)Detour((BYTE*)AD(0x00430650), pR48, 8, (void*)h_MeshRender51);
+    o_CTreeFoliage = (ObjDraw1_t)Detour((BYTE*)AD(0x004E9C10), pTree, 10, (void*)h_CTreeFoliage);
+    o_WaterRender = (ObjDraw0_t)Detour((BYTE*)AD(0x004F8AE0), pWater, 7, (void*)h_WaterRender);
+    if (!CodeCmp((void*)AD(0x004305F0), p50, 16)) { BYTE j[5] = { 0xE9 }; *(DWORD*)(j + 1) = (DWORD)(void*)h_MeshRender50 - (AD(0x004305F0) + 5); PatchBytes((void*)AD(0x004305F0), j, 5); }
+    if (!CodeCmp((void*)AD(0x00430610), p49, 16)) { BYTE j[5] = { 0xE9 }; *(DWORD*)(j + 1) = (DWORD)(void*)h_MeshRender49 - (AD(0x00430610) + 5); PatchBytes((void*)AD(0x00430610), j, 5); }
     LOG("object animation smoothing installed (Objects=%d)", g_meshSmooth);
 }
 static void MeshSmoothStats() {
@@ -190,7 +190,7 @@ static void __fastcall h_PSFill(BYTE* sys, void* edx) {
     for (size_t i = 0; i < n; ++i) {
         BYTE* p = g_psNodes[i]; DWORD* s = (DWORD*)(g_psSave + i * PS_SAVE);
         PSSave(s, p);
-        ((PUpd_t)0x0054AF30)(p, nullptr, t);
+        ((PUpd_t)AD(0x0054AF30))(p, nullptr, t);
         if (!p[0x38]) PSLoad(p, s);                                     // would expire before this moment: keep tick state
     }
     ++g_psSystems; g_psParticles += (DWORD)n;
@@ -200,8 +200,8 @@ static void __fastcall h_PSFill(BYTE* sys, void* edx) {
 static void InstallParticleSmooth() {
     static const BYTE p[6] = { 0x81, 0xEC, 0x38, 0x01, 0x00, 0x00 };
     static const BYTE pu[6] = { 0x83, 0xEC, 0x24, 0x56, 0x8B, 0xF1 };  // CParticle::Update prologue
-    if (memcmp((void*)0x0054AF30, pu, 6)) { LOG("particle smoothing: CParticle::Update differs, not installed"); g_partSmooth = 0; return; }
-    o_PSFill = (PSFill_t)Detour((BYTE*)0x005520D0, p, 6, (void*)h_PSFill);
+    if (CodeCmp((void*)AD(0x0054AF30), pu, 6)) { LOG("particle smoothing: CParticle::Update differs, not installed"); g_partSmooth = 0; return; }
+    o_PSFill = (PSFill_t)Detour((BYTE*)AD(0x005520D0), p, 6, (void*)h_PSFill);
     if (!o_PSFill) g_partSmooth = 0;
     LOG("particle smoothing %s (Particles=%d)", o_PSFill ? "installed" : "unavailable", g_partSmooth);
 }
