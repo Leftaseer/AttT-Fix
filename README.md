@@ -1,7 +1,7 @@
 # AttT-Fix
 
 Unofficial technical update for **Ascension to the Throne / Восхождение на Трон** (Steam version 1.1.128):
-modern resolutions and widescreen menus, smooth movement and animation, sharper textures and shadows,
+modern resolutions in correct widescreen proportions, smooth movement and animation, sharper textures and shadows,
 MSAA, an optional Vulkan renderer (DXVK), large performance fixes and crash fixes.
 
 The mod is a proxy `dinput8.dll` placed next to `ATThrone.exe` (plus an optional `dxvk` folder).
@@ -15,7 +15,8 @@ No game files are modified, and `[Mod] Enabled=0` in `AttTFix.ini` switches ever
 
 **Display and interface**
 - Any resolution the monitor supports (Full HD, 1440p, 4K, …) without stretching; the list in Options comes from the monitor and the choice no longer resets.
-- Menus on a centered 4:3 canvas; the in-game HUD stays full-screen as in the original.
+- True proportions on wide screens (16:9, 16:10, 21:9, 32:9): the original stretched everything to the screen width (1.33x on 16:9). The 3D world is drawn with the real aspect ratio, the world map and battle panels sit unstretched at the screen edges, windows (army, inventory, map, …) are 4:3 in the centre over the world, and menus get a blurred backdrop instead of black bars.
+- The backdrop pictures are made by the mod from the game's own files at the first start (`AttTFix.pak`, rebuilt when the files change); no game art is shipped.
 - If the monitor refuses the chosen fullscreen mode (e.g. the default 1280x960 on a 4K screen), the game starts in a window instead of quitting.
 - Language switch Russian / English, intro videos checkbox, cursor and camera sensitivity, fullscreen checkbox in the English build.
 
@@ -49,13 +50,13 @@ No game files are modified, and `[Mod] Enabled=0` in `AttTFix.ini` switches ever
 
 ## Installation
 
-1. Download `AttTFix-1.3.2.zip` from [Releases](../../releases).
+1. Download `AttTFix-1.4.0.zip` from [Releases](../../releases).
 2. Open the game folder (Steam → right click the game → Manage → Browse local files) and copy `dinput8.dll` there.
 3. Optional, for the DXVK renderer: run `AttTFix_LAA.exe` once in the game folder, copy the `dxvk` folder from the archive there, then pick DXVK in Options → "ATTTFIX".
 4. Optional: back up your `launcher.ini` and replace it with the one from the archive to start without the launcher.
 5. Start the game. `AttTFix.ini` is created on the first start; all settings are described in `dist/README_EN.txt`.
 
-**Uninstall:** delete `dinput8.dll`, `AttTFix.ini` and the `dxvk` folder; run `AttTFix_LAA.exe /undo` if you used it (or verify the game files in Steam).
+**Uninstall:** delete `dinput8.dll`, `AttTFix.ini`, `AttTFix.pak` and the `dxvk` folder; run `AttTFix_LAA.exe /undo` if you used it (or verify the game files in Steam).
 
 **Slow or old computer:** choose shadow quality "Original" on the "ATTTFIX" page and, without high-resolution textures, set `[Video] Mipmaps=0` for faster loading.
 
@@ -86,8 +87,9 @@ The result is `src/dinput8.dll`. `build.sh` converts `attfix.lua` (UTF-8) into `
 - **Proxy DLL.** The game imports `dinput8.dll`; ours forwards `DirectInput8Create` to the system DLL and patches the game in memory. Every patch checks the original bytes first; on a different game build it is skipped and noted in the log.
 - **Hooks.** IAT hooks (Direct3D 9 / D3DX creation, exception and exit handling, affinity), small detours, device vtable hooks (re-applied when a driver resets them), and rewrites of the frame (`0x44A9C0`), render (`0x44E480`) and fixed-step update (`0x424D90`) functions.
 - **Lua bridge.** The game logic and GUI are Lua 5.1 scripts inside `.pak` archives. The DLL registers C functions in the game's Lua state and runs the embedded `attfix.lua` (options pages, widescreen layout, layout fixes).
+- **Widescreen.** The game builds the projection from a hard-coded 4:3 aspect; the mod writes the real one into the constants and the camera. GUI scenes are Lua scripts that scale by `ScreenWidth/800`; the mod loads them with a 4:3 canvas size and moves the scene origin, pins HUD elements to the screen edges by where they sit on the canvas, and lets the engine centre the windows. `AttTFix.pak` is read as the last game pack (the DLL answers the first missing `ResourceN.pak` with it).
 - **Smoothing.** World matrices and skeletal key frames are replaced with interpolated values only while rendering and restored afterwards; the game logic is untouched.
-- **Sources** (all included by `attfix.cpp`): `renderopt.inc` render optimizations and draw distances, `effectsm.inc` effect state manager, `instance.inc` tree instancing and the quality settings API, `billboard.inc` flat trees, `cpuopt.inc` tree sort, `skin.inc` + `skin_core.h` skinning, `sound.inc` async 3D sound, `smoothanim.inc` object and particle smoothing, `msaa.inc` MSAA, `shadow.inc` shadows, `mipmap.inc` + `dxt1mip.h` mip levels. `funcs_table.h` lists function addresses of `ATThrone.exe` for the profiler.
+- **Sources** (all included by `attfix.cpp`): `renderopt.inc` render optimizations and draw distances, `effectsm.inc` effect state manager, `instance.inc` tree instancing and the quality settings API, `billboard.inc` flat trees, `cpuopt.inc` tree sort, `skin.inc` + `skin_core.h` skinning, `sound.inc` async 3D sound, `smoothanim.inc` object and particle smoothing, `msaa.inc` MSAA, `shadow.inc` shadows, `mipmap.inc` + `dxt1mip.h` mip levels, `wsart.inc` widescreen menu backdrops. `funcs_table.h` lists function addresses of `ATThrone.exe` for the profiler.
 - **Tests:** `src/tests/skintest.cpp` (skinning against a reference), `src/tests/fxtest.cpp` (deferred state restore); `tools/perfsum.py <game folder>` summarizes `AttTFix_perf.log`.
 
 No game code or assets are included in this repository. DXVK (https://github.com/doitsujin/dxvk) is distributed in the release archive unmodified under the zlib/libpng license.
@@ -96,7 +98,7 @@ No game code or assets are included in this repository. DXVK (https://github.com
 
 ## Русский
 
-Неофициальное техническое обновление для **«Восхождение на Трон»** (Steam-версия 1.1.128): современные разрешения и широкоформатные меню, плавные движение и анимации, более чёткие текстуры и тени, MSAA, рендер Vulkan (DXVK) по желанию, заметный прирост производительности и исправления вылетов.
+Неофициальное техническое обновление для **«Восхождение на Трон»** (Steam-версия 1.1.128): современные разрешения в правильных пропорциях на широких экранах, плавные движение и анимации, более чёткие текстуры и тени, MSAA, рендер Vulkan (DXVK) по желанию, заметный прирост производительности и исправления вылетов.
 
 Мод — это файл `dinput8.dll` рядом с `ATThrone.exe` (и, по желанию, папка `dxvk`). Файлы игры не изменяются, а `[Mod] Enabled=0` в `AttTFix.ini` выключает всё.
 
@@ -104,7 +106,8 @@ No game code or assets are included in this repository. DXVK (https://github.com
 
 **Экран и интерфейс**
 - Любые разрешения монитора (Full HD, 1440p, 4K…) без растягивания; список в «Опциях» берётся с монитора, выбор больше не сбрасывается.
-- Меню по центру в пропорциях 4:3; игровой интерфейс — на весь экран, как в оригинале.
+- Правильные пропорции на широких экранах (16:9, 16:10, 21:9, 32:9): оригинал растягивал всё под ширину монитора (на 16:9 — в 1.33 раза). Мир рисуется в настоящих пропорциях, панели на карте мира и в бою не растянуты и прижаты к краям экрана, окна (армия, инвентарь, карта…) — 4:3 по центру поверх мира, в меню вместо чёрных полос — размытый фон.
+- Картинки для фона мод делает сам из файлов игры при первом запуске (`AttTFix.pak`, пересоздаётся при их изменении); ресурсы игры не распространяются.
 - Если монитор не принимает выбранный полноэкранный режим (например, 1280x960 по умолчанию на 4K), игра запускается в окне, а не вылетает.
 - Переключение языка (русский / английский), галочка «Заставки», чувствительность курсора и камеры, галочка полноэкранного режима в английской версии.
 
@@ -138,13 +141,13 @@ No game code or assets are included in this repository. DXVK (https://github.com
 
 ### Установка
 
-1. Скачайте `AttTFix-1.3.2.zip` в разделе [Releases](../../releases).
+1. Скачайте `AttTFix-1.4.0.zip` в разделе [Releases](../../releases).
 2. Откройте папку игры (Steam → правой кнопкой по игре → «Управление» → «Просмотреть локальные файлы») и скопируйте туда `dinput8.dll`.
 3. Необязательно, для рендера DXVK: запустите один раз `AttTFix_LAA.exe` в папке игры, скопируйте туда папку `dxvk` из архива и выберите DXVK в «Опциях» → «ATTTFIX».
 4. Необязательно: сохраните свой `launcher.ini` и замените его файлом из архива, чтобы игра запускалась без лаунчера.
 5. Запустите игру. `AttTFix.ini` появится при первом запуске; все настройки описаны в `dist/README_RU.txt`.
 
-**Удаление:** удалите `dinput8.dll`, `AttTFix.ini` и папку `dxvk`; если запускали `AttTFix_LAA.exe` — выполните `AttTFix_LAA.exe /undo` (или проверьте файлы игры в Steam).
+**Удаление:** удалите `dinput8.dll`, `AttTFix.ini`, `AttTFix.pak` и папку `dxvk`; если запускали `AttTFix_LAA.exe` — выполните `AttTFix_LAA.exe /undo` (или проверьте файлы игры в Steam).
 
 **Слабый или старый компьютер:** выберите «Качество теней» = «Оригинал» на странице «ATTTFIX» и, если не используете текстуры высокого разрешения, поставьте `[Video] Mipmaps=0` — загрузка будет быстрее.
 

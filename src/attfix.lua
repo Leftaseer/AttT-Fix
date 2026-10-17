@@ -467,8 +467,12 @@ end)
 if not ok then AttTFix_Log("script error: " .. tostring(err)) end
 
 -- ===================================================================== widescreen UI
--- Menu scenes (tagged __attfix_mode == 1 by the DLL: GUIScenes, SceneOptions, SceneLoad, SceneSave,
--- Infobox) are laid out on a centered 4:3 canvas; in-game scenes keep the original stretched layout.
+-- Scenes are tagged by the DLL with the layout mode of the file they come from (__attfix_mode):
+--  1 = centered 4:3 canvas (menus; with [UI] Hud=1 also the in-game windows - child scenes the engine centers),
+--  2 = HUD pinned to the screen edges (world map / battle buttons): laid out on the canvas, every element the
+--      scene creates (in Load and in any of its methods later) is moved to the left edge, the centre or the right
+--      edge by where its centre is on the canvas,
+--  3 = uniform scale only (pop-ups placed by the game), 0 = original stretched layout.
 local ok2, err2 = pcall(function()
   local cw, ch, ox, oy, rw, rh, enabled = AttTFix_Canvas()
   if enabled == 0 or (ox == 0 and oy == 0) then return end
@@ -526,21 +530,179 @@ local ok2, err2 = pcall(function()
     return function() for _, w in ipairs(saved) do w[1].new = w[2] end end
   end
 
+  -- ---- mode 2: HUD pinned to the screen edges
+  -- this block runs again every time attfix.lua is re-executed; the scenes keep the wrappers of the run that
+  -- wrapped them, so the pinning state is shared through a global table, not kept in locals of one run
+  AttTFix.edge = AttTFix.edge or { depth = 0, saved = nil }
+  local E = AttTFix.edge
+  local function anchorDx(x, w)
+    local c = x + (w or 0) / 2
+    if c < cw * 0.45 then return 0 elseif c > cw * 0.55 then return rw - cw else return (rw - cw) / 2 end
+  end
+  local function widthOf(cname, a)
+    if cname == "Image" then return type(a[3]) == "number" and a[3] or 0 end
+    if cname == "Button" then
+      local st = a[4]; local nrm = type(st) == "table" and st.Normal
+      return type(nrm) == "table" and type(nrm[3]) == "number" and nrm[3] or 0
+    end
+    if cname == "TroopIcon" then
+      local s = a[3]
+      return type(s) == "table" and type(s.size) == "table" and type(s.size.sx) == "number" and s.size.sx or 0
+    end
+    return 0
+  end
+  local function edgeInstall()
+    if E.installed then return end
+    E.installed = {}
+    for _, cname in ipairs({ "Image", "Text", "Button", "TroopIcon" }) do
+      local cls = rawget(_G, cname)
+      local orig = type(cls) == "table" and rawget(cls, "new")
+      if type(orig) == "function" then
+        E.installed[#E.installed + 1] = { cls, orig }
+        cls.new = function(c, ...)
+          local a = { ... }; local n = select("#", ...)
+          if type(a[1]) == "number" and type(a[2]) == "number" then a[1] = a[1] + anchorDx(a[1], widthOf(cname, a)) end
+          return orig(c, unpack(a, 1, n))
+        end
+      end
+    end
+  end
+  local function edgeRemove()
+    if not E.installed then return end
+    for i = #E.installed, 1, -1 do local w = E.installed[i]; w[1].new = w[2] end
+    E.installed = nil
+  end
+  local function edgeBegin()
+    E.depth = E.depth + 1
+    if E.depth > 1 then return end
+    E.saved = {}
+    if type(Config) == "table" then E.saved.sw, E.saved.sh = Config.ScreenWidth, Config.ScreenHeight end
+    setScreen(true)
+    edgeInstall()
+  end
+  local function edgeEnd()
+    if E.depth <= 0 then E.depth = 0; return end
+    E.depth = E.depth - 1
+    if E.depth > 0 then return end
+    edgeRemove()
+    if type(Config) == "table" and E.saved and E.saved.sw then Config.ScreenWidth, Config.ScreenHeight = E.saved.sw, E.saved.sh end
+    E.saved = nil
+  end
+  -- another scene loading from inside a HUD method (the world map buttons open the army screen, the inventory,
+  -- the map ...): the pinning is off while it loads, the screen is the real one again
+  local function edgeSuspend()
+    if E.depth == 0 then return nil end
+    local st = { depth = E.depth, saved = E.saved }
+    edgeRemove(); E.depth = 0; E.saved = nil
+    setScreen(false)
+    return st
+  end
+  local function edgeResume(st)
+    if not st then return end
+    edgeRemove()
+    E.depth, E.saved = st.depth, st.saved
+    setScreen(true); edgeInstall()
+  end
+  local function pack(...) return { n = select("#", ...), ... } end
+  local function wrapEdgeMethods(sc)
+    for k, f in pairs(sc) do
+      if type(f) == "function" and k ~= "Load" then
+        sc[k] = function(...)
+          edgeBegin()
+          local r = pack(pcall(f, ...))
+          edgeEnd()
+          if not r[1] then error(r[2], 0) end
+          return unpack(r, 2, r.n)
+        end
+      end
+    end
+  end
+  -- full-screen background in a centered window: black bars at the sides only when that background is opaque
+  -- (load / save / options pictures). The world windows (army, inventory, map, spell book ...) draw a book or a
+  -- parchment with transparent margins: the game world shows around it, as above and below it, so no bars there.
+  local opaqueBg = { ["bgndload.tga"] = true, ["bgndoptions.tga"] = true, ["cm_bgnd.tga"] = true, ["cm_bgnd2.tga"] = true }
+  local function watchBackground()
+    local big, cls = false, rawget(_G, "Image")
+    local orig = type(cls) == "table" and rawget(cls, "new")
+    if type(orig) ~= "function" then return function() return false end end
+    cls.new = function(c, ...)
+      local a = { ... }
+      if type(a[3]) == "number" and type(a[4]) == "number" and a[3] >= cw * 0.9 and a[4] >= ch * 0.9
+         and type(a[5]) == "string" and (opaqueBg[string.lower(a[5])] or string.find(string.lower(a[5]), "^loading")) then
+        big = true
+      end
+      return orig(c, ...)
+    end
+    return function() cls.new = orig; return big end
+  end
+  local function blackBars()
+    if ox > 0 then
+      Image:new(-ox, 0, ox, rh, "dummy.tga", "2DFillBlack")
+      Image:new(cw, 0, rw - cw - ox + 1, rh, "dummy.tga", "2DFillBlack")
+    end
+    if oy > 0 then
+      Image:new(-ox, -oy, rw, oy, "dummy.tga", "2DFillBlack")
+      Image:new(-ox, ch, rw, rh - ch - oy + 1, "dummy.tga", "2DFillBlack")
+    end
+  end
+
+  -- menu art for wide screens (AttTFix.pak): a dim blurred copy of the picture fills the sides, the picture
+  -- itself is drawn with its black margin made transparent, so the torn parchment lies on that backdrop
+  local wsBackdrop = { MainMenu = "mainmenu", Options = "options", Load = "load", Save = "load",
+                       Credits = "warriorpath", WarriorPath = "warriorpath" }
+  local wsKeyed = { ["scrmainmenu.tga"] = true, ["bgndload.tga"] = true, ["scrload.tga"] = true,
+                    ["bgndoptions.tga"] = true, ["scroptions.tga"] = true, ["scrwarriorpath.tga"] = true }
+  local function wsArtFor(sceneName)
+    if ox <= 0 or oy > 0 or not AttTFix_WsArt or AttTFix_WsArt() ~= 1 then return nil end
+    return wsBackdrop[sceneName]
+  end
+  local function wsArtBegin(bd)
+    local okb, errb = pcall(function()
+      local bh = rw * ch / cw
+      Image:new(-ox, (rh - bh) / 2 - oy, rw, bh, "attfix_wsb_" .. bd .. ".tga", "Default2DAlpha")
+    end)
+    if not okb then AttTFix_Log("widescreen art backdrop error: " .. tostring(errb)) end
+    local cls = rawget(_G, "Image")
+    local orig = type(cls) == "table" and rawget(cls, "new")
+    if type(orig) ~= "function" then return function() end end
+    local en = false
+    if AttTFix_GetLang then local _, act = AttTFix_GetLang(); en = (act == 1) end
+    cls.new = function(c, ...)
+      local a = { ... }; local n = select("#", ...)
+      if type(a[5]) == "string" and wsKeyed[string.lower(a[5])] then
+        local t = string.lower(a[5])
+        if t == "scrmainmenu.tga" and en then t = "en_" .. t end
+        a[5] = "attfix_ws_" .. t
+        return orig(c, unpack(a, 1, n))
+      end
+      return orig(c, ...)
+    end
+    return function() cls.new = orig end
+  end
+
   local wrapped = 0
   for name, sc in pairs(GUIScene) do
     if type(sc) == "table" and type(sc.Load) == "function" and not sc.__attfix_ws then
       sc.__attfix_ws = true
+      if sc.__attfix_mode == 2 then wrapEdgeMethods(sc) end
       local origLoad = sc.Load
       local sceneName = tostring(name)
       sc.Load = function(self, ...)
         local canvas = (self.__attfix_mode == 1)
-        AttTFix_Log("scene " .. sceneName .. " Load" .. (canvas and " (canvas)" or ""))
+        local edges = (self.__attfix_mode == 2)
+        local bgWatch = nil
+        local suspended = (not edges) and edgeSuspend() or nil
+        AttTFix_Log("scene " .. sceneName .. " Load" .. (canvas and " (canvas)" or edges and " (edges)" or ""))
         local real = self.scene
         local unwrap = nil
-        if canvas and self.isChild then
+        local art = canvas and wsArtFor(sceneName) or nil
+        if edges then
+          edgeBegin()
+        elseif canvas and self.isChild then
           -- child dialogs: the engine itself centers them by their background size (bgndWidth = canvas width),
           -- and their scene object belongs to the parent (moving it moved the world HUD) -> only the canvas size
           setScreen(true)
+          if art then unwrap = wsArtBegin(art) else bgWatch = watchBackground() end
         elseif canvas then
           setScreen(true)
           AttTFix.curOX, AttTFix.curOY = ox, oy
@@ -548,7 +710,9 @@ local ok2, err2 = pcall(function()
             local okp, errp = pcall(setOrigin, real, ox, oy)
             if not okp then AttTFix_Log("scene " .. sceneName .. " origin error: " .. tostring(errp)) end
           end
-          if not self.isChild then
+          if art then
+            unwrap = wsArtBegin(art)
+          elseif not self.isChild then
             -- black bars outside the canvas (cover whatever the game rendered there before)
             local okb, errb = pcall(function()
               if ox > 0 then
@@ -564,9 +728,15 @@ local ok2, err2 = pcall(function()
           end
         end
         local ok, r1, r2 = pcall(origLoad, self, ...)
+        if edges then edgeEnd() end
+        if bgWatch and bgWatch() and ok then
+          local okb, errb = pcall(blackBars)
+          if not okb then AttTFix_Log("scene " .. sceneName .. " bars error: " .. tostring(errb)) end
+        end
         if unwrap then unwrap() end
         AttTFix.curOX, AttTFix.curOY = 0, 0
         setScreen(false)
+        edgeResume(suspended)
         if not ok then
           AttTFix_Log("scene " .. sceneName .. " Load error: " .. tostring(r1))
           error(r1, 0)

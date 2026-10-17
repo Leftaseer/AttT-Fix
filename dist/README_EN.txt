@@ -1,8 +1,26 @@
-﻿AttTFix 1.3.2 — technical update for Ascension to the Throne
+﻿AttTFix 1.4.0 — technical update for Ascension to the Throne
 =============================================================
 
 An unofficial, non-commercial mod for the Steam version of the game. No game files are
 modified: the mod is a dinput8.dll that the game loads by itself (plus an optional dxvk folder).
+
+
+WHAT'S NEW IN 1.4.0
+-------------------
+  * Correct proportions on wide screens (16:9, 16:10, 21:9, 32:9). The game used to stretch
+    the picture to the width of the monitor (1.33x on 16:9): the world, the characters and
+    the interface looked wider than intended. Now:
+    - the world and the characters are drawn in their true proportions, a wider screen
+      simply shows more;
+    - the world map and battle panels are not stretched and sit at the screen edges;
+    - windows (army, inventory, map, spell book, journal, game menu, ...) are 4:3 in the
+      centre with the world visible around them, as above and below;
+    - the menus have a blurred backdrop made from the same picture instead of black bars.
+  * The mod makes the pictures for that backdrop itself from the game files at the first
+    start and keeps them in AttTFix.pak next to the game (about 24 MB; made again when the
+    game files change, e.g. after installing a texture pack).
+  * New AttTFix.ini keys: [UI] WorldAspect=0 brings back the stretched world, [UI] Hud=0
+    the stretched panels and windows of the original.
 
 
 WHAT'S NEW IN 1.3.2
@@ -180,7 +198,7 @@ Works together with mods that add their own Resource2.pak.
 
 UNINSTALL
 ---------
-Delete dinput8.dll, AttTFix.ini, the AttTFix*.log files and the dxvk folder (if copied) from the game folder.
+Delete dinput8.dll, AttTFix.ini, AttTFix.pak, the AttTFix*.log files and the dxvk folder (if copied) from the game folder.
 If you replaced launcher.ini, restore your copy or remove the line skip=true from it.
 If you ran AttTFix_LAA.exe, run "AttTFix_LAA.exe /undo" (or verify the game files in Steam:
 Properties -> Installed Files -> Verify integrity).
@@ -240,6 +258,8 @@ changes apply on the next start):
   [Mod]    Enabled=1           0 = the mod does nothing, the game runs as the original
            Baseline=0          1 = the original game + only the FPS counter (F11) and the log, for comparisons
   [UI]     Widescreen=1        1 = menus centered in 4:3, 0 = original stretched menus
+           WorldAspect=1       1 = the world in its true proportions on wide screens, 0 = stretched as in the original
+           Hud=1               1 = panels at the screen edges and windows centered in 4:3, 0 = stretched as in the original
   [Video]  VSync=1             vertical sync
            FpsLimit=0          FPS limit when VSync=0 (0 = unlimited)
            SkipIntro=0         1 = skip the startup videos

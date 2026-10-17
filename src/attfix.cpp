@@ -10,7 +10,7 @@
 #include <math.h>
 #include <dwmapi.h>
 #include <tlhelp32.h>
-#define ATTFIX_VERSION "1.3.2"
+#define ATTFIX_VERSION "1.4.0"
 
 // ---------------------------------------------------------------- log
 static FILE* g_log = nullptr;
@@ -643,6 +643,7 @@ static int h_ChangeSettings(void* L) {
 
 // ---------------------------------------------------------------- widescreen UI canvas
 static int g_wsEnabled = 1;
+static int g_hudLayout = 1;   // [UI] Hud: 1 = in-game HUD and windows keep their proportions, 0 = original stretched
 struct Canvas { int cw, ch, ox, oy, rw, rh; };
 static Canvas GetCanvas() {
     Canvas c; c.rw = *g_scrW; c.rh = *g_scrH;
@@ -666,6 +667,23 @@ static int L_SetIntro(void* L) {
 static int g_langSetting = 0, g_langActive = 0;   // 0 = ru, 1 = en
 static bool LangEn() { return g_langSetting != 0; }
 static DWORD g_langRedirects = 0;
+#include "wsart.inc"
+// ---- AttTFix.pak (widescreen menu art, made by wsart.inc): the game opens Resource0.pak, Resource1.pak ... until one is missing;
+// the first missing ResourceN.pak is answered with AttTFix.pak, so it is read as the last (highest priority) pack.
+static int g_extraPak = 0;          // 1 = AttTFix.pak present, 2 = already handed out
+static char g_extraPakPath[MAX_PATH];
+static int ResourcePakIndex(const char* name) {   // "...\Resource<N>.pak" -> N, else -1
+    size_t n = strlen(name); if (n < 13 || _stricmp(name + n - 4, ".pak")) return -1;
+    const char* e = name + n - 4; const char* d = e; while (d > name && d[-1] >= '0' && d[-1] <= '9') --d;
+    if (d == e || d - name < 8 || _strnicmp(d - 8, "Resource", 8)) return -1;
+    if (d - 8 > name && d[-9] != '\\' && d[-9] != '/') return -1;
+    return atoi(d);
+}
+static bool ExtraPakFor(const char* name) {
+    if (g_extraPak != 1 || ResourcePakIndex(name) < 1) return false;
+    if (GetFileAttributesA(name) != INVALID_FILE_ATTRIBUTES) return false;
+    return true;
+}
 typedef HANDLE (WINAPI *CFA_t)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 static CFA_t o_CFA = nullptr;
 static HANDLE WINAPI h_CFA(LPCSTR name, DWORD acc, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disp, DWORD flags, HANDLE tmpl) {
@@ -676,6 +694,10 @@ static HANDLE WINAPI h_CFA(LPCSTR name, DWORD acc, DWORD share, LPSECURITY_ATTRI
             HANDLE h = o_CFA(alt, acc, share, sa, disp, flags, tmpl);
             if (h != INVALID_HANDLE_VALUE) { if (g_langRedirects++ < 4) LOG("language en: %s -> %s", name, alt); return h; }
         }
+    }
+    if (name && ExtraPakFor(name)) {
+        HANDLE h = o_CFA(g_extraPakPath, acc, share, sa, disp, flags, tmpl);
+        if (h != INVALID_HANDLE_VALUE) { g_extraPak = 2; LOG("pak: %s missing -> %s", name, g_extraPakPath); return h; }
     }
     return o_CFA(name, acc, share, sa, disp, flags, tmpl);
 }
@@ -693,6 +715,12 @@ static HANDLE WINAPI h_CFW(LPCWSTR name, DWORD acc, DWORD share, LPSECURITY_ATTR
             if (h != INVALID_HANDLE_VALUE) { if (g_langRedirects++ < 4) LOG("language en: %ls -> %ls", name, alt); return h; }
         }
     }
+    if (name && g_extraPak == 1) {
+        char an[MAX_PATH]; if (WideCharToMultiByte(CP_ACP, 0, name, -1, an, sizeof an, nullptr, nullptr) > 0 && ExtraPakFor(an)) {
+            HANDLE h = o_CFA ? o_CFA(g_extraPakPath, acc, share, sa, disp, flags, tmpl) : CreateFileA(g_extraPakPath, acc, share, sa, disp, flags, tmpl);
+            if (h != INVALID_HANDLE_VALUE) { g_extraPak = 2; LOG("pak: %ls missing -> %s", name, g_extraPakPath); return h; }
+        }
+    }
     return o_CFW(name, acc, share, sa, disp, flags, tmpl);
 }
 // hot-patch hook: "mov edi,edi" + 5 bytes of padding before the function (standard on Windows system DLLs)
@@ -707,9 +735,15 @@ static void* HotPatch(void* fn, void* hook) {
     return f + 2;
 }
 static void InstallLanguage() {
-    if (g_langActive != 1) { LOG("language: ru (Resource1.pak)"); return; }
-    char p[MAX_PATH]; snprintf(p, sizeof p, "%sLocalization.pak", g_dir);
-    if (GetFileAttributesA(p) == INVALID_FILE_ATTRIBUTES) { LOG("language en requested but %s is missing -> ru", p); g_langActive = 0; return; }
+    if (g_wsEnabled) wsart::Make();
+    snprintf(g_extraPakPath, sizeof g_extraPakPath, "%sAttTFix.pak", g_dir);
+    g_extraPak = GetFileAttributesA(g_extraPakPath) != INVALID_FILE_ATTRIBUTES ? 1 : 0;
+    if (g_langActive != 1) LOG("language: ru (Resource1.pak)");
+    else {
+        char p[MAX_PATH]; snprintf(p, sizeof p, "%sLocalization.pak", g_dir);
+        if (GetFileAttributesA(p) == INVALID_FILE_ATTRIBUTES) { LOG("language en requested but %s is missing -> ru", p); g_langActive = 0; }
+    }
+    if (g_langActive != 1 && !g_extraPak) return;
     o_CFA = (CFA_t)GetProcAddress(GetModuleHandleA("kernel32.dll"), "CreateFileA");
     {   HMODULE kb = GetModuleHandleA("kernelbase.dll"); if (!kb) kb = GetModuleHandleA("kernel32.dll");
         void* w = (void*)GetProcAddress(kb, "CreateFileW");
@@ -726,8 +760,10 @@ static void InstallLanguage() {
         if (slot && *slot != (void*)h_CFA) { DWORD old; VirtualProtect(slot, 4, PAGE_READWRITE, &old); *slot = (void*)h_CFA; VirtualProtect(slot, 4, old, &old); ++patched; LOG("language: CreateFileA hooked in %s", me.szModule); }
     } while (Module32Next(snap, &me));
     if (snap != INVALID_HANDLE_VALUE) CloseHandle(snap);
-    LOG("language: en (Localization.pak instead of Resource1.pak), %d modules", patched);
+    if (g_langActive == 1) LOG("language: en (Localization.pak instead of Resource1.pak), %d modules", patched);
+    if (g_extraPak) LOG("pak: %s will be read after the last ResourceN.pak (%d modules hooked)", g_extraPakPath, patched);
 }
+static int L_WsArt(void* L) { LPushNum(L, (float)(g_extraPak == 2 ? 1 : 0)); return 1; }
 static int L_GetLang(void* L) { LPushNum(L, (float)g_langSetting); LPushNum(L, (float)g_langActive); return 2; }
 static int L_SetLang(void* L) {
     g_langSetting = LNum(L, 1) != 0 ? 1 : 0;
@@ -738,8 +774,8 @@ static int L_SetLang(void* L) {
 static int L_Canvas(void* L) {
     Canvas c = GetCanvas();
     LPushNum(L, (float)c.cw); LPushNum(L, (float)c.ch); LPushNum(L, (float)c.ox); LPushNum(L, (float)c.oy);
-    LPushNum(L, (float)c.rw); LPushNum(L, (float)c.rh); LPushNum(L, (float)g_wsEnabled);
-    return 7;
+    LPushNum(L, (float)c.rw); LPushNum(L, (float)c.rh); LPushNum(L, (float)g_wsEnabled); LPushNum(L, (float)g_hudLayout);
+    return 8;
 }
 
 static const char g_script[] =
@@ -770,14 +806,28 @@ static void __fastcall h_DoFile(void* vm, void* edx, const char* name) {
         FrameEvent("DoFile %s", name);
         if (!strstr(g_seen, key) && g_seenLen + add < sizeof g_seen) { LOG("DoFile %s", name); memcpy(g_seen + g_seenLen, key + 1, add + 1); g_seenLen += add; }
     }
-    // Widescreen: per-file layout mode. Menu files are laid out on a centered 4:3 canvas, everything else
-    // (in-game HUD) keeps the original stretched layout. The mode is applied to Config.ScreenWidth/Height
-    // while each file loads (scripts capture it in file-level locals) and scenes get tagged with it.
-    int mode = 0;   // 0 = real screen, 1 = canvas
+    // Widescreen: per-file layout mode, applied to Config.ScreenWidth/Height while each file loads (scripts
+    // capture it in file-level locals: the 800x600 -> screen factors) and tagged on its scenes:
+    //  0 = real screen (original: x scaled by W/800, y by H/600 - stretched on wide screens)
+    //  1 = centered 4:3 canvas: menus, and with [UI] Hud=1 the in-game windows (child scenes the engine centers by
+    //      their bgndWidth: army, barrack, shop, notes, spell book ...)
+    //  2 = HUD pinned to the screen edges (world map / battle buttons): laid out on the canvas, then every element
+    //      created by the scene is moved to the left edge, the centre or the right edge (attfix.lua)
+    //  3 = uniform scale only (unit / standard info pop-ups the game places itself)
+    int mode = 0;
     bool track = g_wsEnabled && name && _stricmp(name, "Config") && _stricmp(name, "LocalTexts");
     if (track) {
         static const char* canvasFiles[] = { "GUIScenes", "SceneOptions", "SceneLoad", "SceneSave", "Infobox" };
+        static const char* windowFiles[] = { "SceneArmyScreen", "SceneBarrack", "SceneShop", "SceneDivision", "SceneNotes", "SceneMagicSchool",
+                                             "SceneSpellBook", "SceneMaps", "SceneGameMenu", "SceneTownPortal", "RequestDismissUnits", "SceneInventory" };
+        static const char* edgeFiles[] = { "SceneWorldLevel", "SceneTacticLevel" };
+        static const char* uniformFiles[] = { "SceneUnitInfo", "SceneStandardInfo", "Scene_Util" };
         for (const char* cf : canvasFiles) if (!_stricmp(name, cf)) mode = 1;
+        if (g_hudLayout) {
+            for (const char* cf : windowFiles) if (!_stricmp(name, cf)) mode = 1;
+            for (const char* cf : edgeFiles) if (!_stricmp(name, cf)) mode = 2;
+            for (const char* cf : uniformFiles) if (!_stricmp(name, cf)) mode = 3;
+        }
         if (g_modeDepth < 64) g_modeStack[g_modeDepth] = mode;
         ++g_modeDepth;
         SetLuaScreen(vm, mode);
@@ -791,6 +841,17 @@ static void __fastcall h_DoFile(void* vm, void* edx, const char* name) {
             "if type(v)=='table' and v.__attfix_mode==nil then v.__attfix_mode=%d end end end", mode);
         e_RunBuf(vm, nullptr, chunk, n, "=AttTFixTag");
         SetLuaScreen(vm, g_modeDepth > 0 && g_modeDepth <= 64 ? g_modeStack[g_modeDepth - 1] : 0);
+    }
+    if (name && !_stricmp(name, "worldlevel") && g_wsEnabled && g_hudLayout) {
+        // world HUD icons (compass ...) are given in 800x600 units and scaled by the engine with W/800, H/600:
+        // x and width are recomputed so that after that scaling they are square and pinned to their edge
+        Canvas c = GetCanvas(); char chunk[700];
+        int n = snprintf(chunk, sizeof chunk,
+            "if type(WorldLevel)=='table' and type(WorldLevel.Icons)=='table' then local rw,rh=%d,%d; local s=rh/600; local k=800/rw; "
+            "for _,ic in ipairs(WorldLevel.Icons) do if type(ic)=='table' and type(ic[2])=='number' and type(ic[4])=='number' then "
+            "local x,w=ic[2],ic[4]; local X; if x+w/2<400 then X=x*s else X=rw-(800-x)*s end; ic[2]=X*k; ic[4]=w*s*k end end end", c.rw, c.rh);
+        // disabled: the compass is a rotating object, its own width / height turn with it (squashed it vertically)
+        (void)chunk; (void)n;
     }
     if (name && !_stricmp(name, "camera")) {
         Canvas c = GetCanvas(); char chunk[300];
@@ -815,6 +876,7 @@ static void __fastcall h_DoFile(void* vm, void* edx, const char* name) {
         Register("AttTFix_GetIntro", L_GetIntro);
         Register("AttTFix_SetIntro", L_SetIntro);
         Register("AttTFix_GetLang", L_GetLang);
+        Register("AttTFix_WsArt", L_WsArt);
         Register("AttTFix_SetLang", L_SetLang);
         Register("AttTFix_GetQuality", L_GetQuality);
         Register("AttTFix_SetQuality", L_SetQuality);
@@ -1415,9 +1477,49 @@ static void InstallRestoreGuard() {
     static const BYTE p[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF8 };
     o_Restore = (Restore_t)Detour((BYTE*)0x0044DD20, p, 6, (void*)h_Restore);
 }
+// ---- 3D proportions on widescreen screens
+// The battle camera takes its aspect ratio from Camera.TacticLevel.Aspect (set to the screen's by this mod), but
+// the world map and other cameras get a hard-coded 4/3 (0x44F6F2, 0x45AE55, 0x472F47, 0x4DE9EF, 0x583258 load it
+// from the constants 0x60B07C / 0x60B870 into camera +0x80, +0x84 = "rebuild the projection"): on 16:9 the world,
+// the characters and everything 3D were 1.33x wider. [UI] WorldAspect=1: both constants hold the screen's aspect
+// ratio, and a camera still at 4/3 when it renders gets the screen's ratio (vertical field of view unchanged:
+// more is seen at the sides, nothing is stretched).
+static int g_worldAspect = 1; static float g_aspectConst = 0;
+static inline float ScreenAspect() {
+    int w = *g_scrW, h = *g_scrH;
+    if (w <= 0 || h <= 0) return 0;
+    float a = (float)w / (float)h;
+    return (a > 0.5f && a < 5.0f) ? a : 0;
+}
+static void AspectConstPatch() {
+    if (!g_worldAspect) return;
+    float a = ScreenAspect(); if (!a || fabsf(a - g_aspectConst) < 1e-4f) return;
+    static const DWORD at[2] = { 0x0060B07C, 0x0060B870 };
+    for (DWORD p : at) {
+        float* f = (float*)p; DWORD old;
+        if (g_aspectConst == 0 && fabsf(*f - 4.0f / 3.0f) > 1e-3f) { LOG("aspect: unexpected value at %08lx, not patched", p); g_worldAspect = 0; return; }
+        VirtualProtect(f, 4, PAGE_READWRITE, &old); *f = a; VirtualProtect(f, 4, old, &old);
+    }
+    LOG("aspect: 3D cameras use %.4f (%dx%d) instead of 4/3", a, *g_scrW, *g_scrH);
+    g_aspectConst = a;
+}
+static DWORD g_aspectCamFixes = 0;
+static void AspectCameraFix() {
+    if (!g_worldAspect) return;
+    AspectConstPatch();
+    float a = ScreenAspect(); if (!a || fabsf(a - 4.0f / 3.0f) < 1e-3f) return;
+    BYTE* cam = *(BYTE**)0x006CA2C4;
+    if (!cam || !Writable(cam + 0x80)) return;
+    float* asp = (float*)(cam + 0x80);
+    if (fabsf(*asp - 4.0f / 3.0f) < 2e-3f) {
+        *asp = a; cam[0x84] = 1;
+        if (++g_aspectCamFixes <= 5) LOG("aspect: camera %p 4/3 -> %.4f", cam, a);
+    }
+}
 static void __fastcall h_Render(BYTE* e, void* /*edx*/) {
     void* dev = *pDevice;
     DevVtCheck(dev);
+    AspectCameraFix();
     void** vt = *(void***)dev;
     LONGLONG a = Now(), b;
     // Ctrl+7 / MSAA / VSync option: re-create the back buffer through the engine's restore path - not while a menu
@@ -2436,6 +2538,14 @@ static void Init() {
     if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES)
         WritePrivateProfileStringA("UI", "Widescreen", "1  ; 1 = UI on a centered 4:3 canvas, 0 = original stretched UI", path);
     g_wsEnabled = GetPrivateProfileIntA("UI", "Widescreen", 1, path);
+    { char tmp0[8]; if (!GetPrivateProfileStringA("UI", "WorldAspect", "", tmp0, sizeof tmp0, path))
+        WritePrivateProfileStringA("UI", "WorldAspect", "1  ; 1 = 3D world in its true proportions on widescreen screens, 0 = original (stretched 1.33x on 16:9)", path);
+    }
+    g_worldAspect = GetPrivateProfileIntA("UI", "WorldAspect", 1, path);
+    { char tmp0[8]; if (!GetPrivateProfileStringA("UI", "Hud", "", tmp0, sizeof tmp0, path))
+        WritePrivateProfileStringA("UI", "Hud", "1  ; 1 = in-game HUD unstretched at the screen edges and windows centered in 4:3 (widescreen), 0 = original stretched", path);
+    }
+    g_hudLayout = GetPrivateProfileIntA("UI", "Hud", 1, path);
     strcpy(g_iniPath, path);
     char tmp[16];
     // master switch: [Mod] Enabled=0 -> nothing is patched, the DLL only forwards DirectInput (the original game)
