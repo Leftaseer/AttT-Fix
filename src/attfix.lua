@@ -680,11 +680,18 @@ local ok2, err2 = pcall(function()
     return function() cls.new = orig end
   end
 
+  -- the load / save screens and the dialogs that can open while a saved game is still being set up (the battle
+  -- question of an autosave made before a battle): centered by the engine (bgndWidth = canvas width), that
+  -- offset could end up on the world HUD, which then stayed shifted. These keep the full screen as background
+  -- like in the original game and their elements are moved onto the canvas here instead.
+  local selfCentered = { RequestBeforeBattle = true, Load = true, Save = true, RequestLoad = true, RequestDelete = true,
+                         RequestReSave = true }
   local wrapped = 0
   for name, sc in pairs(GUIScene) do
     if type(sc) == "table" and type(sc.Load) == "function" and not sc.__attfix_ws then
       sc.__attfix_ws = true
       if sc.__attfix_mode == 2 then wrapEdgeMethods(sc) end
+      if sc.__attfix_mode == 1 and sc.isChild and selfCentered[tostring(name)] then sc.bgndWidth, sc.bgndHeight = rw, rh end
       local origLoad = sc.Load
       local sceneName = tostring(name)
       sc.Load = function(self, ...)
@@ -698,6 +705,11 @@ local ok2, err2 = pcall(function()
         local art = canvas and wsArtFor(sceneName) or nil
         if edges then
           edgeBegin()
+        elseif canvas and self.isChild and selfCentered[sceneName] then
+          setScreen(true)
+          local unshift = shiftElements(ox, oy)
+          local unart = art and wsArtBegin(art) or nil
+          unwrap = function() if unart then unart() end; unshift() end
         elseif canvas and self.isChild then
           -- child dialogs: the engine itself centers them by their background size (bgndWidth = canvas width),
           -- and their scene object belongs to the parent (moving it moved the world HUD) -> only the canvas size
