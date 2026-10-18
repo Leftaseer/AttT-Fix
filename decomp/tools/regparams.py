@@ -40,6 +40,16 @@ for start in sorted(bf):
             if m in ('xor', 'sub', 'sbb') and len(i.operands) == 2 and i.operands[0].type == X.X86_OP_REG and i.operands[1].type == X.X86_OP_REG and i.operands[0].reg == i.operands[1].reg:
                 r = set() if m != 'sbb' else r
             if m == 'call': r = set()
+            # alignment padding: lea r,[r] / mov r,r
+            if (m == 'lea' and i.op_str.split(',')[0].strip() == i.op_str.split('[')[-1].rstrip(']').strip()) or \
+                    (m == 'mov' and len(i.operands) == 2 and i.operands[0].type == X.X86_OP_REG and
+                     i.operands[1].type == X.X86_OP_REG and i.operands[0].reg == i.operands[1].reg):
+                a = a + i.size
+                continue
+            # or r,-1 / and r,0 set the register without depending on it
+            if m in ('or', 'and') and len(i.operands) == 2 and i.operands[0].type == X.X86_OP_REG and \
+                    i.operands[1].type == X.X86_OP_IMM and (i.operands[1].imm & 0xFFFFFFFF) == (0xFFFFFFFF if m == 'or' else 0):
+                r = set()
             for x in r:
                 if not w & BIT[x]: inputs |= BIT[x]
             for x in wrr: w |= BIT[x]

@@ -142,3 +142,12 @@ SLOT CUpdateObject 1 Update                      # per frame, dt
 SLOT CUpdateObject 2 Render
 SLOT CUpdateObject 5 Tick                        # fixed 33.3 ms step
 SLOT CUpdateObject 9 AfterTicks
+# start-up
+00427990 f CConfig::Instance
+00441D10 f CConfig::CConfig
+004425E0 f CConsole::OpenLog                     # (const std::string &name)
+# input
+0046CEB0 f CInput::ResetMouse                    # mouse buttons -> released (6), click flags off
+0046CEF0 f CInput::ResetKeys                     # key states and the key list of this frame cleared
+0046CF30 f CInput::Reset
+004DEED0 f CUpdateRoot::Update                   # [0x6C8C24]: per-frame update of everything registered

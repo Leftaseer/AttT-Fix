@@ -36,4 +36,8 @@ ORIG_DATA(006C884C);  /* CSingleton<CConfig>::m_instance */
 ORIG_DATA(006C8C10);  /* the Direct3D device */
 #define g_d3dDevice          ORIG_VAR(006C8C10, IDirect3DDevice9 *)
 ORIG_DATA(006C8C24);  /* root of the per-frame updaters */
-#define g_updateRoot         ORIG_VAR(006C8C24, void *)
+#define g_updateRoot         ORIG_VAR(006C8C24, struct CUpdateRoot *)
+ORIG_DATA(006CA494);  /* float: master volume of the Miles digital driver (AttT) */
+#define g_masterVolume       ORIG_VAR(006CA494, float)
+ORIG_DATA(006CA498);  /* HDIGDRIVER of Miles (AttT) */
+#define g_milesDriver        ORIG_VAR(006CA498, void *)

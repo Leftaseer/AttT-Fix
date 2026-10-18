@@ -186,3 +186,65 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
+
+/* ---------------------------------------------------------------------------------------------------------------
+ * GameMain(lpCmdLine): runs inside WinMain's __try (0x42F9B0).  Creates the window and the engine, then pumps
+ * messages; while the window is inactive it waits in GetMessage, otherwise every idle turn runs CEngine::Step. */
+
+#include "game/config.h"
+
+DECOMP(0042F640)
+void GameMain(const char *cmdLine)
+{
+    if (!IsOnlyInstance())
+        return;
+    CreateGamePath();
+    std::string dir = ((nCfg::GamePath *)g_gamePath)->exePath;
+    dir = dir.substr(0, dir.rfind("\\", std::string::npos));
+    dir += "\\";
+    std::string saves = dir + "Saves/";
+    CreateDirectoryA(saves.c_str(), nullptr);
+
+    g_console = CConsole::Instance();
+    ((CConsole *)g_console)->OpenLog(std::string("game.log"));
+    g_config = CConfig::Instance();
+    g_config->LoadGraphicCfg(std::string("game.cfg"));
+
+    CConfig *cfg = g_config;
+    g_hWnd = CreateWindowExW(0, L"ATThrone", L"ATThrone", 0x90000008 /* WS_POPUP | WS_VISIBLE | 8 */,
+                             cfg->x, cfg->y, cfg->width, cfg->height, GetDesktopWindow(), nullptr,
+                             GetModuleHandleA(nullptr), nullptr);
+    g_engine = CEngine::Instance();
+    g_engine->Init(std::string(cmdLine));
+    g_engine->SetActive(g_appActive);
+
+    HACCEL accel = LoadAcceleratorsA(GetModuleHandleA(nullptr), MAKEINTRESOURCEA(101));
+    ShowWindow(g_hWnd, SW_SHOWDEFAULT);
+    UpdateWindow(g_hWnd);
+    RECT r;
+    GetWindowRect(g_hWnd, &r);
+    ClipCursor(&r);
+    g_engine->ApplyGamma();
+
+    MSG msg;
+    for (;;) {
+        if (GetKeyState(VK_CONTROL) < 0)
+            GetKeyState(VK_HOME);            /* leftover of a debug shortcut, the result is not used */
+        if (!g_appActive) {
+            if (!GetMessageA(&msg, nullptr, 0, 0))
+                break;
+        } else if (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT)
+                break;
+        } else {
+            if (!g_engine->Step())
+                break;
+            continue;
+        }
+        if (!TranslateAcceleratorA(msg.hwnd, accel, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        }
+    }
+    DestroySingletons();
+}

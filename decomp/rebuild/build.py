@@ -358,6 +358,11 @@ def main():
         if n in have:
             continue
         base = n.split('@')[0] if '@' in n and not n.startswith('?') else None
+        if '_' + n in have:                # imported with the decorated name itself (Miles, Bink: _AIL_x@8)
+            dll = open(have['_' + n]).read().splitlines()[0].split()[1]
+            add.setdefault(dll, []).append((n, '_' + n))
+            have[n] = have['_' + n]
+            continue
         if base and base in have:          # decorated stdcall name of a function the exe imports undecorated
             dll = open(have[base]).read().splitlines()[0].split()[1]
             add.setdefault(dll, []).append((n, base))

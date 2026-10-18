@@ -7,3 +7,4 @@ strcmp MSVCR80.dll
 sprintf MSVCR80.dll
 malloc MSVCR80.dll
 free MSVCR80.dll
+pow MSVCR80.dll

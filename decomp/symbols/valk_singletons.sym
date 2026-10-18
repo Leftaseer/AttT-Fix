@@ -1,0 +1,132 @@
+00558950 f CReadInterfaceDat::Instance # singleton, new 0x2c
+0087DDC0 d CReadInterfaceDat::m_instance # singleton
+005DF240 f CReadInterfaceDat::CReadInterfaceDat # singleton ctor
+00558A10 f CInput::Instance # singleton, new 0x7cc
+0087DDC4 d CInput::m_instance # singleton
+005A69A0 f CInput::CInput # singleton ctor
+00558AC0 f CCursor::Instance # singleton, new 0x284
+0087DDC8 d CCursor::m_instance # singleton
+0057B6E0 f CCursor::CCursor # singleton ctor
+00558B70 f CBackBufferTexture::Instance # singleton, new 0x14
+0087DDCC d CBackBufferTexture::m_instance # singleton
+00567460 f CBackBufferTexture::CBackBufferTexture # singleton ctor
+0055C140 f CCamera::Instance # singleton, new 0x244
+0087DE48 d CCamera::m_instance # singleton
+0056D5B0 f CCamera::CCamera # singleton ctor
+0055E8C0 f CConfig::Instance # singleton, new 0x98
+0087DF8C d CConfig::m_instance # singleton
+00579390 f CConfig::CConfig # singleton ctor
+0055E970 f CEngine::Instance # singleton, new 0xd8
+0087DF90 d CEngine::m_instance # singleton
+00582030 f CEngine::CEngine # singleton ctor
+00566430 f CConsole::Instance # singleton, new 0x1658
+0087DFF0 d CConsole::m_instance # singleton
+00579D60 f CConsole::CConsole # singleton ctor
+00567AE0 f CMO3DManager::Instance # singleton, new 0x2c
+0087E004 d CMO3DManager::m_instance # singleton
+005B4230 f CMO3DManager::CMO3DManager # singleton ctor
+00569A10 f CTacticLevel::Instance # singleton, new 0x230
+0087E058 d CTacticLevel::m_instance # singleton
+00653360 f CTacticLevel::CTacticLevel # singleton ctor
+0056AD70 f CMapHeight::Instance # singleton, new 0x30
+0087E060 d CMapHeight::m_instance # singleton
+005AA7A0 f CMapHeight::CMapHeight # singleton ctor
+0056B350 f CGrassMap::Instance # singleton, new 0x1c
+0087E064 d CGrassMap::m_instance # singleton
+00664D80 f CGrassMap::CGrassMap # singleton ctor
+0056B3F0 f CClock::Instance # singleton, new 0x78
+0087E068 d CClock::m_instance # singleton
+00572A60 f CClock::CClock # singleton ctor
+0056D240 f CFrustum::Instance # singleton, new 0x64
+0087E07C d CFrustum::m_instance # singleton
+00590070 f CFrustum::CFrustum # singleton ctor
+0056D2E0 f NCollisionDetection::CollisionManager::Instance # singleton, new 0x120
+0087E080 d NCollisionDetection::CollisionManager::m_instance # singleton
+00575330 f NCollisionDetection::CollisionManager::CollisionManager # singleton ctor
+0056D390 f CGlobalTimer::Instance # singleton, new 0x28
+0087E084 d CGlobalTimer::m_instance # singleton
+005994A0 f CGlobalTimer::CGlobalTimer # singleton ctor
+0056D430 f CFindFace::Instance # singleton, new 0x2c
+0087E088 d CFindFace::m_instance # singleton
+0058ACA0 f CFindFace::CFindFace # singleton ctor
+0056EF30 f CMovingTroop::Instance # singleton, new 0x16c
+0087E09C d CMovingTroop::m_instance # singleton
+0063C7C0 f CMovingTroop::CMovingTroop # singleton ctor
+00570D80 f CameraInterpolator::Instance # singleton, new 0xf8
+0087E0A0 d CameraInterpolator::m_instance # singleton
+00570320 f CameraInterpolator::CameraInterpolator # singleton ctor
+00572220 f nScript::Table::i_iterator::Instance # singleton, new 0x108
+0087E0A4 d nScript::Table::i_iterator::m_instance # singleton
+0061B590 f nScript::Table::i_iterator::i_iterator # singleton ctor
+0057A480 f CReadCursorDat::Instance # singleton, new 0x2c
+0087E0EC d CReadCursorDat::m_instance # singleton
+005D8840 f CReadCursorDat::CReadCursorDat # singleton ctor
+005822E0 f CFileSystem::Instance # singleton, new 0xb8
+0087E3A8 d CFileSystem::m_instance # singleton
+00589BC0 f CFileSystem::CFileSystem # singleton ctor
+00582390 f lua::CLua::Instance # singleton, new 0xc
+0087E3AC d lua::CLua::m_instance # singleton
+00699720 f lua::CLua::CLua # singleton ctor
+00582570 f CReadRenderInfo::Instance # singleton, new 0x24
+0087E3B4 d CReadRenderInfo::m_instance # singleton
+005E14B0 f CReadRenderInfo::CReadRenderInfo # singleton ctor
+00582780 f CMessageManager::Instance # singleton, new 0x50
+0087E3C8 d CMessageManager::m_instance # singleton
+005B33C0 f CMessageManager::CMessageManager # singleton ctor
+005852F0 f NSkinAnimation::CSkeletonMO3DManager::Instance # singleton, new 0x10
+0087E3E4 d NSkinAnimation::CSkeletonMO3DManager::m_instance # singleton
+00585040 f NSkinAnimation::CSkeletonMO3DManager::CSkeletonMO3DManager # singleton ctor
+00585C70 f CUsualCollector::Instance # singleton, new 0x1c
+0087E39C d CUsualCollector::m_instance # singleton
+00585390 f CUsualCollector::CUsualCollector # singleton ctor
+00591A10 f CDatFile::Instance # singleton, new 0xbfc
+0087E5A0 d CDatFile::m_instance # singleton
+0057C600 f CDatFile::CDatFile # singleton ctor
+005A6130 f CReadInputCfg::Instance # singleton, new 0x14
+0087E790 d CReadInputCfg::m_instance # singleton
+005D9460 f CReadInputCfg::CReadInputCfg # singleton ctor
+005E87E0 f nScript::Table::Instance # singleton, new 0x38
+0087FAB8 d nScript::Table::m_instance # singleton
+005BC1F0 f nScript::Table::Table # singleton ctor
+005EB590 f CameraScript::Instance # singleton, new 0xb4
+0087FAC4 d CameraScript::m_instance # singleton
+00571070 f CameraScript::CameraScript # singleton ctor
+005EB640 f ActionScript::Instance # singleton, new 0x74
+0087FAC8 d ActionScript::m_instance # singleton
+0055D320 f ActionScript::ActionScript # singleton ctor
+005F88E0 f NSkinAnimation::CSkinAnimationManager::Instance # singleton, new 0x54
+0087FC10 d NSkinAnimation::CSkinAnimationManager::m_instance # singleton
+005F7BD0 f NSkinAnimation::CSkinAnimationManager::CSkinAnimationManager # singleton ctor
+005FECA0 f nSpell::SpellsManager::Instance # singleton, new 0x2c
+0087FCA4 d nSpell::SpellsManager::m_instance # singleton
+006ACDF0 f nSpell::SpellsManager::SpellsManager # singleton ctor
+00600150 f CSpellBookScene::Instance # singleton, new 0x310
+0087FCA8 d CSpellBookScene::m_instance # singleton
+005FFD80 f CSpellBookScene::CSpellBookScene # singleton ctor
+006172B0 f CManager<CTextureNode>::Instance # singleton, new 0x2c
+0087E3A0 d CManager<CTextureNode>::m_instance # singleton
+00617150 f CManager<CTextureNode>::CManager # singleton ctor
+00618DD0 f CSun::Instance # singleton, new 0x128
+0087FE80 d CSun::m_instance # singleton
+0066D2E0 f CSun::CSun # singleton ctor
+00618E80 f CSky::Instance # singleton, new 0x1e8
+0087FE84 d CSky::m_instance # singleton
+0066C930 f CSky::CSky # singleton ctor
+00618F30 f CClouds::Instance # singleton, new 0x2b0
+0087FE88 d CClouds::m_instance # singleton
+0065F630 f CClouds::CClouds # singleton ctor
+0061C470 f nScript::Table::Instance # singleton, new 0x20
+0087FE8C d nScript::Table::m_instance # singleton
+00631CA0 f nScript::Table::Table # singleton ctor
+00631820 f CGexField::Instance # singleton, new 0xa4
+00880030 d CGexField::m_instance # singleton
+00634810 f CGexField::CGexField # singleton ctor
+006372B0 f CMoveAttackCircle::Instance # singleton, new 0x80
+0088004C d CMoveAttackCircle::m_instance # singleton
+00635F40 f CMoveAttackCircle::CMoveAttackCircle # singleton ctor
+00637460 f CTimeLine::Instance # singleton, new 0x14
+00880050 d CTimeLine::m_instance # singleton
+006580B0 f CTimeLine::CTimeLine # singleton ctor
+006506A0 f KWCastles::Instance # singleton, new 0x1d8
+008800F0 d KWCastles::m_instance # singleton
+005D7300 f KWCastles::KWCastles # singleton ctor

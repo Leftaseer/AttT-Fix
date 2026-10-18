@@ -208,8 +208,13 @@
 00420B30 f CSimpleStack<CRenderString *>::`scalar deleting destructor' # rtti-ddtor
 00420B70 f CSimpleStack<CMeshObject2DRes *>::`scalar deleting destructor' # rtti-ddtor
 00421200 f CTexture::`scalar deleting destructor' # rtti-ddtor
+00421220 f CGameException::CGameException # manual
 004212B0 f C2DScene::vf6_4 # rtti
 00421340 f C2DScene::vf13 # rtti
+00421510 f CReadInterfaceDat::Instance # singleton
+004215D0 f CInput::Instance # singleton
+00421680 f CCursor::Instance # singleton
+00421730 f CBackBufferTexture::Instance # singleton
 00421FB0 f Object::Update # slot(Object)
 00421FC0 f C2DScene::vf0_4 # rtti
 00421FD0 f CScene::vf8 # rtti
@@ -226,9 +231,11 @@
 00424CE0 f CGameObject::`scalar deleting destructor' # rtti-ddtor
 00424D90 f CUpdateObject::Update # manual
 00424E00 f BorderCamera::~BorderCamera # rtti-dtor
+00424E70 f CCamera::Instance # singleton
 00424F20 f C3DControlsManager::Update # slot(CUpdateObject)
 00425090 f C3DControlsManager::vf6 # rtti
 004251D0 f C3DControlsManager::~C3DControlsManager # rtti-dtor
+00425290 f C3DControlsManager::C3DControlsManager # ctor
 00425370 f C3DControlsManager::`scalar deleting destructor' # rtti-ddtor
 004253D0 f C3DLine::~C3DLine # rtti-dtor
 00425470 f shared_vf_ActionScript_12 # rtti-shared
@@ -243,17 +250,19 @@
 00425500 f CRenderObject::vf24 # rtti
 00425510 f CRenderObject::vf25 # rtti
 00425520 f CRenderObject3D::vf6 # rtti
-00425530 f shared_vf_Arrow_30 # rtti-shared
+00425530 f return0f # stub
 00425540 f C3DLine::Render # slot(CUpdateObject)
 00425620 f C3DLine::vf37 # rtti
 00425920 f CRenderObject3D::vf35 # rtti
 00425B30 f C3DLine::`scalar deleting destructor' # rtti-ddtor
 00425DA0 f CActionKey::`scalar deleting destructor' # rtti-ddtor
 00425F40 f CSingleton<ActionScript>::`scalar deleting destructor' # rtti-ddtor
+00425FD0 f ActionScript::ActionScript # singleton ctor
 00426060 f ActionScript::vf0_58 # rtti
 00426070 f ActionScript::~ActionScript # rtti-dtor
 00426270 f ActionScript::`scalar deleting destructor' # rtti-ddtor
 00426310 f ActionScript::Update # slot(CUpdateObject)
+004263A0 f CAlphaButton::CAlphaButton # ctor
 00426450 f CRenderObject2D::vf27 # rtti
 00426470 f CRenderObject2D::vf26 # rtti
 00426490 f CRenderObject2D::vf28 # rtti
@@ -287,12 +296,14 @@
 00426C40 f CAlphaControlManager::vf21 # rtti
 00426C70 f CAlphaControlManager::Update # slot(CUpdateObject)
 00426D50 f CAlphaControlManager::~CAlphaControlManager # rtti-dtor
+00426DF0 f CAlphaControlManager::CAlphaControlManager # ctor
 00426EA0 f CAlphaControlManager::`scalar deleting destructor' # rtti-ddtor
 00427020 f std::logic_error::`scalar deleting destructor' # rtti-ddtor
 004273C0 f Singleton<NSound::AmbientSoundManager>::`scalar deleting destructor' # rtti-ddtor
 00427820 f nScript::TableGet::~TableGet # rtti-dtor
 004278A0 f nScript::TableGet::`scalar deleting destructor' # rtti-ddtor
 004278F0 f Lua_006BF538::GetVolume # lua-method
+00427990 f CConfig::Instance # manual
 00427C40 f nScript::VMObjImpl::`scalar deleting destructor' # rtti-ddtor
 00428350 f NSound::AmbientSoundManager::UpdateAt # manual
 00428570 f Lua_006BF538::UpdateSoundInPoint # lua-method
@@ -301,6 +312,7 @@
 00429B40 f NSound::AmbientSoundManager::~AmbientSoundManager # rtti-dtor
 00429D70 f NSound::AmbientSoundManager::vf0_38 # rtti
 00429D80 f NSound::AmbientSoundManager::vf0_3C # rtti
+00429DF0 f NSound::AmbientSoundManager::AmbientSoundManager # ctor
 00429EF0 f NSound::AmbientSoundManager::`scalar deleting destructor' # rtti-ddtor
 0042A6A0 f CSimpleAnimation::vf54 # rtti
 0042A6C0 f CSimpleAnimation::vf56 # rtti
@@ -321,10 +333,11 @@
 0042A920 f CSimpleAnimation::vf14 # rtti
 0042A930 f CSimpleAnimation::vf13 # rtti
 0042A940 f CSimpleAnimation::vf15 # rtti
-0042AE80 f shared_vf_CCritKeyAnimation_58 # rtti-shared
+0042AE80 f nullsub_12 # stub
 0042AED0 f CInvSimpleAnimation::Render # slot(CUpdateObject)
 0042AEE0 f CInvSimpleAnimation::vf48 # rtti
 0042AF30 f CCritKeyAnimation::vf62 # rtti
+0042AF50 f CLoopAnimation::CLoopAnimation # ctor
 0042B0A0 f CLoopAnimation::vf54 # rtti
 0042B0D0 f CLoopAnimation::vf55 # rtti
 0042B0E0 f CLoopAnimation::vf57 # rtti
@@ -351,12 +364,22 @@
 0042E1E0 f Arrow::Update # slot(CUpdateObject)
 0042E330 f Arrow::~Arrow # rtti-dtor
 0042E420 f Arrow::`scalar deleting destructor' # rtti-ddtor
+0042E770 f IsOnlyInstance # manual
+0042E930 f WriteErrorLog # manual
+0042EA90 f ReportException # manual
 0042EB70 f WndProc # manual
 0042ECF0 f Singleton<nCfg::GamePath>::`scalar deleting destructor' # rtti-ddtor
+0042ED10 f nCfg::GamePath::GamePath # manual
 0042EE40 f nCfg::GamePath::~GamePath # rtti-dtor
 0042EEA0 f nCfg::GamePath::`scalar deleting destructor' # rtti-ddtor
+0042EFF0 f DestroySingletons # manual
+0042F050 f CConsole::Instance # manual
+0042F100 f CreateGamePath # manual
 0042F160 f CEngine::Instance # manual
-0042F640 f WinMainLoop # manual
+0042F280 f CrashFilter # manual
+0042F640 f GameMain # manual
+0042F9B0 f GameMainGuarded # manual
+0042FA10 f WinMain # manual
 0042FBB0 f CAviTexture::vf4 # rtti
 0042FBC0 f CAviTexture::Tick # slot(CUpdateObject)
 0042FCC0 f CAviTexture::~CAviTexture # rtti-dtor
@@ -370,8 +393,10 @@
 0042FF60 f CTextureNode::vf3_28 # rtti
 0042FF70 f CTextureNode::vf4_28 # rtti
 0042FF80 f CTextureNode::vf0_28 # rtti
+0042FF90 f CAviTexture::CAviTexture # ctor
 00430020 f CAviTexture::`scalar deleting destructor' # rtti-ddtor
 00430110 f CSingleton<CBackBufferTexture>::`scalar deleting destructor' # rtti-ddtor
+00430130 f CBackBufferTexture::CBackBufferTexture # singleton ctor
 00430150 f CBackBufferTexture::~CBackBufferTexture # rtti-dtor
 004301D0 f CBackBufferTexture::`scalar deleting destructor' # rtti-ddtor
 00430460 f CBaseMeshObject3D::~CBaseMeshObject3D # rtti-dtor
@@ -391,19 +416,25 @@
 004306D0 f CTweenAnim::SetFrame # manual
 00430710 f CBaseMeshObject3D::vf60 # rtti
 00430790 f CBaseMeshObject3D::`scalar deleting destructor' # rtti-ddtor
+004307B0 f CMO3DManager::Instance # singleton
+004308F0 f CBaseMeshObject3D::CBaseMeshObject3D # ctor
+00430A10 f CBaseMeshObject3D::CBaseMeshObject3D # ctor
 00430B40 f CSingleton<CBattleInfo>::`scalar deleting destructor' # rtti-ddtor
 00431AE0 f CBlood::Update # slot(CUpdateObject)
 00431B50 f CBlood::Tick # slot(CUpdateObject)
 00431C00 f CBlood::`scalar deleting destructor' # rtti-ddtor
 00432180 f Singleton<BorderCamera>::`scalar deleting destructor' # rtti-ddtor
+00432260 f CTacticLevel::Instance # singleton
+004323E0 f nScript::Table::Table # ctor
 00432530 f BorderCamera::vf0_38 # rtti
 004325D0 f fs::BaseFileEntry<fs::DeleteClearer>::`scalar deleting destructor' # rtti-ddtor
 00432620 f CLuaWrapper::DoFile # manual
+00432700 f BorderCamera::BorderCamera # ctor
 00432840 f BorderCamera::`scalar deleting destructor' # rtti-ddtor
 00432880 f BorderCamera::Update # slot(CUpdateObject)
 00432C70 f BoundingBox::vf26 # rtti
 00432CC0 f BoundingBox::`scalar deleting destructor' # rtti-ddtor
-00432EA0 f InstancedGrass::StaticInit # export
+00432EA0 f nullsub # stub
 00432EF0 f nGUI::iGUIElement::vf0_214 # rtti
 00432F40 f nGUI::BoundingRect::~BoundingRect # rtti-dtor
 00432FB0 f nGUI::BoundingRect::`scalar deleting destructor' # rtti-ddtor
@@ -414,11 +445,19 @@
 004331F0 f CButterfly::vf0_1DC # rtti
 004332B0 f CButterfly::`scalar deleting destructor' # rtti-ddtor
 004332D0 f CButterfly::Update # slot(CUpdateObject)
+00433620 f CMapHeight::Instance # singleton
+00433BD0 f CGrassMap::Instance # singleton
+00433C70 f CClock::Instance # singleton
 00434550 f CButterflyManger::Update # manual
 00435280 f CButterflyManger::~CButterflyManger # rtti-dtor
 00435300 f CButterflyManger::`scalar deleting destructor' # rtti-ddtor
 004357B0 f CCamera::SetOrtho2D # manual
 00435A80 f CSingleton<CCamera>::`scalar deleting destructor' # rtti-ddtor
+00435B00 f CFrustum::Instance # singleton
+00435BA0 f NCollisionDetection::CollisionManager::Instance # singleton
+00435C50 f CGlobalTimer::Instance # singleton
+00435CF0 f CFindFace::Instance # singleton
+00435E70 f CCamera::CCamera # singleton ctor
 004362C0 f CCamera::vf6_4 # rtti
 004362D0 f CCamera::vf0_3C # rtti
 004362E0 f CCamera::vf0_4 # rtti
@@ -429,18 +468,24 @@
 00436A20 f CCamera::`scalar deleting destructor' # rtti-ddtor
 00436A40 f CCamera::vf3_3C # rtti
 00436FB0 f CSingleton<CameraInterpolator>::`scalar deleting destructor' # rtti-ddtor
+004377C0 f CMovingTroop::Instance # singleton
 004378D0 f CBattleCalculation::~CBattleCalculation # rtti-dtor
 00437950 f nScript::Function::`scalar deleting destructor' # rtti-ddtor
+00437970 f nScript::TableGet::TableGet # ctor
 004379E0 f CameraInterpolator::~CameraInterpolator # rtti-dtor
 00437A70 f CRenderObject::vf7 # rtti
 00437A90 f CRenderObject::vf8 # rtti
 00437AB0 f CameraInterpolator::vf0_58 # rtti
+00438BF0 f CameraInterpolator::CameraInterpolator # singleton ctor
 00438D50 f CameraInterpolator::`scalar deleting destructor' # rtti-ddtor
 00438D70 f CameraInterpolator::Update # slot(CUpdateObject)
 004395E0 f CSingleton<CameraScript>::`scalar deleting destructor' # rtti-ddtor
+004396C0 f CameraInterpolator::Instance # singleton
 00439870 f CameraScript::Update # slot(CUpdateObject)
 00439940 f CameraScript::vf0_58 # rtti
+004399B0 f CameraScript::CameraScript # singleton ctor
 00439AC0 f CameraScript::`scalar deleting destructor' # rtti-ddtor
+0043A0D0 f CCastle::CCastle # ctor
 0043A1A0 f CCastle::~CCastle # rtti-dtor
 0043A200 f CCastle::Update # slot(CUpdateObject)
 0043A230 f CCastle::Render # slot(CUpdateObject)
@@ -454,6 +499,8 @@
 0043A8A0 f LuaGlobal_Clock_GetHours # lua-global
 0043A950 f Object::`scalar deleting destructor' # rtti-ddtor
 0043A970 f LuaGlobal_Clock_CheckTimeWithLength # lua-global
+0043ABA0 f nScript::Table::i_iterator::Instance # singleton
+0043ACB0 f VariableSaveator::_SaveLoad<unsigned int>::_SaveLoad # ctor
 0043AD60 f VariableSaveator::_SaveLoad<unsigned int>::vf2 # rtti
 0043ADA0 f VariableSaveator::_SaveLoad<unsigned int>::vf3 # rtti
 0043ADF0 f VariableSaveator::_SaveLoad<unsigned int>::~_SaveLoad # rtti-dtor
@@ -466,15 +513,18 @@
 0043B210 f CClock::vf0_3C # rtti
 0043B260 f CClock::`scalar deleting destructor' # rtti-ddtor
 0043B2E0 f CClock::Update # slot(CUpdateObject)
+0043B3E0 f CClock::CClock # singleton ctor
 0043B720 f CUsualCollector::Update # slot(CUpdateObject)
 0043B740 f CUsualCollector::vf4 # rtti
 0043B830 f CUsualCollector::Tick # slot(CUpdateObject)
 0043B8D0 f CUsualCollector::vf6 # rtti
 0043B910 f CUsualCollector::Render # slot(CUpdateObject)
 0043B9C0 f CUsualCollector::vf3 # rtti
+0043BDC0 f NCollisionDetection::CameraPositionObject::CameraPositionObject # ctor
 0043C4A0 f CSingleton<NCollisionDetection::CollisionManager>::`scalar deleting destructor' # rtti-ddtor
 0043C540 f NCollisionDetection::CameraPositionObject::Update # slot(CUpdateObject)
 0043C9D0 f NCollisionDetection::CollisionManager::StaticInit # export
+0043DCD0 f NCollisionDetection::CollisionManager::CollisionManager # singleton ctor
 0043DE50 f NCollisionDetection::CollisionManager::vf0_4 # rtti
 0043DE60 f NCollisionDetection::CollisionManager::~CollisionManager # rtti-dtor
 0043DF70 f NCollisionDetection::CollisionManager::`scalar deleting destructor' # rtti-ddtor
@@ -482,13 +532,18 @@
 0043F2F0 f PointInPolygon # manual
 0043FA90 f std::strstream::~strstream # rtti-dtor
 0043FF30 f std::strstream::`scalar deleting destructor' # rtti-ddtor
+00440B10 f NCollisionDetection::CollideObject::CollideObject # ctor
+00440D60 f NCollisionDetection::CollideObject::CollideObject # ctor
 00440F70 f NCollisionDetection::CollideObject::~CollideObject # rtti-dtor
 004412C0 f NCollisionDetection::CollideObject::`scalar deleting destructor' # rtti-ddtor
 00441CF0 f CSingleton<CConfig>::`scalar deleting destructor' # rtti-ddtor
+00441D10 f CConfig::CConfig # manual
 00441D70 f CConfig::~CConfig # rtti-dtor
 00441DD0 f CConfig::`scalar deleting destructor' # rtti-ddtor
 00441DF0 f CConfig::LoadGraphicCfg # manual
+004425E0 f CConsole::OpenLog # manual
 004426C0 f CSingleton<CConsole>::`scalar deleting destructor' # rtti-ddtor
+004426E0 f CConsole::CConsole # singleton ctor
 004427D0 f CConsole::vf0_4 # rtti
 004427E0 f CConsole::~CConsole # rtti-dtor
 00442870 f CConsole::`scalar deleting destructor' # rtti-ddtor
@@ -502,12 +557,15 @@
 00442AD0 f CCursor::Update # slot(CUpdateObject)
 00442B90 f CCursor::Render # slot(CUpdateObject)
 00442BE0 f CSingleton<CCursor>::`scalar deleting destructor' # rtti-ddtor
+00442E20 f CReadCursorDat::Instance # singleton
 00443C00 f CCursor::~CCursor # rtti-dtor
 00443CF0 f CCursor::vf0_224 # rtti
+00443E80 f CCursor::CCursor # singleton ctor
 00444AB0 f CCursor::`scalar deleting destructor' # rtti-ddtor
 00444B40 f CDelCom::~CDelCom # rtti-dtor
 00444D10 f CSingleton<CDatFile>::`scalar deleting destructor' # rtti-ddtor
 00444D30 f CDelCom::`scalar deleting destructor' # rtti-ddtor
+00444D50 f CDatFile::CDatFile # singleton ctor
 00445130 f CDatFile::~CDatFile # rtti-dtor
 00445A90 f CDatFile::`scalar deleting destructor' # rtti-ddtor
 004469E0 f basic_debugbuf<char, std::char_traits<char>>::vf12 # rtti
@@ -517,11 +575,13 @@
 00446C90 f basic_odebugstream<char, std::char_traits<char>>::~char_traits # rtti-dtor
 00446D00 f basic_odebugstream<char, std::char_traits<char>>::`scalar deleting destructor' # rtti-ddtor
 004472A0 f CDistanceTransparency::Update # slot(CUpdateObject)
+00447340 f CDistanceTransparency::CDistanceTransparency # ctor
 00447430 f CDistanceTransparency::`scalar deleting destructor' # rtti-ddtor
 004474F0 f CEffect::vf22 # rtti
 00447530 f CEffect::vf4 # rtti
 004475D0 f CSimpleStack<CTexture *>::`scalar deleting destructor' # rtti-ddtor
 00447610 f Singleton<EffectManager>::`scalar deleting destructor' # rtti-ddtor
+00447A50 f CEffect::CEffect # ctor
 004480C0 f CEffect::Begin # manual
 004480F0 f CEffect::End # manual
 00448110 f CEffect::BeginPass # manual
@@ -560,6 +620,7 @@
 00448CF0 f EffectManager::_ChangableEffect::vf0 # rtti
 00448D00 f EffectManager::~EffectManager # rtti-dtor
 00448E40 f EffectManager::_NonChangableEffect::vf27 # rtti
+00448E60 f EffectManager::EffectManager # ctor
 00448ED0 f EffectManager::`scalar deleting destructor' # rtti-ddtor
 00449000 f EffectManager::_NonChangableEffect::vf0 # rtti
 00449310 f EnemyArmy::Render # slot(CUpdateObject)
@@ -568,6 +629,7 @@
 00449740 f EnemyArmy::~EnemyArmy # rtti-dtor
 00449840 f EnemyArmy::vf0_58 # rtti
 00449880 f EnemyArmy::`scalar deleting destructor' # rtti-ddtor
+00449E80 f CEngine::ApplyGamma # manual
 00449F80 f CEngine::SetActive # manual
 00449FE0 f CEngine::Screenshot # manual
 0044A6A0 f CSingleton<CGlobalCollector>::`scalar deleting destructor' # rtti-ddtor
@@ -577,8 +639,14 @@
 0044A720 f Singleton<nCfg::CommandLine>::`scalar deleting destructor' # rtti-ddtor
 0044A740 f CSingleton<NSkinAnimation::CSkeletonMO3DManager>::`scalar deleting destructor' # rtti-ddtor
 0044A7D0 f WinConsole::`scalar deleting destructor' # rtti-ddtor
+0044A820 f nCfg::CommandLine::CommandLine # ctor
 0044A8D0 f nCfg::CommandLine::`scalar deleting destructor' # rtti-ddtor
+0044A930 f CEngine::CEngine # manual
 0044A9C0 f CEngine::Frame # manual
+0044ABE0 f CFileSystem::Instance # singleton
+0044AC90 f lua::CLua::Instance # singleton
+0044AE70 f CReadRenderInfo::Instance # singleton
+0044B080 f CMessageManager::Instance # singleton
 0044B1F0 f LuaGlobal_ExitGame # lua-global
 0044B260 f LuaGlobal__PlayMovie # lua-global
 0044B2F0 f LuaGlobal_ChangeContinent # lua-global
@@ -589,6 +657,7 @@
 0044B6A0 f LuaGlobal_IsShiftDown # lua-global
 0044B700 f LuaGlobal_AddGammaRamp # lua-global
 0044B810 f LuaGlobal_DecGammaRamp # lua-global
+0044BAB0 f CEngine::HandleMessage # manual
 0044C5A0 f LuaGlobal_TreeDistanceUp # lua-global
 0044C840 f LuaGlobal_TreeDistanceDown # lua-global
 0044CAE0 f LuaGlobal_GetTreeDistCoef # lua-global
@@ -599,37 +668,48 @@
 0044D6C0 f CEngine::`scalar deleting destructor' # rtti-ddtor
 0044D7D0 f CGlobalCollector::~CGlobalCollector # rtti-dtor
 0044D830 f CUsualCollector::`scalar deleting destructor' # rtti-ddtor
+0044D850 f TextureUpdator::TextureUpdator # ctor
 0044D8D0 f TextureUpdator::`scalar deleting destructor' # rtti-ddtor
+0044D900 f NSkinAnimation::CSkeletonMO3DManager::CSkeletonMO3DManager # singleton ctor
 0044D960 f NSkinAnimation::CSkeletonMO3DManager::~CSkeletonMO3DManager # rtti-dtor
 0044D9B0 f NSkinAnimation::CSkeletonMO3DManager::`scalar deleting destructor' # rtti-ddtor
 0044D9D0 f LuaGlobal_ChangeSettings # manual
+0044DBB0 f NSkinAnimation::CSkeletonMO3DManager::Instance # singleton
+0044DC50 f CUsualCollector::CUsualCollector # singleton ctor
 0044DD20 f CEngine::RestoreDevice # manual
 0044E410 f CGlobalCollector::vf0_18 # rtti
 0044E440 f CGlobalCollector::`scalar deleting destructor' # rtti-ddtor
 0044E480 f CEngine::Render # manual
+0044E5A0 f CUsualCollector::Instance # singleton
 0044E690 f CEngine::StaticInit # export
 0044E830 f LuaGlobal__PlaySound # lua-global
 0044E8E0 f LuaGlobal__StopSound # lua-global
+0044F2E0 f CEngine::Init # manual
 0044F75E d SkipIntroBranch # manual
+0044FD50 f CEngine::Step # manual
 004507B0 f CSingleton<CFileSystem>::`scalar deleting destructor' # rtti-ddtor
 004508C0 f NSFileSystem::CArchFile::vf1 # rtti
 00450AB0 f NSFileSystem::CBaseFile::`scalar deleting destructor' # rtti-ddtor
 00450B10 f NSFileSystem::CArchFile::vf3 # rtti
+00450B20 f NSFileSystem::CFstreamFile::CFstreamFile # ctor
 00450C20 f NSFileSystem::CFstreamFile::vf1 # rtti
 00450C30 f NSFileSystem::CFstreamFile::vf2 # rtti
 00450C50 f NSFileSystem::CFstreamFile::vf3 # rtti
 00450C70 f NSFileSystem::CFstreamFile::vf4 # rtti
 00450C90 f NSFileSystem::CFstreamFile::~CFstreamFile # rtti-dtor
 00450D00 f NSFileSystem::CFstreamFile::`scalar deleting destructor' # rtti-ddtor
+00451E00 f CFileSystem::CFileSystem # singleton ctor
 00451E90 f CFileSystem::OpenPaks # manual
 004524E0 f std::basic_ifstream<char, std::char_traits<char>>::`scalar deleting destructor' # rtti-ddtor
 00452580 f CFileSystem::~CFileSystem # rtti-dtor
 00452740 f CFileSystem::`scalar deleting destructor' # rtti-ddtor
 00452E10 f CSingleton<CFindFace>::`scalar deleting destructor' # rtti-ddtor
 00452E30 f CSimpleStack<ST_INDEX>::`scalar deleting destructor' # rtti-ddtor
+00452E70 f CFindFace::CFindFace # singleton ctor
 00452E90 f CFindFace::~CFindFace # rtti-dtor
 00453320 f CFindFace::`scalar deleting destructor' # rtti-ddtor
 00453640 f NFireBall::CFireBall::Update # slot(CUpdateObject)
+004538E0 f NFireBall::CFireBallFrame::CFireBallFrame # ctor
 00453CF0 f NFireBall::CFireBallFrame::~CFireBallFrame # rtti-dtor
 00453D70 f NFireBall::CFireBallFrame::`scalar deleting destructor' # rtti-ddtor
 00453E80 f NFireBall::CFireBall::Render # slot(CUpdateObject)
@@ -643,16 +723,20 @@
 00455CF0 f NForest::Tree::Render # manual
 00456CC0 f FourWheelObject::`scalar deleting destructor' # rtti-ddtor
 004574F0 f FourWheelObject::Update # slot(CUpdateObject)
+00457510 f CFPSCounter::CFPSCounter # ctor
 004575A0 f CFPSCounter::~CFPSCounter # rtti-dtor
 004576F0 f CFPSCounter::Update # slot(CUpdateObject)
 00457710 f CFPSCounter::Tick # slot(CUpdateObject)
 004577E0 f CFPSCounter::`scalar deleting destructor' # rtti-ddtor
 00457820 f Singleton<FrameMeshCalc>::`scalar deleting destructor' # rtti-ddtor
+00457900 f FrameMeshCalc::FrameMeshCalc # ctor
 004579A0 f FrameMeshCalc::`scalar deleting destructor' # rtti-ddtor
 00458120 f CFrustum::TestCorners # manual
 004584B0 f CSingleton<CFrustum>::`scalar deleting destructor' # rtti-ddtor
+004584D0 f CFrustum::CFrustum # singleton ctor
 004584F0 f CFrustumCulling::vf1 # rtti
 00458670 f CFrustumCulling::vf3 # rtti
+004588E0 f CFrustumCulling::CFrustumCulling # ctor
 004588F0 f CFrustumCulling::vf2 # rtti
 00458910 f CCulling::`scalar deleting destructor' # rtti-ddtor
 00458F40 f CGameBitmap::`scalar deleting destructor' # rtti-ddtor
@@ -663,13 +747,15 @@
 00459970 f CGdlViewerScene::vf0_4 # rtti
 00459980 f CGdlViewerScene::~CGdlViewerScene # rtti-dtor
 00459A20 f CGdlViewerScene::vf15 # rtti
+00459EA0 f CDatFile::Instance # singleton
+00459F50 f NGdlViewerScene::CViewerInfo::CViewerInfo # ctor
 0045A110 f NGdlViewerScene::CViewerInfo::~CViewerInfo # rtti-dtor
 0045A1A0 f CGdlViewerScene::`scalar deleting destructor' # rtti-ddtor
 0045A6D0 f CGdlViewerScene::vf16 # rtti
 0045A970 f NGdlViewerScene::CViewerInfo::`scalar deleting destructor' # rtti-ddtor
 0045B6F0 f CReflRenderObject::`scalar deleting destructor' # rtti-ddtor
 0045B980 f GizmoContourObject::vf7 # rtti
-0045BD10 f GizmoContourObject::StaticInit # slot(CRenderObject3D)
+0045BD10 f GizmoContourObject::vf39 # rtti
 0045BD40 f GizmoContourObject::vf44 # rtti
 0045C030 f GizmoContourObject::Tick # slot(CUpdateObject)
 0045C060 f GizmoContourObject::vf37 # rtti
@@ -678,7 +764,7 @@
 0045C340 f GizmoContourObject::vf28 # rtti
 0045C380 f GizmoContourObject::vf1_1F4 # rtti
 0045C3E0 f CGizmo::DistanceTest # manual
-0045C4D0 f House::StaticInit # slot(CRenderObject3D)
+0045C4D0 f House::vf38 # rtti
 0045C5B0 f House::vf44 # rtti
 0045C920 f nScript::Table::iterator::~iterator # rtti-dtor
 0045CA20 f nScript::Table::iterator::`scalar deleting destructor' # rtti-ddtor
@@ -686,7 +772,7 @@
 0045CBE0 f GizmoContourObject::Render # slot(CUpdateObject)
 0045CDF0 f GizmoContourObject::vf1_24C # rtti
 0045CF30 f House::vf37 # rtti
-0045D460 f GizmoContourObject::StaticInit # slot(CRenderObject3D)
+0045D460 f GizmoContourObject::vf38 # rtti
 0045DAA0 f GizmoContourObject::vf41 # rtti
 0045E280 f GizmoContourObject::~GizmoContourObject # rtti-dtor
 0045E3D0 f CRenderObject3D::vf26 # rtti
@@ -699,6 +785,7 @@
 00461830 f House::~House # rtti-dtor
 004619C0 f House::`scalar deleting destructor' # rtti-ddtor
 00461A00 f CSingleton<CGlobalTimer>::`scalar deleting destructor' # rtti-ddtor
+00461A20 f CGlobalTimer::CGlobalTimer # singleton ctor
 00461A50 f CGlobalTimer::`scalar deleting destructor' # rtti-ddtor
 00461C10 f CGroundPlane::Update # slot(CUpdateObject)
 00461C80 f CSimpleStack<D3DXVECTOR3>::`scalar deleting destructor' # rtti-ddtor
@@ -706,6 +793,7 @@
 00461F00 f CGroundPlane::vf26 # rtti
 00462130 f CHealthBar3D::~CHealthBar3D # rtti-dtor
 00462230 f CHealthBar3D::`scalar deleting destructor' # rtti-ddtor
+00462650 f CHealthBar3D::CHealthBar3D # ctor
 00462B50 f CHealthBar3D::Render # slot(CUpdateObject)
 004631F0 f CHero::vf32 # rtti
 00463240 f CHero::vf33 # rtti
@@ -717,6 +805,7 @@
 004632D0 f CHero::vf43 # rtti
 004632E0 f CHero::vf3 # rtti
 004632F0 f CHero::vf4 # rtti
+004635A0 f CHero::PositionObject::PositionObject # ctor
 00463940 f CHero::Tick # slot(CUpdateObject)
 00463A50 f CRenderObject3D::`scalar deleting destructor' # rtti-ddtor
 00463D20 f nScript::Table::i_iterator::~i_iterator # rtti-dtor
@@ -727,6 +816,7 @@
 00464110 f CHero::vf44 # rtti
 004644E0 f CHero::vf2_1C8 # rtti
 00464AC0 f CHero::Update # manual
+00465950 f CHero::CHero # ctor
 00465B90 f CHero::vf0_1C4 # rtti
 00465BA0 f CHero::vf0_1C8 # rtti
 00465BB0 f CHero::vf30 # rtti
@@ -739,6 +829,7 @@
 004684F0 f CHeroArmy::vf0_4 # rtti
 00468500 f CHeroArmy::vf0_C # rtti
 00468870 f CHeroArmy::`scalar deleting destructor' # rtti-ddtor
+004699B0 f CIcon::CIcon # ctor
 00469A60 f CIcon::~CIcon # rtti-dtor
 00469AC0 f CIcon::Render # slot(CUpdateObject)
 00469B10 f CIcon::vf3 # rtti
@@ -748,6 +839,7 @@
 0046A120 f IconBlinker::vf0_4 # rtti
 0046A130 f IconBlinker::vf0 # rtti
 0046A2F0 f Lua_006C0D00::Unblink # lua-method
+0046A560 f IconBlinker::IconBlinker # ctor
 0046A6D0 f CIconsManager::Update # slot(CUpdateObject)
 0046A7B0 f CIconsManager::~CIconsManager # rtti-dtor
 0046A900 f CIconsManager::`scalar deleting destructor' # rtti-ddtor
@@ -768,11 +860,13 @@
 0046C410 f CSimpleStack<NInput::E_BC_TYPE>::`scalar deleting destructor' # rtti-ddtor
 0046C450 f CSimpleStack<CSimpleStack<unsigned char>>::`scalar deleting destructor' # rtti-ddtor
 0046D030 f CInput::vf1_4 # rtti
+0046EA50 f CReadInputCfg::Instance # singleton
 0046EB10 f evMoveInfo::vf0 # rtti
 0046EC00 f CInput::vf5_4 # rtti
 0046EC30 f evKeyInfo::vf0 # rtti
 0046EEA0 f CInput::~CInput # rtti-dtor
 0046F050 f CInput::vf0_4 # rtti
+0046F300 f CInput::CInput # singleton ctor
 0046F460 f CInput::`scalar deleting destructor' # rtti-ddtor
 0046F920 f LuaTrigger::~LuaTrigger # rtti-dtor
 0046F9C0 f LuaTrigger::vf10 # rtti
@@ -795,6 +889,7 @@
 00471EF0 f CLGDLObject::vf56 # rtti
 00471F00 f CLGDLObject::vf57 # rtti
 00471F50 f CLGDLObject::`scalar deleting destructor' # rtti-ddtor
+00471FB0 f CLGDLObject::CLGDLObject # ctor
 00472C70 f CMainMenuScene::vf2 # rtti
 00472D20 f CMainMenuScene::vf0_4 # rtti
 00472D30 f CMainMenuScene::vf0_74 # rtti
@@ -804,8 +899,10 @@
 00472E20 f CMainMenuScene::vf15 # rtti
 00472FE0 f CMainMenuScene::vf4 # rtti
 00473340 f CSingleton<CMapHeight>::`scalar deleting destructor' # rtti-ddtor
+00473360 f CMapHeight::CMapHeight # singleton ctor
 00473540 f CMapHeight::~CMapHeight # rtti-dtor
 00473590 f CMapHeight::`scalar deleting destructor' # rtti-ddtor
+004735C0 f CMaskButton::CMaskButton # ctor
 00473640 f CMaskButton::~CMaskButton # rtti-dtor
 004736A0 f CMaskButton::vf2_54 # rtti
 004736B0 f CMaskButton::Render # slot(CUpdateObject)
@@ -822,8 +919,11 @@
 00473B60 f CMaskControlsManager::Update # slot(CUpdateObject)
 00473D70 f CMaskControlsManager::~CMaskControlsManager # rtti-dtor
 00473EF0 f CMaskControlsManager::`scalar deleting destructor' # rtti-ddtor
+00473F10 f CMaskControlsManager::CMaskControlsManager # ctor
+00473FD0 f CMaskRegion::CMaskRegion # ctor
 00474000 f CMaskRegion::`scalar deleting destructor' # rtti-ddtor
 00474080 f CSimpleStack<unsigned char>::`scalar deleting destructor' # rtti-ddtor
+004740C0 f CMaskTexture::CMaskTexture # ctor
 00474200 f CMaskTexture::`scalar deleting destructor' # rtti-ddtor
 00474260 f NSkinAnimation::CMatrixMeshSubObject::vf2 # rtti
 00474640 f NSkinAnimation::CMatrixMeshSubObject::~CMatrixMeshSubObject # rtti-dtor
@@ -831,6 +931,7 @@
 004749B0 f NSkinAnimation::CMatrixMeshSubObject::Draw # slot(NSkinAnimation::CSkinMeshSubObject)
 00474BC0 f DrawAttachedObject # manual
 00474E60 f NSkinAnimation::CMatrixMeshSubObject::`scalar deleting destructor' # rtti-ddtor
+00475720 f NSkinAnimation::CMatrixMeshSubObject::CMatrixMeshSubObject # ctor
 004757D0 f ST_VIDEO_TWEEN_ANIM::vf4 # rtti
 00475820 f ST_VIDEO_SHAD_ANIM::vf3 # rtti
 00475980 f ST_VIDEO_SHAD_ANIM::vf4 # rtti
@@ -865,9 +966,11 @@
 00477A90 f ST_ANIM_MESH::vf6 # rtti
 00477AA0 f ST_ANIM_MESH::vf7 # rtti
 00477C50 f ST_ANIM_MESH::vf8 # rtti
+00477E00 f ST_VIDEO_TWEEN_ANIM::ST_VIDEO_TWEEN_ANIM # ctor
 00478010 f ST_VIDEO_TWEEN_ANIM::`scalar deleting destructor' # rtti-ddtor
 00478030 f shared_vf_ST_VIDEO_SHAD_ANIM_1 # rtti-shared
 00478390 f ST_VIDEO_SHAD_ANIM::`scalar deleting destructor' # rtti-ddtor
+004783C0 f ST_SOFT_ANIM::ST_SOFT_ANIM # ctor
 004785D0 f ST_SOFT_ANIM::`scalar deleting destructor' # rtti-ddtor
 004785F0 f ST_SOFT_ANIM::vf1 # rtti
 00478960 f CSimpleStack<ST_MATERIAL>::vf0 # rtti
@@ -890,6 +993,8 @@
 00479EF0 f CMeshObject2DRes::`scalar deleting destructor' # rtti-ddtor
 00479F10 f CMeshObject2DRes::vf13 # rtti
 00479F30 f CMeshObject2DRes::vf14 # rtti
+0047A0D0 f CMeshObject2DRes::CMeshObject2DRes # ctor
+0047A120 f CMeshObject2DRes::CMeshObject2DRes # ctor
 0047A510 f CMeshObject3D::~CMeshObject3D # rtti-dtor
 0047A5A0 f CMeshObject3D::Update # slot(CUpdateObject)
 0047A660 f CMeshObject3D::Tick # slot(CUpdateObject)
@@ -900,6 +1005,7 @@
 0047AC40 f CMeshObject3D::vf0_1DC # rtti
 0047AD60 f CMeshSubObject3D::vf0 # rtti
 0047ADC0 f CMeshObject3D::`scalar deleting destructor' # rtti-ddtor
+0047B060 f CMeshObject3D::CMeshObject3D # ctor
 0047B300 f CMeshObject3D::vf44 # rtti
 0047B400 f CMeshObject3D::vf29 # rtti
 0047B5D0 f CMessage::~CMessage # rtti-dtor
@@ -910,10 +1016,12 @@
 0047BDB0 f CSingleton<CMessageManager>::`scalar deleting destructor' # rtti-ddtor
 0047BED0 f CMessageManager::~CMessageManager # rtti-dtor
 0047BF40 f CMessageManager::vf0_4 # rtti
+0047BFB0 f CMessageManager::CMessageManager # singleton ctor
 0047C050 f CMessageManager::`scalar deleting destructor' # rtti-ddtor
 0047C920 f CSingleton<CMO3DManager>::`scalar deleting destructor' # rtti-ddtor
 0047CB90 f CMO3DManager::~CMO3DManager # rtti-dtor
 0047CC10 f CMO3DManager::`scalar deleting destructor' # rtti-ddtor
+0047CD70 f CMO3DManager::CMO3DManager # singleton ctor
 0047CE50 f Lua_006C1480::Update # lua-method
 0047CF30 f Singleton<NSound::MusicManager>::`scalar deleting destructor' # rtti-ddtor
 0047CFC0 f Lua_006C1480::SetNumFramesForFade # lua-method
@@ -923,9 +1031,12 @@
 0047E8B0 f NSound::MusicManager::~MusicManager # rtti-dtor
 0047E9B0 f NSound::MusicManager::vf0_38 # rtti
 0047E9C0 f NSound::MusicManager::vf0_3C # rtti
+0047ECD0 f NSound::MusicManager::MusicManager # ctor
 0047EDF0 f NSound::MusicManager::`scalar deleting destructor' # rtti-ddtor
 0047FB10 f pNode::`scalar deleting destructor' # rtti-ddtor
+0047FD30 f Vertex::Vertex # ctor
 00482730 f CNotesBook::Tick # slot(CUpdateObject)
+00482B40 f CNotesBook::CNotesBook # ctor
 00483640 f CNotesBook::~CNotesBook # rtti-dtor
 00483790 f CNotesBook::`scalar deleting destructor' # rtti-ddtor
 00483830 f CNotesBookScene::vf2 # rtti
@@ -940,9 +1051,11 @@
 004844C0 f CSingleton<NPCCollector>::`scalar deleting destructor' # rtti-ddtor
 004845C0 f NPCList::vf0 # rtti
 00484BC0 f NPCCollector::~NPCCollector # rtti-dtor
+00484C70 f nScript::Table::Table # singleton ctor
 00484D40 f NPCCollector::`scalar deleting destructor' # rtti-ddtor
 004853A0 f ObjectShadowBox::`scalar deleting destructor' # rtti-ddtor
 00485C40 f COcclusionCulling::vf1 # rtti
+00486010 f COcclusionCulling::COcclusionCulling # ctor
 004861A0 f COcclusionCulling::vf2 # rtti
 004861C0 f COcclusionCulling::~COcclusionCulling # rtti-dtor
 00486280 f COcclusionCulling::vf3 # rtti
@@ -1005,17 +1118,21 @@
 0049D200 f KWCastles::vf0 # rtti
 0049E9A0 f KWTreesProperties::vf0 # rtti
 0049F090 f CReadCfg::~CReadCfg # rtti-dtor
+0049F3E0 f KWFlares::KWFlares # singleton ctor
 0049F5D0 f CReadCfg::`scalar deleting destructor' # rtti-ddtor
 0049F6F0 f KWForest::vf0 # rtti
 0049FE20 f KWEnemies::vf0 # rtti
 004A0730 f CSingleton<CReadCursorDat>::`scalar deleting destructor' # rtti-ddtor
 004A0870 f CReadCursorDat::~CReadCursorDat # rtti-dtor
+004A0910 f CReadCursorDat::CReadCursorDat # singleton ctor
 004A0970 f CReadCursorDat::`scalar deleting destructor' # rtti-ddtor
 004A0C10 f CSingleton<CReadInputCfg>::`scalar deleting destructor' # rtti-ddtor
+004A1650 f CReadInputCfg::CReadInputCfg # singleton ctor
 004A1690 f CReadInputCfg::~CReadInputCfg # rtti-dtor
 004A1780 f CReadInputCfg::`scalar deleting destructor' # rtti-ddtor
 004A1F90 f CSingleton<CReadInterfaceDat>::`scalar deleting destructor' # rtti-ddtor
 004A70C0 f CReadInterfaceDat::~CReadInterfaceDat # rtti-dtor
+004A7160 f CReadInterfaceDat::CReadInterfaceDat # singleton ctor
 004A71C0 f CReadInterfaceDat::`scalar deleting destructor' # rtti-ddtor
 004A7310 f CSingleton<CReadNPCInfo>::`scalar deleting destructor' # rtti-ddtor
 004A8460 f CReadNPCInfo::~CReadNPCInfo # rtti-dtor
@@ -1024,6 +1141,7 @@
 004A8A20 f CReadQuestInfo::~CReadQuestInfo # rtti-dtor
 004A8B80 f CReadQuestInfo::`scalar deleting destructor' # rtti-ddtor
 004A8BC0 f CSingleton<CReadRenderInfo>::`scalar deleting destructor' # rtti-ddtor
+004A9480 f CReadRenderInfo::CReadRenderInfo # singleton ctor
 004A9570 f CReadRenderInfo::`scalar deleting destructor' # rtti-ddtor
 004A98F0 f CSingleton<CReadTalkDat>::`scalar deleting destructor' # rtti-ddtor
 004AB4B0 f CReadTalkDat::~CReadTalkDat # rtti-dtor
@@ -1081,6 +1199,7 @@
 004AD670 f CRenderString::vf56 # rtti
 004AD6E0 f CRenderString::vf53 # rtti
 004AD970 f CSimpleStack<ST_T_FRAGMENT>::`scalar deleting destructor' # rtti-ddtor
+004AD9B0 f CRenderString::CRenderString # ctor
 004ADAE0 f CRenderString::vf46 # rtti
 004ADB00 f CRenderString::vf45 # rtti
 004ADB70 f CRenderString::vf47 # rtti
@@ -1093,11 +1212,14 @@
 004AE5F0 f CTextManager::Update # slot(CUpdateObject)
 004AE660 f CTextManager::Render # slot(CUpdateObject)
 004AE8E0 f CRenderString::~CRenderString # rtti-dtor
+004AE990 f CTextFont::CTextFont # ctor
 004AEAE0 f CTextFont::~CTextFont # rtti-dtor
 004AF440 f CTextFont::`scalar deleting destructor' # rtti-ddtor
 004AF460 f CRenderString::`scalar deleting destructor' # rtti-ddtor
+004AF7A0 f CTextManager::CTextManager # ctor
 004AF9B0 f CTextManager::~CTextManager # rtti-dtor
 004AFED0 f CTextManager::`scalar deleting destructor' # rtti-ddtor
+004AFEF0 f CRenderString::CRenderString # ctor
 004B0490 f SAO::vf49 # rtti
 004B04A0 f SAO::Tick # slot(CUpdateObject)
 004B05A0 f SAO::~SAO # rtti-dtor
@@ -1113,12 +1235,13 @@
 004B0910 f SAO::vf30 # rtti
 004B0A30 f SAO::vf51 # rtti
 004B0A60 f SAO::vf52 # rtti
+004B0AA0 f nScript::Table::Instance # singleton
 004B0BF0 f SAO::`scalar deleting destructor' # rtti-ddtor
-004B0C10 f SAO::StaticInit # slot(CRenderObject3D)
+004B0C10 f SAO::vf38 # rtti
 004B0E00 f SAO::vf53 # rtti
 004B1A70 f CCallBackObject::`scalar deleting destructor' # rtti-ddtor
 004B1B20 f CScene::vf2 # rtti
-004B1B30 f LuaGlobal_ContinentTessalateNow # lua-global
+004B1B30 f return0 # stub
 004B1D10 f CScene::vf5 # rtti
 004B1E20 f CScene::vf6 # rtti
 004B1EB0 f CScene::vf9 # rtti
@@ -1132,16 +1255,21 @@
 004B2270 f SceneRankChange::~SceneRankChange # rtti-dtor
 004B22E0 f SceneRankChange::vf0_4 # rtti
 004B22F0 f SceneRankChange::`scalar deleting destructor' # rtti-ddtor
+004B2430 f SceneRankChangePlayAnimSound::SceneRankChangePlayAnimSound # ctor
 004B2520 f Arrow::Tick # slot(CUpdateObject)
 004B2530 f SceneRankChangePlayAnimSound::~SceneRankChangePlayAnimSound # rtti-dtor
 004B2590 f SceneRankChangePlayAnimSound::`scalar deleting destructor' # rtti-ddtor
 004B25B0 f SceneRankChange::vf5 # rtti
 004B2660 f SceneRankChange::vf13 # rtti
+004B2720 f SceneRankChange::SceneRankChange # ctor
+004B3000 f ScreenCroper::ScreenCroper # ctor
 004B3070 f ScreenCroper::~ScreenCroper # rtti-dtor
 004B3260 f ScreenCroper::Update # slot(CUpdateObject)
 004B34F0 f ScreenCroper::Render # slot(CUpdateObject)
 004B3520 f ScreenCroper::`scalar deleting destructor' # rtti-ddtor
 004B3710 f CSingleton<ScriptManager>::`scalar deleting destructor' # rtti-ddtor
+004B3800 f CameraScript::Instance # singleton
+004B38B0 f ActionScript::Instance # singleton
 004B3BF0 f ScriptManager::Update # slot(CUpdateObject)
 004B3D90 f ScriptManager::vf0_58 # rtti
 004B3DA0 f ScriptManager::~ScriptManager # rtti-dtor
@@ -1150,6 +1278,7 @@
 004B4190 f Serializable::`scalar deleting destructor' # rtti-ddtor
 004B4690 f Singleton<Serializator>::`scalar deleting destructor' # rtti-ddtor
 004B5680 f Lua_006C2020::Load # lua-method
+004B5710 f Serializator::Serializator # ctor
 004B5790 f Serializator::vf0_8 # rtti
 004B57A0 f Serializator::vf0_C # rtti
 004B57E0 f Serializator::~Serializator # rtti-dtor
@@ -1161,10 +1290,13 @@
 004B6CA0 f CShadowManager::`scalar deleting destructor' # rtti-ddtor
 004B6D70 f CShadowManager::CollectCasters # manual
 004B6E70 f CShadowManager::RenderCasters # manual
+004B7D90 f ObjectCells<CShadowObject>::ObjectCells # ctor
 004B7E90 f ObjectCells<CShadowObject>::~ObjectCells # rtti-dtor
 004B8160 f ObjectCells<CShadowObject>::`scalar deleting destructor' # rtti-ddtor
+004B8180 f CShadowManager::CShadowManager # ctor
 004B8860 f SignOnNPC::Update # slot(CUpdateObject)
 004B88D0 f Singleton<SignOnNPC>::`scalar deleting destructor' # rtti-ddtor
+004B88F0 f SignOnNPC::SignOnNPC # ctor
 004B8B60 f SignOnNPC::vf0_58 # rtti
 004B8B70 f SignOnNPC::~SignOnNPC # rtti-dtor
 004B8BE0 f SignOnNPC::`scalar deleting destructor' # rtti-ddtor
@@ -1176,9 +1308,11 @@
 004BC630 f NSkinAnimation::CSkeletonMeshSubObject::~CSkeletonMeshSubObject # rtti-dtor
 004BCA50 f NSkinAnimation::CSkeletonMeshSubObject::`scalar deleting destructor' # rtti-ddtor
 004BCC60 f NSkinAnimation::CSkinMeshSubObject::Read # manual
+004BD0F0 f NSkinAnimation::CSkeletonMeshSubObject::CSkeletonMeshSubObject # ctor
 004BD9E0 f CSingleton<NSkinAnimation::CSkinAnimationManager>::`scalar deleting destructor' # rtti-ddtor
-004BDA00 f shared_vf_lua_CLOLuaFunction_6 # rtti-shared
+004BDA00 f returnthis # stub
 004BFF70 f NSkinAnimation::CSkinAnimationManager::~CSkinAnimationManager # rtti-dtor
+004C01B0 f NSkinAnimation::CSkinAnimationManager::CSkinAnimationManager # singleton ctor
 004C0220 f NSkinAnimation::CSkinAnimationManager::`scalar deleting destructor' # rtti-ddtor
 004C06D0 f NSkinAnimation::CSkinMesh::~CSkinMesh # rtti-dtor
 004C07A0 f NSkinAnimation::CSkinMesh::`scalar deleting destructor' # rtti-ddtor
@@ -1190,10 +1324,13 @@
 004C0E30 f NSkinAnimation::CSkinMesh::DrawCurrent # manual
 004C0E60 f NSkinAnimation::CSkinMesh::Draw3 # manual
 004C0EA0 f NSkinAnimation::CSkinMesh::DrawNoWorld # manual
+004C0EE0 f NSkinAnimation::CSkinAnimationManager::Instance # singleton
+004C0FE0 f SkinMeshObject::SkinMeshObject # ctor
 004C10C0 f SkinMeshObject::vf58 # rtti
 004C10D0 f SkinMeshObject::vf55 # rtti
 004C10E0 f SkinMeshObject::vf56 # rtti
 004C10F0 f SkinMeshObject::vf57 # rtti
+004C1100 f SkinMeshObject::SkinMeshObject # ctor
 004C11D0 f SkinMeshObject::~SkinMeshObject # rtti-dtor
 004C12B0 f SkinMeshObject::`scalar deleting destructor' # rtti-ddtor
 004C12D0 f NSkinAnimation::CSkinMeshSubObject::~CSkinMeshSubObject # rtti-dtor
@@ -1239,7 +1376,9 @@
 004C3670 f NSound::Sound::vf9 # rtti
 004C3A10 f NSound::Sound::`scalar deleting destructor' # rtti-ddtor
 004C3AC0 f NSound::SimpleSound::GetStatus # slot(NSound::Sound)
+004C3AE0 f NSound::Sound2D::Sound2D # ctor
 004C3B50 f NSound::Sound2D::GetStatus # slot(NSound::Sound)
+004C3B90 f NSound::SoundGui2D::SoundGui2D # ctor
 004C3E10 f NSound::Sound2D::vf2 # rtti
 004C40B0 f NSound::SimpleSound::~SimpleSound # rtti-dtor
 004C4150 f NSound::Sound2D::~Sound2D # rtti-dtor
@@ -1248,6 +1387,7 @@
 004C4430 f NSound::Sound2D::`scalar deleting destructor' # rtti-ddtor
 004C4450 f NSound::SoundGui2D::`scalar deleting destructor' # rtti-ddtor
 004C4B00 f NSound::Sound3D::vf13 # rtti
+004C4BC0 f NSound::Sound3D::Sound3D # ctor
 004C53A0 f NSound::Sound3D::Stop # manual
 004C5410 f NSound::Sound3D::vf2 # rtti
 004C5440 f NSound::Sound3D::~Sound3D # rtti-dtor
@@ -1268,21 +1408,26 @@
 004C6370 f CSpellLogo::Tick # slot(CUpdateObject)
 004C6430 f CSpellLogo::vf0_224 # rtti
 004C6440 f CSpellIcon::vf0_224 # rtti
+004C6450 f CSpellBook::CSpellBook # ctor
 004C6620 f CSpellBook::`scalar deleting destructor' # rtti-ddtor
 004C6920 f CSpellIcon::`scalar deleting destructor' # rtti-ddtor
 004C6940 f CSpellIcon::vf1_224 # rtti
 004C69E0 f CSpellLogo::`scalar deleting destructor' # rtti-ddtor
 004C6BA0 f CSpellBookScene::vf6 # rtti
 004C6DA0 f CSingleton<CSpellBookScene>::`scalar deleting destructor' # rtti-ddtor
+004C73E0 f nSpell::SpellsManager::Instance # singleton
 004C76A0 f CSpellBookScene::vf13 # rtti
+004C84D0 f CSpellBookScene::CSpellBookScene # singleton ctor
 004C8610 f CSpellBookScene::vf1 # rtti
 004C8630 f CSpellBookScene::vf0_74 # rtti
 004C8640 f CSpellBookScene::vf0_4 # rtti
 004C8860 f CSpellBookScene::vf4 # rtti
+004C88A0 f CSpellBookScene::Instance # singleton
 004C8950 f LuaGlobal_SpellBook_AddSpell # lua-global
 004C8A70 f CSpellBookScene::~CSpellBookScene # rtti-dtor
 004C8B50 f CSpellBookScene::`scalar deleting destructor' # rtti-ddtor
 004CA5D0 f CSpellBookScene::vf2 # rtti
+004CB520 f StackAnim::StackAnim # ctor
 004CB570 f StackAnim::~StackAnim # rtti-dtor
 004CB640 f StackAnim::`scalar deleting destructor' # rtti-ddtor
 004CBB30 f CStandardBorder::~CStandardBorder # rtti-dtor
@@ -1290,7 +1435,9 @@
 004CBD50 f CStandardBorder::vf44 # rtti
 004CBDA0 f CStandardBorder::Render # slot(CUpdateObject)
 004CBE00 f CStandardBorder::vf0_1C4 # rtti
+004CBE20 f CStandardBorder::CStandardBorder # ctor
 004CC150 f CStandardBorder::`scalar deleting destructor' # rtti-ddtor
+004CC170 f StandardList::StandardList # ctor
 004CC1B0 f StandardList::vf0_18 # rtti
 004CC1C0 f StandardList::`scalar deleting destructor' # rtti-ddtor
 004CC6D0 f StandardList::vf1_18 # rtti
@@ -1304,6 +1451,7 @@
 004CE800 f ObjectCells<CRenderObject3D>::`scalar deleting destructor' # rtti-ddtor
 004CE850 f StaticObjectManager::~StaticObjectManager # rtti-dtor
 004CE8E0 f StaticObjectManager::`scalar deleting destructor' # rtti-ddtor
+004CEA30 f UpdateTacticRenderList::UpdateTacticRenderList # ctor
 004CEB90 f CSingleton<CStatisticScreenScene>::`scalar deleting destructor' # rtti-ddtor
 004CEC70 f CStatisticScreenScene::vf1 # rtti
 004CEC90 f CStatisticScreenScene::vf0_74 # rtti
@@ -1329,6 +1477,7 @@
 004D2780 f Lua_006C2630::End # lua-method
 004D2900 f Lua_006C2630::OpenScene # lua-method
 004D3350 f Lua_006C2630::Select # lua-method
+004D3C20 f CTalker::CTalker # ctor
 004D3E90 f CRenderObject2D::vf36 # rtti
 004DC910 f NTesselation::CTesselation::StaticInit # export
 004DD190 f CTestShaderScene::vf0_4 # rtti
@@ -1342,27 +1491,38 @@
 004DED20 f CCursorTexture::Update # slot(CUpdateObject)
 004DED30 f CTexture::Tick # slot(CUpdateObject)
 004DEE20 f CSingleton<CManager<CTextureNode>>::`scalar deleting destructor' # rtti-ddtor
+004DF5D0 f CManager<CTextureNode>::CManager # singleton ctor
 004DF630 f CManager<CTextureNode>::~CManager # rtti-dtor
 004DF6B0 f CManager<CTextureNode>::`scalar deleting destructor' # rtti-ddtor
 004DF6D0 f CTexture::~CTexture # rtti-dtor
+004DF730 f CManager<CTextureNode>::Instance # singleton
+004DF7D0 f CTexture::CTexture # ctor
 004DF860 f CTexture::CreateRenderTarget # manual
+004DF920 f CTexture::CTexture # ctor
 004DFD20 f CTextureNode::Update # slot(CUpdateObject)
 004DFD50 f shared_vf_CTextureNode_4 # rtti-shared
 004DFD60 f CTextureNode::Tick # slot(CUpdateObject)
 004DFF80 f CTextureNode::~CTextureNode # rtti-dtor
 004E02B4 d CTexture_LoadDDS_CreateTexture_ret # manual
+004E0AE0 f CTextureNode::CTextureNode # ctor
 004E0B80 f CTextureNode::Render # slot(CUpdateObject)
 004E0DD0 f CSingleton<nTime::TimeManager>::`scalar deleting destructor' # rtti-ddtor
+004E0FB0 f CSun::Instance # singleton
+004E1060 f CSky::Instance # singleton
+004E1110 f CClouds::Instance # singleton
 004E1AD0 f nTime::TimeManager::Update # slot(CUpdateObject)
 004E1E80 f nTime::TimeManager::~TimeManager # rtti-dtor
 004E1F30 f nTime::TimeManager::vf0_38 # rtti
 004E1F40 f nTime::TimeManager::`scalar deleting destructor' # rtti-ddtor
+004E3800 f nScript::Table::i_iterator::i_iterator # singleton ctor
 004E41B0 f nTime::TimeManager::AfterTicks # slot(CUpdateObject)
-004E4220 f CTimer::FrameWait # manual
+004E4200 f CTimer::Resume # manual
+004E4220 f CTimer::Wait # manual
 004E4360 f CTLEndVictoryScene::vf2 # rtti
 004E4380 f CTLEndVictoryScene::vf4 # rtti
 004E43F0 f CTLEndVictoryScene::vf6_4 # rtti
 004E4480 f CTLEndVictoryScene::vf13 # rtti
+004E46D0 f nScript::Function::Instance # singleton
 004E5210 f CTLEndVictoryScene::~CTLEndVictoryScene # rtti-dtor
 004E52D0 f CTLEndVictoryScene::vf0_4 # rtti
 004E55C0 f CTLEndVictoryScene::`scalar deleting destructor' # rtti-ddtor
@@ -1391,17 +1551,22 @@
 004EA700 f TrAppearHero::~TrAppearHero # rtti-dtor
 004EA770 f TrBeginHero::~TrBeginHero # rtti-dtor
 004EA7F0 f TrChangeScene::~TrChangeScene # rtti-dtor
+004EA850 f TrAppearHeroPlayAnimSound::TrAppearHeroPlayAnimSound # ctor
 004EA940 f TrAppearHeroPlayAnimSound::Update # slot(CUpdateObject)
 004EA970 f TrAppearHeroPlayAnimSound::~TrAppearHeroPlayAnimSound # rtti-dtor
 004EA9D0 f TrAppearHeroPlayAnimSound::`scalar deleting destructor' # rtti-ddtor
 004EAA80 f CTrigger::`scalar deleting destructor' # rtti-ddtor
+004EAAA0 f TrAppearHero::TrAppearHero # ctor
 004EAF90 f TrAppearHero::`scalar deleting destructor' # rtti-ddtor
 004EAFB0 f TrAppearHero::vf1 # rtti
 004EB110 f TrBeginHero::`scalar deleting destructor' # rtti-ddtor
+004EB130 f TrChangeScene::TrChangeScene # ctor
 004EB2A0 f TrChangeScene::`scalar deleting destructor' # rtti-ddtor
+004EB2C0 f TrChangeScene::TrChangeScene # ctor
 004EB440 f TrAppearHero::vf2 # rtti
 004EB510 f CTriggersManager::Update # slot(CUpdateObject)
 004EB560 f CTriggersManager::~CTriggersManager # rtti-dtor
+004EB690 f CTriggersManager::CTriggersManager # ctor
 004EB720 f CTriggersManager::`scalar deleting destructor' # rtti-ddtor
 004EBC20 f NCollisionDetection::CollideObjectObsolete::`scalar deleting destructor' # rtti-ddtor
 004EBE90 f CUnitShadow::~CUnitShadow # rtti-dtor
@@ -1410,9 +1575,10 @@
 004EC910 f CUnitShadow::Render # manual
 004ECF20 f CUnitShadow::vf4 # rtti
 004ED0C0 f Singleton<NSound::UnitSoundManager>::`scalar deleting destructor' # rtti-ddtor
-004ED1C0 f shared_vf_Arrow_27 # rtti-shared
+004ED1C0 f returntrue # stub
 004ED630 f Lua_006C2A40::GetVolume # lua-method
 004F5210 f NSound::UnitSoundManager::_Cleanup # export
+004F5650 f NSound::UnitSoundManager::UnitSoundManager # ctor
 004F5750 f NSound::UnitSoundManager::vf0_38 # rtti
 004F5760 f NSound::UnitSoundManager::vf0_3C # rtti
 004F58D0 f NSound::UnitSoundManager::~UnitSoundManager # rtti-dtor
@@ -1424,6 +1590,7 @@
 004F6220 f UpdateRenderList::vf4_18 # rtti
 004F6250 f StandardList::~StandardList # rtti-dtor
 004F62B0 f UpdateRenderList::vf0_18 # rtti
+004F62C0 f UpdateRenderList::UpdateRenderList # ctor
 004F6340 f UpdateRenderList::`scalar deleting destructor' # rtti-ddtor
 004F7550 f CVideoClip::~CVideoClip # rtti-dtor
 004F7620 f CVideoClip::`scalar deleting destructor' # rtti-ddtor
@@ -1446,8 +1613,10 @@
 004F9620 f CWaterCircleManager::~CWaterCircleManager # rtti-dtor
 004F9680 f CWaterCircleManager::`scalar deleting destructor' # rtti-ddtor
 004F9720 f WorldStandard::`scalar deleting destructor' # rtti-ddtor
+004F9ED0 f CGexField::Instance # singleton
 004F9F80 f CAroundGex::`scalar deleting destructor' # rtti-ddtor
 004FA090 f CSingleton<CBattleCalculation>::`scalar deleting destructor' # rtti-ddtor
+004FA320 f nScript::Function::Function # singleton ctor
 004FA830 f CBattleCalculation::`scalar deleting destructor' # rtti-ddtor
 004FBA70 f CGroundPlane::vf0 # rtti
 004FBAE0 f CCircleSelection::vf20 # rtti
@@ -1457,6 +1626,7 @@
 004FCAB0 f CCircleSelection::`scalar deleting destructor' # rtti-ddtor
 004FCBB0 f CGexField::Render # slot(CUpdateObject)
 004FCE70 f CSingleton<CGexField>::`scalar deleting destructor' # rtti-ddtor
+004FCE90 f CGexField::CGexField # singleton ctor
 004FCF40 f CGexField::vf20 # rtti
 004FCF50 f CGexField::vf19 # rtti
 004FCF60 f CGexField::vf25 # rtti
@@ -1466,6 +1636,7 @@
 004FD910 f GexView::vf20 # rtti
 004FD9B0 f GexView::Update # slot(CUpdateObject)
 004FD9F0 f GexView::Render # slot(CUpdateObject)
+004FDAF0 f CGroundPlane::CGroundPlane # ctor
 004FDC70 f GexView::~GexView # rtti-dtor
 004FDCF0 f GexView::`scalar deleting destructor' # rtti-ddtor
 004FDE90 f CLoadTacticLevel::~CLoadTacticLevel # rtti-dtor
@@ -1482,6 +1653,7 @@
 004FE450 f CManagerUnitCircle::Tick # slot(CUpdateObject)
 004FE5B0 f CMoveAttackCircle::Tick # slot(CUpdateObject)
 004FE5F0 f CSingleton<CMoveAttackCircle>::`scalar deleting destructor' # rtti-ddtor
+004FE610 f CMoveAttackCircle::CMoveAttackCircle # singleton ctor
 004FE6A0 f CMoveAttackCircle::vf0_58 # rtti
 004FE6B0 f CMoveAttackCircle::~CMoveAttackCircle # rtti-dtor
 004FE770 f CMoveAttackCircle::Update # slot(CUpdateObject)
@@ -1496,7 +1668,10 @@
 004FF310 f CSimpleStack<NMovingTroop::ST_UNIT_GEX>::`scalar deleting destructor' # rtti-ddtor
 004FF350 f CSimpleStack<ST_INFO_SORT<CTacticCreature *, unsigned int>>::`scalar deleting destructor' # rtti-ddtor
 004FF390 f CSimpleStack<NGexField::unsgex>::`scalar deleting destructor' # rtti-ddtor
+004FF9A0 f CMoveAttackCircle::Instance # singleton
+004FFB00 f CTimeLine::Instance # singleton
 00504860 f CMovingTroop::~CMovingTroop # rtti-dtor
+00504EC0 f CMovingTroop::CMovingTroop # singleton ctor
 00505080 f CMovingTroop::`scalar deleting destructor' # rtti-ddtor
 00505120 f ParSysSelection::`scalar deleting destructor' # rtti-ddtor
 00505260 f CPlacingTroop::~CPlacingTroop # rtti-dtor
@@ -1576,7 +1751,9 @@
 005180C0 f CTacticLevel::vf5 # rtti
 005184C0 f Lua_006C73C0::SetCurrent # lua-method
 00518540 f CSingleton<CTacticLevel>::`scalar deleting destructor' # rtti-ddtor
+00518B10 f KWFlares::Instance # singleton
 00518CF0 f LuaGlobal_Kill # lua-global
+00518D10 f NSound::ListenerUpdater::ListenerUpdater # ctor
 00518D80 f NSound::ListenerUpdater::Tick # slot(CUpdateObject)
 00518D90 f NSound::ListenerUpdater::Tick # manual
 00518E30 f CTacticLevel::vf3 # rtti
@@ -1592,6 +1769,7 @@
 0051B630 f CTacticLevel::vf0_4 # rtti
 0051B640 f CTacticLevel::vf0_74 # rtti
 0051B650 f CTacticLevel::vf0_78 # rtti
+0051B6C0 f CTacticLevel::CTacticLevel # singleton ctor
 0051B920 f CTacticLevel::`scalar deleting destructor' # rtti-ddtor
 0051D1B0 f CTacticLoadLine::Render # slot(CUpdateObject)
 0051D3A0 f CTacticLoadLine::`scalar deleting destructor' # rtti-ddtor
@@ -1602,6 +1780,7 @@
 0051FC70 f CSimpleStack<unsigned int>::vf0 # rtti
 0051FCE0 f CTimeLine::~CTimeLine # rtti-dtor
 0051FEA0 f CTimeLine::`scalar deleting destructor' # rtti-ddtor
+0051FEC0 f CTimeLine::CTimeLine # singleton ctor
 00520310 f CSimpleStack<NTrajectoryMove::ST_FRAME_POS_ANGLE>::`scalar deleting destructor' # rtti-ddtor
 00521AF0 f NUnitInfoWindow::CUnitWindow::~CUnitWindow # rtti-dtor
 00521B50 f NUnitInfoWindow::CUnitWindow::vf53 # rtti
@@ -1609,6 +1788,7 @@
 00521F60 f CSimpleStack<CRenderString>::`scalar deleting destructor' # rtti-ddtor
 00521FB0 f CSimpleStack<NUnitInfoWindow::ST_STRING_BASE_POS>::`scalar deleting destructor' # rtti-ddtor
 00521FF0 f CSimpleStack<NUnitInfoWindow::ST_OBJ_BASE_POS>::`scalar deleting destructor' # rtti-ddtor
+00522030 f NUnitInfoWindow::CUnitWindow::CUnitWindow # ctor
 00522180 f NUnitInfoWindow::CUnitWindow::`scalar deleting destructor' # rtti-ddtor
 005221A0 f NUnitInfoWindow::CUnitWindow::Render # slot(CUpdateObject)
 00522300 f CUnitInfoWindow::Render # slot(CUpdateObject)
@@ -1617,14 +1797,17 @@
 005227E0 f CUnitInfoWindow::Update # slot(CUpdateObject)
 005228A0 f CUnitInfoWindow::Tick # slot(CUpdateObject)
 005230B0 f Singleton<ViewMove>::`scalar deleting destructor' # rtti-ddtor
+005230D0 f ViewMove::ViewMove # ctor
 00523160 f ViewMove::vf0_4 # rtti
 00523170 f ViewMove::~ViewMove # rtti-dtor
 005231C0 f ViewMove::`scalar deleting destructor' # rtti-ddtor
 00523270 f Singleton<ViewMovePoint>::`scalar deleting destructor' # rtti-ddtor
+00523290 f ViewMovePoint::ViewMovePoint # ctor
 00523390 f ViewMovePoint::vf0_4 # rtti
 005233A0 f ViewMovePoint::~ViewMovePoint # rtti-dtor
 00523420 f ViewMovePoint::`scalar deleting destructor' # rtti-ddtor
 00524330 f CWidthFind::~CWidthFind # rtti-dtor
+00524610 f CWidthFind::CWidthFind # ctor
 00524830 f CWidthFind::`scalar deleting destructor' # rtti-ddtor
 00524A10 f InstancedGrass::vf3 # rtti
 00524A70 f InstancedGrass::vf4 # rtti
@@ -1632,6 +1815,7 @@
 00524AD0 f InstancedGrass::~InstancedGrass # rtti-dtor
 00524BD0 f InstancedGrass::vf0_1C4 # rtti
 00524BE0 f InstancedGrass::`scalar deleting destructor' # rtti-ddtor
+00524C00 f InstancedGrass::InstancedGrass # ctor
 00524D00 f InstancedGrass::Render # slot(CUpdateObject)
 00524F40 f AttackSphere::~AttackSphere # rtti-dtor
 00524FF0 f AttackSphere::vf0_8 # rtti
@@ -1639,6 +1823,7 @@
 00525040 f Lua_006C75D0::Hide # lua-method
 00525050 f AttackSphere::`scalar deleting destructor' # rtti-ddtor
 00525680 f Lua_006C75D0::SetColor # lua-method
+00525B50 f CBorder::CBorder # ctor
 005260D0 f CBorder::~CBorder # rtti-dtor
 00526A50 f CBorder::`scalar deleting destructor' # rtti-ddtor
 00526B40 f CSimpleStack<CBorder *>::`scalar deleting destructor' # rtti-ddtor
@@ -1650,6 +1835,7 @@
 00527410 f CClouds::Render # slot(CUpdateObject)
 00527420 f CClouds::vf1_1DC # rtti
 00527470 f CSingleton<CClouds>::`scalar deleting destructor' # rtti-ddtor
+00527490 f CClouds::CClouds # singleton ctor
 00527710 f CClouds::vf0_1DC # rtti
 00527720 f CClouds::vf0_1E0 # rtti
 00527730 f CClouds::~CClouds # rtti-dtor
@@ -1659,6 +1845,7 @@
 005278D0 f CCompass::Tick # slot(CUpdateObject)
 00527920 f CCompass::Render # slot(CUpdateObject)
 00527940 f CCompass::`scalar deleting destructor' # rtti-ddtor
+00527960 f CCompass::CCompass # ctor
 00527DF0 f CClouds::Serialize # manual
 00527EA0 f CContinent::Tick # slot(CUpdateObject)
 00527ED0 f CClouds::RenderShadowPass # manual
@@ -1670,11 +1857,13 @@
 00529690 f CContinent::`scalar deleting destructor' # rtti-ddtor
 00529CF0 f CClouds::Render # manual
 0052A1D0 f CContinent::vf4 # rtti
+0052A510 f CContinentReflection::CContinentReflection # ctor
 0052A6A0 f CContinentReflection::~CContinentReflection # rtti-dtor
 0052A750 f CContinentReflection::Update # slot(CUpdateObject)
 0052A830 f CContinentReflection::vf2_20 # rtti
 0052A930 f CContinentReflection::vf0_20 # rtti
 0052A940 f CContinentReflection::`scalar deleting destructor' # rtti-ddtor
+0052A960 f CCulledContinent::CCulledContinent # ctor
 0052AA80 f CCulledContinent::~CCulledContinent # rtti-dtor
 0052AB10 f CCulledContinent::vf1 # rtti
 0052ABE0 f CCulledContinent::`scalar deleting destructor' # rtti-ddtor
@@ -1686,9 +1875,11 @@
 0052B1F0 f CFlares::Update # manual
 0052B420 f CFlares::Render # manual
 0052B6C0 f CFlares::vf4 # rtti
+0052B9C0 f CFlares::CFlares # ctor
 0052BBE0 f CGrass::Render # slot(CUpdateObject)
 0052C4E0 f CGrass::vf3 # rtti
 0052CDD0 f CSingleton<CGrassMap>::`scalar deleting destructor' # rtti-ddtor
+0052D430 f CGrassMap::CGrassMap # singleton ctor
 0052D4A0 f CGrassMap::vf0_8 # rtti
 0052D4B0 f CGrassMap::~CGrassMap # rtti-dtor
 0052E150 f CGrass::StaticInit # export
@@ -1708,7 +1899,7 @@
 00531DD0 f CNpc::vf3 # rtti
 00531DE0 f CNpc::vf4 # rtti
 00531DF0 f CNpc::vf29 # rtti
-00531F70 f Lua_006C2A40::PlayVolumeMusic # lua-method
+00531F70 f return0_4 # stub
 00532260 f CNpc::vf0_250 # rtti
 00532270 f CNpc::vf0_1FC # rtti
 00532280 f CNpc::vf0_25C # rtti
@@ -1730,7 +1921,7 @@
 00532E30 f CNpc::vf35 # rtti
 00532ED0 f CNpc::vf11 # rtti
 00532F70 f CNpc::Update # slot(CUpdateObject)
-00533080 f CNpc::StaticInit # slot(CRenderObject3D)
+00533080 f CNpc::vf38 # rtti
 00533270 f CNpc::vf0_1F4 # rtti
 005332D0 f CNpc::vf37 # rtti
 005333D0 f CNpc::vf28 # rtti
@@ -1742,9 +1933,11 @@
 00533C60 f ST_SPEECH::`scalar deleting destructor' # rtti-ddtor
 00533C80 f CNpc::`scalar deleting destructor' # rtti-ddtor
 00533CA0 f CNpc::Render # slot(CUpdateObject)
+00533E30 f CNpc::CNpc # ctor
 00534FA0 f CSky::Update # slot(CUpdateObject)
 00534FF0 f CSky::vf1_1DC # rtti
 00535040 f CSingleton<CSky>::`scalar deleting destructor' # rtti-ddtor
+00535060 f CSky::CSky # singleton ctor
 00535190 f CSky::vf0_1DC # rtti
 005351A0 f CSky::vf0_1E0 # rtti
 005351B0 f CSky::~CSky # rtti-dtor
@@ -1756,6 +1949,7 @@
 00535810 f CSun::vf3 # rtti
 00535850 f CSun::ReadBackBufferPixel # manual
 005359F0 f CSingleton<CSun>::`scalar deleting destructor' # rtti-ddtor
+00535A10 f CSun::CSun # singleton ctor
 00535AB0 f CSun::vf0_58 # rtti
 00535AC0 f CSun::vf0_5C # rtti
 00535BA0 f CSun::~CSun # rtti-dtor
@@ -1766,9 +1960,10 @@
 005360F0 f Town::~Town # rtti-dtor
 00536180 f shared_vf_ChooseAnim_42 # rtti-shared
 005361B0 f Town::`scalar deleting destructor' # rtti-ddtor
-005361D0 f Town::StaticInit # slot(CRenderObject3D)
+005361D0 f Town::vf38 # rtti
 005362A0 f Town::Render # slot(CUpdateObject)
 005365A0 f shared_vf_House_41 # rtti-shared
+005366E0 f Town::Town # ctor
 00536D80 f TownAnims::vf32 # rtti
 00536DD0 f TownAnims::vf33 # rtti
 00536DE0 f TownAnims::vf34 # rtti
@@ -1787,7 +1982,8 @@
 00537960 f TownAnims::vf0_1F8 # rtti
 005379C0 f TownAnims::vf37 # rtti
 00537AC0 f TownAnims::`scalar deleting destructor' # rtti-ddtor
-00537FB0 f TownAnims::StaticInit # slot(CRenderObject3D)
+00537FB0 f TownAnims::vf38 # rtti
+005384B0 f TownAnims::TownAnims # ctor
 00538CB0 f CWorldHeroCreature::vf30 # rtti
 00538D20 f CWorldHeroCreature::vf31 # rtti
 00538DC0 f CWorldHeroCreature::vf44 # rtti
@@ -1797,6 +1993,7 @@
 00539A00 f CWorldHeroCreature::~CWorldHeroCreature # rtti-dtor
 00539B40 f CWorldHeroCreature::vf12 # rtti
 00539B50 f CWorldHeroCreature::Render # slot(CUpdateObject)
+00539C70 f CWorldHeroCreature::CWorldHeroCreature # ctor
 0053A4A0 f CWorldHeroCreature::`scalar deleting destructor' # rtti-ddtor
 0053A6C0 f CWorldLevel::vf2 # rtti
 0053AA80 f CWorldLevel::vf11 # rtti
@@ -1812,6 +2009,7 @@
 0053E8C0 f CWorldLevel::vf8 # rtti
 0053E980 f nEvent::Event<AddInfoEventMsg>::ObjectListener<CWorldLevel>::vf0 # rtti
 0053E9C0 f nEvent::Event<evNPCInfo>::ObjectListener<CWorldLevel>::vf0 # rtti
+0053EB20 f CGroundPlane::CGroundPlane # ctor
 0053F020 f CWorldLevel::vf4 # rtti
 005406F0 f CEngine::WriteGraphicSettings # manual
 00541330 f LuaGlobal_CreateScreenForSave # lua-global
@@ -1822,6 +2020,7 @@
 00543040 f CWorldLevel::vf0_4 # rtti
 00543050 f CWorldLevel::vf0_74 # rtti
 005433F0 f CWorldLevel::`scalar deleting destructor' # rtti-ddtor
+00543410 f CWorldLevel::CWorldLevel # ctor
 00546610 f WorldLoadLine::Render # slot(CUpdateObject)
 005472B0 f WorldLoadLine::~WorldLoadLine # rtti-dtor
 00547360 f WorldLoadLine::`scalar deleting destructor' # rtti-ddtor
@@ -1883,18 +2082,24 @@
 0054AA80 f Lua_006C6920::GetPos # lua-method
 0054AF30 f NParticleSystem::CParticle::Update # manual
 0054B1F0 f NParticleSystem::CParticle::`scalar deleting destructor' # rtti-ddtor
-0054B510 f shared_vf_Arrow_29 # rtti-shared
+0054B510 f nullsub_8 # stub
 0054BEE0 f NParticleSystem::CParticleSystem::vf44 # rtti
 0054BFD0 f NParticleSystem::CParticleSystem::Update # slot(CUpdateObject)
 0054C330 f NParticleSystem::COrigin::`scalar deleting destructor' # rtti-ddtor
+0054C360 f NParticleSystem::COriginPoint::COriginPoint # ctor
+0054C3C0 f NParticleSystem::COriginFilledCircle::COriginFilledCircle # ctor
+0054C440 f NParticleSystem::COriginCircle::COriginCircle # ctor
+0054C4C0 f NParticleSystem::COriginFilledSphere::COriginFilledSphere # ctor
+0054C540 f NParticleSystem::COriginSphere::COriginSphere # ctor
 0054D390 f NParticleSystem::CParticleSystem::vf43 # rtti
-0054D3E0 f NParticleSystem::CParticleSystem::StaticInit # slot(CRenderObject3D)
+0054D3E0 f NParticleSystem::CParticleSystem::vf38 # rtti
 0054EB10 f NParticleSystem::COriginPoint::vf1 # rtti
 0054EC00 f NParticleSystem::COriginFilledCircle::vf1 # rtti
 0054EF60 f NParticleSystem::COriginCircle::vf1 # rtti
 0054F290 f NParticleSystem::COriginFilledSphere::vf1 # rtti
 0054F500 f NParticleSystem::COriginSphere::vf1 # rtti
 0054F7B0 f nEvent::Event<nEvent::NullInfo>::ObjectListener<NParticleSystem::CParticleSystem>::vf0 # rtti
+00550B20 f NParticleSystem::CParticleSystem::CParticleSystem # ctor
 00551460 f CLuaParticleSystem::~CLuaParticleSystem # rtti-dtor
 005519D0 f NParticleSystem::CParticleSystem::`scalar deleting destructor' # rtti-ddtor
 005520D0 f NParticleSystem::CParticleSystem::BuildQuads # manual
@@ -1912,6 +2117,8 @@
 00554D70 f NForest::Forest::~Forest # rtti-dtor
 00555040 f NForest::Forest::vf0_60 # rtti
 00555140 f NForest::Forest::`scalar deleting destructor' # rtti-ddtor
+00555690 f NForest::Forest::Forest # ctor
+005559C0 f CForests::PositionObject::PositionObject # ctor
 00555C80 f CSimpleStack<NForests::ST_NUM_DIST>::`scalar deleting destructor' # rtti-ddtor
 00555CC0 f CSimpleStack<ST_BOX>::`scalar deleting destructor' # rtti-ddtor
 00555D00 f CSimpleStack<CSimpleStack<NForests::ST_BASE_TREE>>::`scalar deleting destructor' # rtti-ddtor
@@ -1933,9 +2140,11 @@
 0055A810 f CForestsCreator::`scalar deleting destructor' # rtti-ddtor
 0055A830 f CForestsCreator::Generate # manual
 0055C500 f NForest::TreeMassive::CompareDist # manual
+0055C540 f NForest::TreeMassive::PositionObject::PositionObject # ctor
 0055C690 f NForest::TreeMassive::RenderTrees # manual
 0055CB20 f NForest::TreeMassive::vf3 # rtti
-0055CFD0 f InstancedGrass::Update # slot(CUpdateObject)
+0055CFD0 f nullsub_4 # stub
+0055D3C0 f NForest::TreeMassive::TreeMassive # ctor
 0055D990 f NForest::TreeMassive::~TreeMassive # rtti-dtor
 0055DF60 f NForest::TreeMassive::RenderBillboards # manual
 0055E820 f NForest::TreeMassive::Classify # manual
@@ -1944,7 +2153,7 @@
 0055EDB0 f NForest::TreeMassive::Update # slot(CUpdateObject)
 0055EDF0 f NForest::TreeMassive::Render # manual
 005608B0 f CSingleton<lua::CLua>::`scalar deleting destructor' # rtti-ddtor
-005609A0 f shared_vf_CDXUTControl_7 # rtti-shared
+005609A0 f returnfalse # stub
 005609B0 f lua::CLuaObject::vf4 # rtti
 00560A40 f lua::CLOBool::vf1 # rtti
 00560A80 f lua::CLONumber::vf3 # rtti
@@ -1953,8 +2162,14 @@
 00560B80 f lua::CLOString::`scalar deleting destructor' # rtti-ddtor
 00560BC0 f shared_vf_lua_CLOBool_0 # rtti-shared
 00560CA0 f lua::CLOLuaFunction::~CLOLuaFunction # rtti-dtor
+00560D20 f lua::CLOTable::CLOTable # ctor
+00561060 f lua::CLOTable::CLOTable # ctor
+005611E0 f lua::CLOTable::CLOTable # ctor
+00561270 f lua::CLOTable::CLOTable # ctor
 00561320 f lua::CLOTable::~CLOTable # rtti-dtor
+00561E70 f lua::CLua::CLua # singleton ctor
 00561F30 f lua::CLua::vf0_4 # rtti
+00561F40 f lua::CLOLuaFunction::CLOLuaFunction # ctor
 00561FB0 f lua::CLOLuaFunction::`scalar deleting destructor' # rtti-ddtor
 00562090 f lua::CLOTable::`scalar deleting destructor' # rtti-ddtor
 00562CB0 f lua::CLua::~CLua # rtti-dtor
@@ -2025,11 +2240,12 @@
 00570770 f Lua_006C69E0::Table # lua-method
 005707F0 f Lua_006C69E0::Init # lua-method
 00570820 f CLuaRenderObject::`scalar deleting destructor' # rtti-ddtor
+00571130 f CLuaWrapper::CLuaWrapper # ctor
 00571650 f CLuaWrapper::`scalar deleting destructor' # rtti-ddtor
 005717D0 f shared_vf_nSpell_AresSword_26 # rtti-shared
 005718B0 f nScript::RestoreStack::~RestoreStack # rtti-dtor
 00571920 f nScript::RestoreStack::`scalar deleting destructor' # rtti-ddtor
-005719B0 f shared_vf_nEvent_Event_AddInfoEventMsg__ObjectListener_CWorldLevel__2 # rtti-shared
+005719B0 f returnfalse_4 # stub
 00571A20 f nSpell::iSpell::vf35 # rtti
 00571B50 f Follower::Update # slot(CUpdateObject)
 00571C80 f Follower::vf10 # rtti
@@ -2076,6 +2292,7 @@
 00574D70 f shared_vf_nSpell_HermesBoots_29 # rtti-shared
 00574E30 f nSpell::Slow::`scalar deleting destructor' # rtti-ddtor
 00574EB0 f CSingleton<nSpell::SpellsManager>::`scalar deleting destructor' # rtti-ddtor
+005754B0 f nSpell::SpellsManager::SpellsManager # singleton ctor
 00575A30 f nSpell::SpellsManager::~SpellsManager # rtti-dtor
 00575AB0 f nSpell::SpellsManager::`scalar deleting destructor' # rtti-ddtor
 00575D80 f nSpell::Target::vf30 # rtti
@@ -2087,6 +2304,7 @@
 00576780 f Singleton<fs::FileSystemArchive>::`scalar deleting destructor' # rtti-ddtor
 00576C90 f fs::FileSystemArchive::~FileSystemArchive # rtti-dtor
 00576DB0 f fs::FileSystemArchive::`scalar deleting destructor' # rtti-ddtor
+00576DD0 f fs::FileSystemArchive::FileSystemArchive # ctor
 005775A0 f Singleton<fs::FileSystemDisk>::`scalar deleting destructor' # rtti-ddtor
 005782D0 f fs::FileSystemDisk::~FileSystemDisk # rtti-dtor
 00578880 f fs::FileSystemDisk::`scalar deleting destructor' # rtti-ddtor
@@ -2097,6 +2315,8 @@
 0057E280 f LuaGlobal_DoFile # lua-global
 0057E310 f LuaGlobal_using # lua-global
 0057EDE0 f LuaGlobal_FindSaveFiles # lua-global
+0057F1B0 f nScript::VM::VM # ctor
+0057F2F0 f nGUI::Background::Background # ctor
 0057F3B0 f nGUI::Background::Render # slot(CUpdateObject)
 0057F3C0 f nGUI::Background::`scalar deleting destructor' # rtti-ddtor
 0057F420 f nGUI::Image::`scalar deleting destructor' # rtti-ddtor
@@ -2137,6 +2357,7 @@
 005821A0 f nGUI::iGUIElement::vf66 # rtti
 00582200 f nGUI::iGUIElement::vf67 # rtti
 00582270 f Lua_006C6E50::SetCursorStateOnEnter # lua-method
+00582350 f nGUI::iGUIElement::iGUIElement # ctor
 005825A0 f Lua_006C6E50::SetToolTip # lua-method
 00582610 f nEvent::Event<nEvent::NullInfo>::ObjectListener<nGUI::iGUIElement>::vf0 # rtti
 00582670 f nGUI::ElementEventInfo::vf0 # rtti
@@ -2149,6 +2370,7 @@
 00582E90 f GUIScene::vf6 # rtti
 00582EC0 f GUIScene::vf16 # rtti
 00582EE0 f Lua_006C70B0::SetPos # lua-method
+00582FA0 f GUIScene::GUIScene # ctor
 00583300 f GUIScene::vf0_4 # rtti
 00583310 f GUIScene::vf0_74 # rtti
 00583560 f GUIScene::vf10 # rtti
@@ -2185,6 +2407,7 @@
 00585DC0 f nGUI::ItemIconDragDroper::`scalar deleting destructor' # rtti-ddtor
 00585DE0 f nGUI::ItemIconDragDroper::Update # slot(CUpdateObject)
 00586A70 f nGUI::ItemIcon::vf71 # rtti
+00586B10 f nGUI::Rect::Rect # ctor
 00586B30 f nGUI::Rect::~Rect # rtti-dtor
 00586D80 f nGUI::Rect::Render # slot(CUpdateObject)
 00586E50 f nGUI::Rect::vf0_214 # rtti
@@ -2229,6 +2452,7 @@
 00589060 f Lua_006C71B0::Changed # lua-method
 005890E0 f Lua_006C71B0::Filled # lua-method
 00589170 f Lua_006C71B0::Empty # lua-method
+00589200 f nGUI::TroopIconDragDroper::TroopIconDragDroper # ctor
 00589330 f nGUI::TroopIconDragDroper::~TroopIconDragDroper # rtti-dtor
 00589920 f nGUI::TroopIcon::`scalar deleting destructor' # rtti-ddtor
 00589940 f nGUI::TroopIcon::vf72 # rtti
@@ -2248,6 +2472,7 @@
 0058A2A0 f Lua_006C7120::GetTroop # lua-method
 0058A320 f nGUI::UnitIconDragDroper::~UnitIconDragDroper # rtti-dtor
 0058A3C0 f nGUI::UnitIcon::`scalar deleting destructor' # rtti-ddtor
+0058A3E0 f nGUI::UnitIconDragDroper::UnitIconDragDroper # ctor
 0058A540 f nGUI::UnitIconDragDroper::`scalar deleting destructor' # rtti-ddtor
 0058AF40 f Lua_006C7120::SetEvent # lua-method
 0058B000 f nGUI::UnitIcon::vf71 # rtti
@@ -2276,6 +2501,7 @@
 0058D100 f ChooseHeroRotator::~ChooseHeroRotator # rtti-dtor
 0058D200 f ChooseHeroRotator::vf0_214 # rtti
 0058D2A0 f ChooseHeroRotator::`scalar deleting destructor' # rtti-ddtor
+0058DB50 f ChooseHeroScene::ChooseHeroScene # ctor
 0058DC40 f ChooseHeroScene::~ChooseHeroScene # rtti-dtor
 0058DCB0 f ChooseHeroScene::vf2 # rtti
 0058DCF0 f ChooseHeroScene::vf17 # rtti
@@ -2286,6 +2512,7 @@
 0058E150 f ChoosePlaneShadow::vf3 # rtti
 0058E180 f ChoosePlaneShadow::vf4 # rtti
 0058E1B0 f ChoosePlaneShadow::Render # slot(CUpdateObject)
+0058E660 f ChoosePlaneShadow::ChoosePlaneShadow # ctor
 0058E890 f ChoosePlaneShadow::vf0_1DC # rtti
 0058E8A0 f ChoosePlaneShadow::~ChoosePlaneShadow # rtti-dtor
 0058E930 f ChoosePlaneShadow::`scalar deleting destructor' # rtti-ddtor
@@ -2293,6 +2520,7 @@
 005904B0 f DrawableBBox::Update # slot(CUpdateObject)
 00591ED0 f DrawableBBox::~DrawableBBox # rtti-dtor
 00592000 f DrawableBBox::`scalar deleting destructor' # rtti-ddtor
+00592020 f DrawableBBox::DrawableBBox # ctor
 00592AE0 f CDXUTControl::vf3 # rtti
 00592AF0 f CDXUTControl::vf8 # rtti
 00592B00 f CDXUTControl::vf9 # rtti
@@ -2338,17 +2566,22 @@
 00598A30 f CDXUTControl::vf16 # rtti
 00598A40 f CDXUTControl::vf17 # rtti
 00598A50 f CDXUTControl::~CDXUTControl # rtti-dtor
+00598AC0 f CDXUTStatic::CDXUTStatic # ctor
 00598B80 f shared_vf_CDXUTStatic_13 # rtti-shared
 00598BD0 f CDXUTControl::vf13 # rtti
 00598BF0 f CDXUTButton::vf12 # rtti
 00598C60 f CDXUTCheckBox::vf12 # rtti
 00598CC0 f CDXUTRadioButton::vf12 # rtti
+00598CD0 f CDXUTSlider::CDXUTSlider # ctor
 00598D50 f shared_vf_CDXUTButton_7 # rtti-shared
+00598E50 f CDXUTListBox::CDXUTListBox # ctor
 00598F20 f CDXUTListBox::vf1 # rtti
 00598F30 f CDXUTListBox::~CDXUTListBox # rtti-dtor
+00598F90 f CDXUTEditBox::CDXUTEditBox # ctor
 00599100 f CDXUTEditBox::vf18 # rtti
 00599110 f CDXUTEditBox::~CDXUTEditBox # rtti-dtor
 00599170 f CDXUTDialog::`scalar deleting destructor' # rtti-ddtor
+005998A0 f CDXUTComboBox::CDXUTComboBox # ctor
 00599920 f CDXUTComboBox::vf1 # rtti
 00599930 f CDXUTComboBox::~CDXUTComboBox # rtti-dtor
 00599990 f CDXUTControl::`scalar deleting destructor' # rtti-ddtor
@@ -2368,7 +2601,7 @@
 0059CDA0 f CDXUTEditBox::vf3 # rtti
 0059D770 f CDXUTDialog::Render # slot(CUpdateObject)
 005A0ED0 f EditorArmy::Render # slot(CUpdateObject)
-005A0F00 f EditorArmy::StaticInit # slot(CRenderObject3D)
+005A0F00 f EditorArmy::vf38 # rtti
 005A0FB0 f EditorArmy::~EditorArmy # rtti-dtor
 005A1070 f EditorArmy::vf0_1F4 # rtti
 005A10C0 f EditorArmy::vf43 # rtti
@@ -2378,13 +2611,15 @@
 005A8880 f EditorDialog::~EditorDialog # rtti-dtor
 005A89B0 f EditorDialog::vf0_240 # rtti
 005A89E0 f EditorDialog::`scalar deleting destructor' # rtti-ddtor
+005AC0F0 f EditorDialog::EditorDialog # ctor
 005AC240 f EditorTree::vf44 # rtti
 005AC360 f EditorTree::Update # slot(CUpdateObject)
 005AC3A0 f EditorTree::vf37 # rtti
 005AC430 f EditorTree::~EditorTree # rtti-dtor
 005AC590 f shared_vf_CNpc_42 # rtti-shared
 005AC5C0 f EditorTree::Render # slot(CUpdateObject)
-005AC620 f EditorTree::StaticInit # slot(CRenderObject3D)
+005AC620 f EditorTree::vf38 # rtti
+005AC790 f EditorTree::EditorTree # ctor
 005AC980 f EditorTree::`scalar deleting destructor' # rtti-ddtor
 005ACBE0 f EditorUtils::Render # slot(CUpdateObject)
 005ACD30 f Singleton<EditorUtils>::`scalar deleting destructor' # rtti-ddtor
@@ -2392,6 +2627,7 @@
 005B2610 f EditorUtils::~EditorUtils # rtti-dtor
 005B2700 f EditorUtils::vf0_38 # rtti
 005B2710 f EditorUtils::vf0_3C # rtti
+005B28E0 f EditorUtils::EditorUtils # ctor
 005B2D20 f EditorUtils::`scalar deleting destructor' # rtti-ddtor
 005B39D0 f EditorUtils::Update # slot(CUpdateObject)
 005B4050 f ScriptableRenderObject3D::~ScriptableRenderObject3D # rtti-dtor
@@ -2405,21 +2641,21 @@
 005B55C0 f InstancedGrassMap::CGrassMap::~CGrassMap # rtti-dtor
 005B5630 f InstancedGrassMap::CGrassMap::vf0_8 # rtti
 005B7BB0 f InstancedGrassMap::CGrassMap::`scalar deleting destructor' # rtti-ddtor
-005E3C48 f basic_debugbuf<char, std::char_traits<char>>::vf2 # rtti
-005E3C4E f basic_debugbuf<char, std::char_traits<char>>::vf3 # rtti
-005E3C54 f basic_debugbuf<char, std::char_traits<char>>::vf4 # rtti
-005E3C5A f basic_debugbuf<char, std::char_traits<char>>::vf5 # rtti
-005E3C60 f basic_debugbuf<char, std::char_traits<char>>::vf6 # rtti
-005E3C66 f basic_debugbuf<char, std::char_traits<char>>::vf7 # rtti
-005E3C6C f basic_debugbuf<char, std::char_traits<char>>::vf8 # rtti
-005E3C72 f basic_debugbuf<char, std::char_traits<char>>::vf9 # rtti
-005E3C78 f basic_debugbuf<char, std::char_traits<char>>::vf10 # rtti
-005E3C7E f basic_debugbuf<char, std::char_traits<char>>::vf11 # rtti
-005E3C84 f basic_debugbuf<char, std::char_traits<char>>::vf13 # rtti
+005E3C48 f j_?pbackfail@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHH@Z # stub
+005E3C4E f j_?showmanyc@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHXZ # stub
+005E3C54 f j_?underflow@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHXZ # stub
+005E3C5A f j_?uflow@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHXZ # stub
+005E3C60 f j_?xsgetn@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHPADH@Z # stub
+005E3C66 f j_?_Xsgetn_s@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHPADIH@Z # stub
+005E3C6C f j_?xsputn@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHPBDH@Z # stub
+005E3C72 f j_?seekoff@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAE?AV?$fpos@H@2@JHH@Z # stub
+005E3C78 f j_?seekpos@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAE?AV?$fpos@H@2@V32@H@Z # stub
+005E3C7E f j_?setbuf@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEPAV12@PADH@Z # stub
+005E3C84 f j_?imbue@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEXABVlocale@2@@Z # stub
 005E3E41 f type_info::`scalar deleting destructor' # rtti-ddtor
-005E3E90 f std::bad_alloc::vf1 # rtti
-005E3EBA f CSimpleStack<CBorder *>::~CSimpleStack # rtti-dtor
-005E3F84 f NSkinAnimation::CSkinMeshSubObject::Draw2 # slot(NSkinAnimation::CSkinMeshSubObject)
+005E3E90 f j_?what@exception@std@@UBEPBDXZ # stub
+005E3EBA f j_??_V@YAXPAX@Z # stub
+005E3F84 f j__purecall # stub
 00607B0C d std::bad_alloc::vftable # rtti
 00607B18 d std::logic_error::vftable # rtti
 00607B24 d std::length_error::vftable # rtti
@@ -3131,14 +3367,58 @@
 006C04B4 d g_pakXorKey # manual
 006C344C d g_camRotBattle # manual
 006C3DB8 d g_camRotWorld # manual
+006C8680 d CReadInterfaceDat::m_instance # singleton
+006C8684 d CInput::m_instance # singleton
+006C8688 d CCursor::m_instance # singleton
+006C868C d CBackBufferTexture::m_instance # singleton
+006C8708 d CCamera::m_instance # singleton
+006C884C d CConfig::m_instance # singleton
+006C88B0 d CConsole::m_instance # singleton
+006C88B8 d CEngine::m_instance # singleton
+006C88C8 d CMO3DManager::m_instance # singleton
+006C88DC d CTacticLevel::m_instance # singleton
+006C88E4 d CMapHeight::m_instance # singleton
+006C88E8 d CGrassMap::m_instance # singleton
+006C88EC d CClock::m_instance # singleton
+006C8900 d CFrustum::m_instance # singleton
+006C8904 d NCollisionDetection::CollisionManager::m_instance # singleton
+006C8908 d CGlobalTimer::m_instance # singleton
+006C890C d CFindFace::m_instance # singleton
+006C8920 d CMovingTroop::m_instance # singleton
+006C8924 d CameraInterpolator::m_instance # singleton
+006C8928 d nScript::Table::i_iterator::m_instance # singleton
 006C8958 d g_screenHeightF # manual
 006C895C d g_screenWidthF # manual
 006C8960 d g_screenHeight # manual
 006C8964 d g_screenWidth # manual
+006C8970 d CReadCursorDat::m_instance # singleton
 006C8C10 d g_d3dDevice # manual
+006C8C1C d CUsualCollector::m_instance # singleton
+006C8C20 d CManager<CTextureNode>::m_instance # singleton
 006C8C24 d g_updateRoot # manual
+006C8C28 d CFileSystem::m_instance # singleton
+006C8C2C d lua::CLua::m_instance # singleton
+006C8C34 d CReadRenderInfo::m_instance # singleton
+006C8C48 d CMessageManager::m_instance # singleton
+006C8C64 d NSkinAnimation::CSkeletonMO3DManager::m_instance # singleton
+006C8E20 d CDatFile::m_instance # singleton
+006C9010 d CReadInputCfg::m_instance # singleton
 006CA2C4 d g_currentCamera # manual
+006CA338 d nScript::Table::m_instance # singleton
+006CA344 d CameraScript::m_instance # singleton
+006CA348 d ActionScript::m_instance # singleton
+006CA490 d NSkinAnimation::CSkinAnimationManager::m_instance # singleton
 006CA4B4 d g_soundManager # manual
+006CA52C d nSpell::SpellsManager::m_instance # singleton
+006CA530 d CSpellBookScene::m_instance # singleton
+006CA708 d CSun::m_instance # singleton
+006CA70C d CSky::m_instance # singleton
+006CA710 d CClouds::m_instance # singleton
+006CA714 d nScript::Function::m_instance # singleton
+006CA8B8 d CGexField::m_instance # singleton
+006CA8D4 d CMoveAttackCircle::m_instance # singleton
+006CA8D8 d CTimeLine::m_instance # singleton
+006CA978 d KWFlares::m_instance # singleton
 00870F00 d g_visibleTrees # manual
 008CF048 d g_visibleTreeCount # manual
 008D1208 d g_debugPrint # manual

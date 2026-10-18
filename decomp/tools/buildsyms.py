@@ -10,6 +10,7 @@ ap = argparse.ArgumentParser()
 for k in ('exe', 'rtti', 'rttisym', 'lunar', 'luaglobals', 'lualib', 'out'): ap.add_argument('--' + k)
 ap.add_argument('--manual', action='append', default=[])
 ap.add_argument('--ported', action='append', default=[])
+ap.add_argument('--extra', action='append', default=[], help='FILE.sym: detected names (singletons, constructors), priority 80')
 a = ap.parse_args()
 sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(__file__))); from pe import PE
 p = PE(a.exe)
@@ -46,6 +47,8 @@ if a.lualib:
     for l in open(a.lualib):
         f, nm, fl, why = l.rstrip('\n').split('\t')
         if why in ('seed', 'table', 'string'): put(int(f, 16), 'f', nm, 'lua-lib(%s.c)' % fl, 50)
+for fn in a.extra:
+    for ad, k, n, c in readsym(fn): put(ad, k, n, c.split(',')[0] if c else 'extra', 80)
 for fn in a.ported:
     for ad, k, n, c in readsym(fn): put(ad, k, n, 'ported:' + c.split(' ')[0] if c else 'ported', 70)
 for fn in a.manual:

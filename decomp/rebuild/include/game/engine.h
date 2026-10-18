@@ -47,12 +47,38 @@ struct CInputKey {                           /* pressed key of this frame */
     unsigned char pressed;
 };
 
-struct CInput {                              /* CSingleton<CInput>, CUpdateObject at +4 */
+struct CInput {                              /* CSingleton<CInput> (0x7CC bytes), CUpdateObject at +4 */
     void *vftable;
     CUpdateObject updater;                   /* +004 */
-    char pad008[0x660 - 0x008];
-    CInputKey *keys;                         /* +660 */
+    char pad008[0x048 - 0x008];
+    unsigned char keyState[256];             /* +048 DirectInput keyboard state */
+    char pad148[0x660 - 0x148];
+    CInputKey *keys;                         /* +660 key events of this frame */
     unsigned keyCount;                       /* +664 */
+    char pad668[0x66C - 0x668];
+    int *mouseButtons;                       /* +66C button states (6 = released) */
+    unsigned mouseButtonCount;               /* +670 */
+    char pad674[0x7C4 - 0x674];
+    bool click;                              /* +7C4 */
+    bool doubleClick;                        /* +7C5 */
+    bool rightClick;                         /* +7C6 */
+    char pad7C7[0x7CC - 0x7C7];
+
+    static CInput *Instance();               /* 0x4215D0 */
+    void ResetMouse();                       /* 0x46CEB0 */
+    void ResetKeys();                        /* 0x46CEF0 */
+    void Reset();                            /* 0x46CF30 */
+};
+static_assert(sizeof(CInput) == 0x7CC, "CInput is 0x7CC bytes");
+
+struct CCursor {                             /* CSingleton<CCursor> (0x284 bytes) */
+    void **vftable;
+    static CCursor *Instance();              /* 0x421680 */
+    const float *ScreenPos() { return ((const float *(__thiscall *)(CCursor *))vftable[34])(this); }
+};
+
+struct CUpdateRoot {                         /* g_updateRoot */
+    void Update(float dt);                   /* 0x4DEED0 */
 };
 
 struct CConfig;
@@ -62,7 +88,9 @@ struct CEngine {
     void *musicManager;                      /* +04 NSound::MusicManager */
     void *unitSoundManager;                  /* +08 */
     void *ambientSoundManager;               /* +0C NSound::AmbientSoundManager */
-    char pad10[0x54 - 0x10];
+    char pad10[0x40 - 0x10];
+    double gamma;                            /* +40 */
+    char pad48[0x54 - 0x48];
     CConfig *config;                         /* +54 */
     char pad58[0x5C - 0x58];
     CScene *scene;                           /* +5C current scene */
@@ -86,6 +114,8 @@ struct CEngine {
     char padB0[0xD8 - 0xB0];
 
     static CEngine *Instance();              /* 0x42F160 */
+    void Init(const std::string &cmdLine);   /* 0x44F2E0 */
+    bool Step();                             /* 0x44FD50: one turn of the state machine; false = quit */
     void SetActive(bool active);             /* 0x449F80 */
     void ApplyGamma();                       /* 0x449E80 */
     void Screenshot();                       /* 0x449FE0 */

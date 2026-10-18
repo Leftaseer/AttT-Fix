@@ -19,5 +19,5 @@ def test_math_abs(h):
         h_ = h
         # allocate first so both runs see the same pointer
         setup(h_)
-        diffs += h.compare(0x004064D0, args=[st['L']])
+        diffs += h.compare(0x004064D0, args=[st['L']], ret='eax')
     return diffs

@@ -216,7 +216,7 @@ class Harness:
         eip = uc.reg_read(UC_X86_REG_EIP)
         if self.fault is None and eip != STOP:
             self.fault = 'did not return (EIP %08X)' % eip
-        res = {'eax': uc.reg_read(UC_X86_REG_EAX), 'edx': uc.reg_read(UC_X86_REG_EDX),
+        res = {'eax': uc.reg_read(UC_X86_REG_EAX), 'edx': uc.reg_read(UC_X86_REG_EDX), 'ecx': uc.reg_read(UC_X86_REG_ECX),
                'esp': uc.reg_read(UC_X86_REG_ESP) - sp, 'fault': self.fault,
                'ebx': uc.reg_read(UC_X86_REG_EBX), 'esi': uc.reg_read(UC_X86_REG_ESI),
                'edi': uc.reg_read(UC_X86_REG_EDI), 'ebp': uc.reg_read(UC_X86_REG_EBP)}
@@ -226,9 +226,36 @@ class Harness:
             res['st0'] = None
         return res
 
-    def compare(self, attt_addr, args=(), regs=None, setup=None, check_st0=True, mem=True, game_addr=None):
-        """Run original and replacement from the same state; return a list of differences (empty = equal)."""
-        va = game_addr if game_addr is not None else attt_addr
+    def game_address(self, attt_addr):
+        """AttT address -> address in the game under test (Valkyrie through symbols/attt2valk.tsv)"""
+        if self.orig.pe.FILE_HEADER.TimeDateStamp != 0x4883FB4F:
+            return attt_addr
+        if not hasattr(self, '_fmap'):
+            self._fmap = {}
+            for l in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'symbols', 'attt2valk.tsv')):
+                q = l.split('\t')
+                self._fmap[int(q[0], 16)] = int(q[1], 16)
+        return self._fmap[attt_addr]
+
+    def clobbered(self, va):
+        """volatile registers the original may change (symbols/<game>_functions.tsv)"""
+        if not hasattr(self, '_clob'):
+            game = 'valk' if self.orig.pe.FILE_HEADER.TimeDateStamp == 0x4883FB4F else 'attt'
+            self._clob = {}
+            for l in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'symbols', game + '_functions.tsv')):
+                if l[0] != '#':
+                    q = l.rstrip('\n').split('\t')
+                    self._clob[int(q[0], 16)] = set(x.lower() for x in q[4].split(',') if x)
+        return self._clob.get(va, {'eax', 'ecx', 'edx'})
+
+    def compare(self, attt_addr, args=(), regs=None, setup=None, ret='eax', mem=True, game_addr=None, check_st0=None):
+        """Run original and replacement from the same state; return a list of differences (empty = equal).
+        ret: registers holding the result ('eax', 'eax:edx', 'al', 'st0' or None for void); volatile registers
+        the original leaves unchanged are compared as well (callers compiled with /LTCG may rely on them)."""
+        if check_st0 is not None and ret == 'eax':
+            ret = 'eax' if not check_st0 else 'eax'
+
+        va = game_addr if game_addr is not None else self.game_address(attt_addr)
         entry = self.to_rebuilt(va)
         orig_head = self.orig.read(va, 5)
         new_head = bytes(self.uc.mem_read(entry, 5))
@@ -251,10 +278,18 @@ class Harness:
         self.restore(base)
         self.heap_ptr = heap0
         diffs = []
-        for k in ('fault', 'eax', 'edx', 'esp', 'ebx', 'esi', 'edi', 'ebp'):
-            if r1[k] != r2[k]:
-                diffs.append('%s: orig %r new %r' % (k, r1[k], r2[k]))
-        if check_st0 and r1['st0'] != r2['st0'] and not (r1['st0'] != r1['st0'] and r2['st0'] != r2['st0']):
+        keys = ['fault', 'esp', 'ebx', 'esi', 'edi', 'ebp']
+        keys += [r for r in ('eax', 'ecx', 'edx') if r not in self.clobbered(va)]
+        if ret in ('eax', 'eax:edx'):
+            keys.append('eax')
+        if ret == 'eax:edx':
+            keys.append('edx')
+        for k in dict.fromkeys(keys):
+            if r1.get(k) != r2.get(k):
+                diffs.append('%s: orig %r new %r' % (k, r1.get(k), r2.get(k)))
+        if ret == 'al' and (r1['eax'] & 0xFF) != (r2['eax'] & 0xFF):
+            diffs.append('al: orig %r new %r' % (r1['eax'] & 0xFF, r2['eax'] & 0xFF))
+        if ret == 'st0' and r1['st0'] != r2['st0'] and not (r1['st0'] != r1['st0'] and r2['st0'] != r2['st0']):
             diffs.append('st0: orig %r new %r' % (r1['st0'], r2['st0']))
         if mem:
             for (b, d1), (_, d2) in zip(m1, m2):
