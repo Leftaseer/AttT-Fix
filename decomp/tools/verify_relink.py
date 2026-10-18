@@ -35,7 +35,7 @@ for n, v, sz in osecs:
     ns = starts[n]
     a = v; end = v + sz
     while a < end:
-        if a in relocs and a + 4 <= end:
+        if a in relocs and a + 4 <= end and not any(r - 4 < a < r + 5 for r in repl):
             to = struct.unpack_from('<I', mo, a - bo)[0]
             tn = struct.unpack_from('<I', mn, ns + a - v - bn)[0]
             nrel += 1
@@ -48,7 +48,7 @@ for n, v, sz in osecs:
                 bad += 1
                 if bad < 20: print('reloc mismatch at %08X: orig %08X new %08X' % (a, to, tn))
             a += 4; continue
-        if any(r <= a < r + 5 for r in repl if r <= a < r + 5):
+        if any(r <= a < r + 9 for r in repl):   # the jmp and the pointer bytes it cuts through
             a += 1; continue
         if mo[a - bo] != mn[ns + a - v - bn]:
             bad += 1

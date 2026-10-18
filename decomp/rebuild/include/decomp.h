@@ -11,7 +11,8 @@
  *                               functions with /LTCG register conventions get a generated cdecl shim: list the
  *                               register parameters first, in the order ECX, EAX, EDX, EBX, ESI, EDI.
  *   ORIG_THISCALL / ORIG_FASTCALL / ORIG_STDCALL   the same for the standard conventions.
- *   ORIG_VAR(006C8964, int)     an original global (an lvalue); the build declares d_006C8964 for it.
+ *   ORIG_DATA(006C8964);        declares the original global at that address (d_006C8964)
+ *   ORIG_VAR(006C8964, int)     uses it as an lvalue of the given type
  *
  * Addresses are written as 8 hex digits without 0x so they can be pasted into identifiers.
  */
@@ -23,7 +24,18 @@
 #define DECOMP_C extern
 #endif
 
+#ifdef DECOMP_SCAN
+#define DECOMP(addr) __decomp_marker__(addr)
+#else
 #define DECOMP(addr)
+#endif
+/* code that differs between the games: #if DECOMP_GAME_ATTT / #if DECOMP_GAME_VALK (set by build.py) */
+#ifndef DECOMP_GAME_ATTT
+#define DECOMP_GAME_ATTT 0
+#endif
+#ifndef DECOMP_GAME_VALK
+#define DECOMP_GAME_VALK 0
+#endif
 
 #define ORIG_FN(addr, ret, params)       DECOMP_C ret __cdecl sub_##addr params
 #define ORIG_STDCALL(addr, ret, params)  DECOMP_C ret __stdcall sub_##addr params
@@ -31,6 +43,8 @@
 #define ORIG_THISCALL(addr, ret, params) DECOMP_C ret __thiscall sub_##addr params
 #define ORIG_CALL(addr) sub_##addr
 
+#define ORIG_DATA(addr) DECOMP_C char d_##addr[]
+/* ORIG_STR(addr) in game/common.h needs ORIG_DATA(addr) too */
 #define ORIG_VAR(addr, type) (*(type *)d_##addr)
 
 /* Lua 5.1 as configured in this engine: LUA_NUMBER is float */

@@ -8,7 +8,7 @@
 008D122C d g_luaState                            # lua_State* used by the engine
 00406CD0 f math_random                            # Lua math.random
 # engine / main loop
-0042F640 f WinMainLoop                           # GetMessage when [0x6BF6E0]==0
+0042F640 f GameMain                              # (lpCmdLine) window, engine, message loop
 0042EB70 f WndProc
 006BF6E0 d g_appActive
 0042F160 f CEngine::Instance                     # returns CEngine*; +0x2C tree crossfade start, +0x30 end, +0x34 visible, +0x38 TreeVisibleDelta
@@ -21,7 +21,24 @@
 00451E90 f CFileSystem::OpenPaks                 # Resource0..N.pak
 00449F80 f CEngine::SetActive                    # (bool) sound volume + game timer
 00449FE0 f CEngine::Screenshot
-004E4220 f CTimer::FrameWait
+0044BAB0 f CEngine::HandleMessage                # window messages for the current scene
+0044A930 f CEngine::CEngine
+00449E80 f CEngine::ApplyGamma
+0044FD50 f CEngine::Step                         # state machine, called by the main loop
+0044F2E0 f CEngine::Init
+0042E770 f IsOnlyInstance
+0042E930 f WriteErrorLog
+0042EA90 f ReportException
+0042F050 f CConsole::Instance
+0042F100 f CreateGamePath
+0042EFF0 f DestroySingletons
+0042F280 f CrashFilter                           # SEH filter: logs and reports the exception
+0042F9B0 f GameMainGuarded                       # __try GameMain __except CrashFilter
+00421220 f CGameException::CGameException
+0042ED10 f nCfg::GamePath::GamePath
+0042FA10 f WinMain
+004E4220 f CTimer::Wait                           # frame limiter, returns the frame time
+004E4200 f CTimer::Resume
 0044F75E d SkipIntroBranch                       # test al,al before the intro videos
 006C8C10 d g_d3dDevice
 006C8964 d g_screenWidth

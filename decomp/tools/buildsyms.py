@@ -50,6 +50,36 @@ for fn in a.ported:
     for ad, k, n, c in readsym(fn): put(ad, k, n, 'ported:' + c.split(' ')[0] if c else 'ported', 70)
 for fn in a.manual:
     for ad, k, n, c in readsym(fn): put(ad, k, n, 'manual', 100)
+# tiny functions are folded by the linker and shared by unrelated classes (ret stubs, _purecall thunks):
+# name them by what they do, above everything else
+import capstone
+_md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+def stub_name(ad):
+    code = p.read(ad, 16) or b''
+    ins = []
+    for i in _md.disasm(code, ad):
+        ins.append(i)
+        if i.mnemonic in ('ret', 'jmp') or len(ins) > 3: break
+    if not ins or ins[-1].mnemonic not in ('ret', 'jmp'): return None
+    if ins[-1].mnemonic == 'jmp':
+        o = ins[0]
+        if len(ins) == 1 and o.op_str.startswith('dword ptr ['):
+            v = int(o.op_str[11:-1], 16) if o.op_str[11:-1].startswith('0x') else None
+            if v in p.imports: return 'j_' + p.imports[v][1]
+        return None
+    body = ' '.join((i.mnemonic + ' ' + i.op_str).strip() for i in ins)
+    names = {'ret': 'nullsub', 'ret 4': 'nullsub_4', 'ret 8': 'nullsub_8', 'ret 0xc': 'nullsub_12',
+             'xor eax, eax ret': 'return0', 'xor eax, eax ret 4': 'return0_4', 'xor al, al ret': 'returnfalse',
+             'xor al, al ret 4': 'returnfalse_4', 'mov al, 1 ret': 'returntrue', 'mov al, 1 ret 4': 'returntrue_4',
+             'mov eax, 1 ret': 'return1', 'mov eax, ecx ret': 'returnthis', 'fldz ret': 'return0f'}
+    return names.get(body)
+fslot_all = set()
+for c in json.load(open(a.rtti)):
+    for v in c['vtables']:
+        for f in v['funcs']: fslot_all.add(int(f, 16))
+for ad in list(fslot_all) + [x for x, v in S.items() if v[0] == 'f']:
+    n = stub_name(ad)
+    if n: S[ad] = ('f', n, 'stub', 110)
 # slot propagation
 C = json.load(open(a.rtti))
 bases = {c['name']: set(b['name'] for b in c['bases']) for c in C}

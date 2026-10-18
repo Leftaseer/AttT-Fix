@@ -47,7 +47,10 @@ def load_functions(game):
     return f
 
 
-def load_map(name):
+TRUSTED = {'vtable', 'bytes', 'strings', 'luatable', 'lunar', 'luaglobal', 'export', 'attfix', 'manual'}
+
+
+def load_map(name, how=None):
     m = {}
     path = os.path.join(SYMS, name)
     if os.path.exists(path):
@@ -56,6 +59,8 @@ def load_map(name):
                 continue
             p = l.split('\t')
             m[int(p[0], 16)] = int(p[1], 16)
+            if how is not None:
+                how[int(p[0], 16)] = p[2].strip() if len(p) > 2 else ''
     return m
 
 
@@ -79,17 +84,19 @@ def split_params(text):
     return n
 
 
-def scan_sources(files):
-    """DECOMP annotations: (attt_addr, qualified name, param count, is_member) and ORIG_FN prototypes."""
+def scan_sources(files, cflags):
+    """DECOMP annotations: (attt_addr, qualified name, param count, is_member) and ORIG_* prototypes, from the
+    preprocessed sources (so #if DECOMP_GAME_ATTT / DECOMP_GAME_VALK is honoured)."""
     decomp, protos = [], {}
+    conv_of = {'__cdecl': 'FN', '__stdcall': 'STDCALL', '__fastcall': 'FASTCALL', '__thiscall': 'THISCALL'}
     for fn in files:
-        src = open(fn, encoding='utf-8').read()
-        src_nc = re.sub(r'/\*.*?\*/|//[^\n]*', lambda m: ' ' * len(m.group(0)), src, flags=re.S)
-        for m in re.finditer(r'DECOMP\(\s*([0-9A-Fa-f]{8})\s*\)\s*([^{;]*?)\b([A-Za-z_][\w:~<>]*)\s*(\((?:[^()]|\([^()]*\))*\))', src_nc):
-            addr, ret, name, params = int(m.group(1), 16), m.group(2), m.group(3), m.group(4)
+        extra = ['-x', 'c++', '-std=c++17'] if fn.endswith('.cpp') else ['-x', 'c', '-std=c11']
+        src = run(['clang'] + cflags + extra + ['-DDECOMP_SCAN', '-E', '-P', fn])
+        for m in re.finditer(r'__decomp_marker__\(\s*([0-9A-Fa-f]{8})\s*\)\s*([^{;]*?)\b([A-Za-z_][\w:~<>]*)\s*(\((?:[^()]|\([^()]*\))*\))', src):
+            addr, name, params = int(m.group(1), 16), m.group(3), m.group(4)
             decomp.append((addr, name, split_params(params), '::' in name, fn))
-        for m in re.finditer(r'ORIG_(FN|STDCALL|FASTCALL|THISCALL)\(\s*([0-9A-Fa-f]{8})\s*,[^,]*,\s*(\((?:[^()]|\([^()]*\))*\))\s*\)', src_nc):
-            protos[int(m.group(2), 16)] = (m.group(1), split_params(m.group(3)))
+        for m in re.finditer(r'(__cdecl|__stdcall|__fastcall|__thiscall)\s+sub_([0-9A-Fa-f]{8})\s*(\((?:[^()]|\([^()]*\))*\))', src):
+            protos[int(m.group(2), 16)] = (conv_of[m.group(1)], split_params(m.group(3)))
     return decomp, protos
 
 
@@ -115,8 +122,16 @@ def demangle(sym):
 
 
 def symbol_conv(sym, member):
-    if member or re.search(r'@@[A-Z][A-D]E', sym):
-        return 'thiscall'
+    """calling convention of a compiled function from its MSVC decorated name"""
+    cc = {'A': 'cdecl', 'E': 'thiscall', 'G': 'stdcall', 'I': 'fastcall'}
+    if sym.startswith('?'):
+        m = re.search(r'@@(Y)([AEGI])', sym)
+        if m:
+            return cc[m.group(2)]
+        m = re.search(r'@@([QAIUMEOGWKSC])([A-D]?)([AEGI])', sym)
+        if m:
+            return cc[m.group(3)]
+        return 'thiscall' if member else 'cdecl'
     if sym.startswith('@'):
         return 'fastcall'
     if re.match(r'^_\w+@\d+$', sym):
@@ -137,7 +152,7 @@ def adapter_asm(name, target, conv, regs, nstack, retpop, preserve):
     if conv == 'cdecl':
         for r in reversed(regs):
             a.append('\tpushl\t%%%s' % r.lower())
-    a.append('\tcalll\t%s' % target)
+    a.append('\tcalll\t"%s"' % target)
     if conv == 'cdecl' and nstack + len(regs):
         a.append('\taddl\t$%d, %%esp' % (4 * (nstack + len(regs))))
     for r in reversed(saved):
@@ -177,7 +192,8 @@ def main():
     work = os.path.join(os.path.dirname(os.path.abspath(a.out)), 'work_' + game)
     os.makedirs(work, exist_ok=True)
     funcs = load_functions(game)
-    fmap = load_map('attt2valk.tsv') if game == 'valk' else None
+    fhow = {}
+    fmap = load_map('attt2valk.tsv', fhow) if game == 'valk' else None
     dmap = load_map('attt2valk_data.tsv') if game == 'valk' else None
 
     def gaddr(x, data=False):
@@ -192,13 +208,16 @@ def main():
                    glob.glob(os.path.join(HERE, 'src', '**', '*.cpp'), recursive=True))
     if a.only:
         files = [f for f in files if os.path.basename(f) in a.only.split(',')]
-    decomp, protos = scan_sources(files)
 
-    # compile
-    objs = []
+    mingw_inc = os.environ.get('MINGW_INCLUDE', '/usr/i686-w64-mingw32/include')
     cflags = ['--target=i686-pc-windows-msvc', '-O2', '-march=pentium4', '-msse2', '-fms-extensions',
               '-fno-builtin', '-ffreestanding', '-fno-stack-protector', '-I', os.path.join(HERE, 'include'),
+              # Win32 / Direct3D 9 declarations from mingw-w64 work with the MSVC ABI this way
+              '-fgnuc-version=4.2.1', '-D_X86_', '-DWIN32_LEAN_AND_MEAN', '-isystem', mingw_inc,
               '-I', os.path.join(HERE, 'src'), '-D', 'DECOMP_GAME_%s=1' % game.upper()]
+    decomp, protos = scan_sources(files, cflags)
+    # compile
+    objs = []
     for fn in files:
         obj = os.path.join(work, os.path.relpath(fn, os.path.join(HERE, 'src')).replace(os.sep, '_') + '.obj')
         extra = ['-std=c++17', '-fno-exceptions', '-fno-rtti'] if fn.endswith('.cpp') else ['-std=c11']
@@ -227,6 +246,10 @@ def main():
             sys.exit('%s: cannot find the compiled symbol of %s (candidates: %s)' % (fn, name, cands))
         sym = cands[0]
         ga = gaddr(addr)
+        if game == 'valk' and fhow.get(addr) not in TRUSTED:
+            sys.exit('%s: %s: the Valkyrie match of %08X is only "%s"; check it and mark it "manual" in '
+                     'symbols/attt2valk.tsv, or exclude the function with #if DECOMP_GAME_ATTT'
+                     % (fn, name, addr, fhow.get(addr)))
         size, regs, retpop, clob = funcs.get(ga, (0, [], 0, {'EAX', 'ECX', 'EDX'}))
         preserve = {'EAX', 'ECX', 'EDX'} - clob - set(regs)
         conv = symbol_conv(sym, member)
@@ -243,6 +266,8 @@ def main():
         if direct and not preserve:
             repl.append((ga, sym))
             continue
+        if conv == 'stdcall' and not regs:
+            conv = 'thiscall'      # same stack handling: the target pops its stack arguments, no registers
         if conv not in ('cdecl', 'thiscall') or (conv == 'thiscall' and not set(regs) <= {'ECX'}):
             sys.exit('%s: %s: original %08X takes %s and pops %d bytes; write the replacement as a cdecl function '
                      'with the register parameters first (%s)' % (fn, name, ga, ','.join(regs) or 'no registers',
@@ -250,6 +275,34 @@ def main():
         ad = 'adp_%08X' % addr
         asm += adapter_asm(ad, sym, conv, regs if conv == 'cdecl' else [], max(nstack, 0), retpop, preserve)
         repl.append((ga, ad))
+    # C++ declarations of original functions (methods not decompiled yet): resolved by name through the
+    # symbol tables of the game (symbols/attt.sym and attt_manual.sym, AttT addresses)
+    byaddr = {}
+    for fn_ in ('attt.sym', 'attt_manual.sym'):          # the manual names win (and need no regeneration)
+        for l in open(os.path.join(SYMS, fn_), encoding='utf-8'):
+            if l[0] in '#S' or not l.strip():
+                continue
+            b_ = l.split('#')[0].split(None, 2)
+            if len(b_) == 3 and b_[1] == 'f':
+                byaddr[int(b_[0], 16)] = b_[2].strip().replace(' ', '_')
+    names = {}
+    resolved = set()
+    for ad_, n_ in byaddr.items():
+        names.setdefault(n_, []).append(ad_)
+    for s in sorted(undefined):
+        if not s.startswith('?'):
+            continue
+        q = demangle(s)
+        cands = names.get(q, [])
+        if len(cands) > 1:
+            sys.exit('%s is ambiguous in the symbol tables: %s' % (q, ' '.join('%08X' % c for c in cands)))
+        if cands:
+            ga = gaddr(cands[0])
+            regs = funcs.get(ga, (0, [], 0, set()))[1]
+            if [r for r in regs if r != 'ECX']:
+                sys.exit('%s (%08X) has an LTCG register convention: call it through ORIG_FN' % (q, cands[0]))
+            syms.append((ga, s))
+            resolved.add(s)
     # references to originals
     for s in sorted(undefined):
         m = re.match(r'^[_@]?(sub|d)_([0-9A-Fa-f]{8})(@\d+)?$', s)
@@ -257,7 +310,7 @@ def main():
             continue
         kind, addr = m.group(1), int(m.group(2), 16)
         if kind == 'd':
-            syms.append((gaddr(addr, True), s))
+            syms.append((gaddr(addr, True), s[1:] if s.startswith('_') else s))
             continue
         ga = gaddr(addr)
         size, regs, retpop, clob = funcs.get(ga, (0, [], 0, set()))
@@ -277,12 +330,6 @@ def main():
     with open(os.path.join(work, 'replace.txt'), 'w') as f:
         for ga, s in repl:
             f.write('%08X %s\n' % (ga, s[1:] if s.startswith('_') else s))
-    if len(asm) > 1:
-        gs = os.path.join(work, 'glue.s')
-        open(gs, 'w').write('\n'.join(asm) + '\n')
-        go = os.path.join(work, 'glue.obj')
-        run(['clang', '--target=i686-pc-windows-msvc', '-c', gs, '-o', go])
-        objs.append(go)
 
     run([sys.executable, '-I', os.path.join(TOOLS, 'exe2obj.py'), a.exe, work,
          '--syms', os.path.join(work, 'syms.txt'), '--replace', os.path.join(work, 'replace.txt')])
@@ -300,24 +347,42 @@ def main():
                 extra_map[q[0]] = q[1]
     add = {}
     for s_ in sorted(undefined):
-        if not s_.startswith('__imp_'):
+        if s_.startswith('__imp_'):
+            n = s_[6:]
+        elif re.match(r'^_\w+@\d+$', s_):
+            n = s_                         # stdcall call through the import thunk
+        else:
             continue
-        n = s_[6:]
         if not n.startswith('?'):
             n = n[1:]                      # C names carry the extra underscore
         if n in have:
             continue
-        dll = extra_map.get(n) or ('MSVCP80.dll' if 'std@@' in n else None)
+        base = n.split('@')[0] if '@' in n and not n.startswith('?') else None
+        if base and base in have:          # decorated stdcall name of a function the exe imports undecorated
+            dll = open(have[base]).read().splitlines()[0].split()[1]
+            add.setdefault(dll, []).append((n, base))
+            have[n] = have[base]
+            continue
+        dll = extra_map.get(n) or extra_map.get(base or '') or ('MSVCP80.dll' if 'std@@' in n else None)
         if not dll:
             sys.exit('new code imports %s: add "%s <dll>" to rebuild/imports_extra.txt' % (n, n))
-        add.setdefault(dll, []).append(n)
+        add.setdefault(dll, []).append((n, base or n))
+        have[n] = dll
     for dll, names in add.items():
         d = os.path.join(work, 'imports', dll.lower().replace('.dll', '') + '.def')
         if not os.path.exists(d):
             open(d, 'w').write('LIBRARY %s\nEXPORTS\n' % dll)
         with open(d, 'a') as f:
-            for n in names:
-                f.write('  %s == %s\n' % (n, n))
+            for n, imp in names:
+                f.write('  %s == %s\n' % (n, imp))
+    # direct calls of imported functions get the linker's jmp thunks at the end of .text: they fit into the
+    # unused tail of the original .text page, so .rdata does not move (checked after linking)
+    if len(asm) > 1:
+        gs = os.path.join(work, 'glue.s')
+        open(gs, 'w').write('\n'.join(asm) + '\n')
+        go = os.path.join(work, 'glue.obj')
+        run(['clang', '--target=i686-pc-windows-msvc', '-c', gs, '-o', go])
+        objs.append(go)
     libs = []
     for d in glob.glob(os.path.join(work, 'imports', '*.def')):
         lib = d[:-4] + '.lib'

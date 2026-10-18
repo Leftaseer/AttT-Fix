@@ -20,6 +20,11 @@ SCN = {'.text': 0x60000020, '.rdata': 0x40000040, '.data': 0xC0000040}
 ALIGN_4096 = 0x00D00000
 NRELOC_OVFL = 0x01000000
 
+def cname(n):
+    """COFF symbol of a C name (leading underscore); decorated C++/fastcall names are kept as they are"""
+    return n if n[0] in '?@' else '_' + n
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('exe'); ap.add_argument('outdir')
@@ -34,7 +39,7 @@ def main():
     for s in pe.sections:
         n = s.Name.rstrip(b'\0').decode()
         if n not in SCN: continue
-        size = max(s.Misc_VirtualSize, s.SizeOfRawData) if n != '.data' else s.Misc_VirtualSize
+        size = s.Misc_VirtualSize     # not the raw size: the rest of the last page is free for linker thunks
         size = (size + 15) & ~15
         b = bytearray(raw[s.PointerToRawData:s.PointerToRawData + min(s.SizeOfRawData, size)])
         b += bytes(size - len(b))
@@ -92,7 +97,7 @@ def main():
             s[4].append((off, sym(iat[tgt]), IMAGE_REL_I386_DIR32)); stats['iat'] += 1; continue
         if tgt in repl:
             struct.pack_into('<I', s[3], off, 0)
-            s[4].append((off, sym('_' + repl[tgt]), IMAGE_REL_I386_DIR32)); stats['repl'] += 1; continue
+            s[4].append((off, sym(cname(repl[tgt])), IMAGE_REL_I386_DIR32)); stats['repl'] += 1; continue
         ti = find_sec(tgt)
         if ti is None:
             if base <= tgt < first_va:
@@ -110,7 +115,7 @@ def main():
         si = find_sec(va); s = secs[si]; off = va - s[1]
         s[3][off] = 0xE9; struct.pack_into('<I', s[3], off + 1, 0)
         s[4] = [x for x in s[4] if not (off < x[0] + 4 and x[0] < off + 5)]
-        s[4].append((off + 1, sym('_' + new), IMAGE_REL_I386_REL32))
+        s[4].append((off + 1, sym(cname(new)), IMAGE_REL_I386_REL32))
 
     # public symbols for new code
     if a.syms:
@@ -122,7 +127,7 @@ def main():
             si = find_sec(va)
             if si is None or nm in seen: continue
             seen.add(nm)
-            sym(nm if nm[0] in '?@' else '_' + nm, va - secs[si][1], si + 1, 2)
+            sym(cname(nm), va - secs[si][1], si + 1, 2)
     # section start symbols and the entry point
     for i, s in enumerate(secs):
         sym('__orig%s_start' % s[0].replace('.', '_'), 0, i + 1, 2)
