@@ -143,6 +143,37 @@ def proto_text(name, pr):
     return '%s %s %s(%s)' % (ret, w, name, ', '.join(ps) if ps else 'void')
 
 
+STACKVAR = re.compile(r'^(\s+)([A-Za-z_][\w ]*?)\s*(\**)\s*\b((?:local|[a-zA-Z]+Stack)_([0-9a-f]+)(?:_\d+)?)\s*(\[\d+\])?;\s*$')
+
+
+def stack_frame(body):
+    """declarations of local_X / xStack_X at the top of the body -> macros over gh_frame; returns (body, names)"""
+    lines = body.split('\n')
+    decl, i = [], 1
+    while i < len(lines) and lines[i].strip():
+        m = STACKVAR.match(lines[i])
+        if m:
+            decl.append((i, m))
+        i += 1
+    if not decl:
+        return body, []
+    top = max(int(m.group(5), 16) for _, m in decl)
+    if top > 0x100000:
+        return None, 'stack frame too large'
+    out = []
+    for _, m in decl:
+        t, ptr, name, off, dim = m.group(2).strip(), m.group(3), m.group(4), int(m.group(5), 16), m.group(6)
+        at = '(gh_frame + %d)' % (top - off)
+        if dim:
+            out.append('#define %s (*(%s %s(*)%s)%s)' % (name, t, ptr, dim, at))
+        else:
+            out.append('#define %s (*(%s %s*)%s)' % (name, t, ptr, at))
+    drop = set(i for i, _ in decl)
+    rest = [l for k, l in enumerate(lines) if k not in drop]
+    rest.insert(1, '  unsigned char gh_frame[%d] __attribute__((aligned(16)));' % top)
+    return '\n'.join([rest[0]] + out + rest[1:]), [m.group(4) for _, m in decl]
+
+
 def body_of(code):
     i = code.find('{')
     if i < 0:
@@ -212,7 +243,7 @@ def convert(f, protos, skip, imports, impnames):
         return None, 'varargs'
     if len(params) != len(plist):
         return None, 'parameter count differs from the prototype'
-    if ret.startswith('undefined') and not re.search(r'\breturn\s+[^;\s]', body):
+    if ret.startswith('undefined') and not re.search(r'\breturn\s+[^;\s]', re.sub(r'/\*.*?\*/', '', body, flags=re.S)):
         ret = 'void'               # the decompiler guessed a result that the function never sets
     if ret == 'void' and a in eax_used:
         return None, 'callers use EAX, the decompiler found no result'
@@ -234,6 +265,12 @@ def convert(f, protos, skip, imports, impnames):
     if '::' in own:
         cls = own.rsplit('::', 1)[0]
         body = re.sub(r'(?<![\w:.>])(vftable(?:_\w+)?)\b', cls + r'::\1', body)
+    # stack variables at their original offsets: the decompiler splits buffers and structures into scalars that the
+    # original kept side by side (and walks across them with pointers), so all named stack variables become views
+    # of one frame array laid out as the original stack frame (local_1c is at -0x1c from the return address)
+    body, frame_names = stack_frame(body)
+    if body is None:
+        return None, frame_names
     # labels keep their names (the address substitution below is for LAB_ used as a value)
     body = re.sub(r'\bgoto\s+(LAB_[0-9a-fA-F]{8})\b', r'goto L\1', body)
     body = re.sub(r'^(\s*)(LAB_[0-9a-fA-F]{8}):', r'\1L\2:', body, flags=re.M)
@@ -331,7 +368,7 @@ def convert(f, protos, skip, imports, impnames):
     # macros of this function only (the same global can have another type in another function)
     macros = [d for d in decls if d.startswith('#define')]
     decls = [d for d in decls if not d.startswith('#define')]
-    undefs = ['#undef ' + d.split()[1] for d in macros]
+    undefs = ['#undef ' + d.split()[1] for d in macros] + ['#undef ' + n for n in frame_names]
     text = '/* @func %08X%s */\n%s\nDECOMP(%08X)\n%s\n%s\n%s\n' % (a, ' custom' if custom else '', '\n'.join(macros), a, head, body.strip(), '\n'.join(undefs))
     return (a, decls, text), None
 

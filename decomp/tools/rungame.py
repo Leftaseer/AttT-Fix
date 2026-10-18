@@ -71,7 +71,10 @@ for act in [s.strip() for s in script.split(';') if s.strip()]:
     elif q[0] == 'focus':                   # give the game window the keyboard and mouse (no window manager)
         r = subprocess.run(['xdotool', 'search', '--onlyvisible', '--name', '.'], env=env, capture_output=True, text=True)
         for w in r.stdout.split():
-            xdo('windowfocus', '--sync', w)
+            n = subprocess.run(['xdotool', 'getwindowname', w], env=env, capture_output=True, text=True).stdout.strip()
+            print('window', w, repr(n), flush=True)
+            if 'scension' in n or 'ATThrone' in n or 'Trone' in n:
+                xdo('windowfocus', '--sync', w)
     elif q[0] == 'shot':
         subprocess.run(['import', '-window', 'root', os.path.join(SHOTS, '%s_%s.png' % (name, q[1]))], env=env,
                        stderr=subprocess.DEVNULL, timeout=30)

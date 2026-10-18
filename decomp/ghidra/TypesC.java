@@ -142,7 +142,7 @@ public class TypesC {
                 if (c.isBitFieldComponent() || c.getLength() == 0) continue;
                 if (c.getOffset() < off) continue;
                 if (c.getOffset() > off) { gap(b, off, c.getOffset()); off = c.getOffset(); }
-                String fn = c.getFieldName() != null ? san(c.getFieldName()) : String.format("field_0x%x", c.getOffset());
+                String fn = c.getFieldName() != null ? san(c.getFieldName()) : c.getDefaultFieldName();
                 DataType ct = c.getDataType();
                 String dl = (ct == null || (ct.getLength() > 0 && ct.getLength() != c.getLength()))
                     ? "unsigned char " + fn + "[" + c.getLength() + "]" : decl(ct, fn);
