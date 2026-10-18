@@ -218,6 +218,7 @@ def main():
     work = os.path.join(os.path.dirname(os.path.abspath(a.out)), 'work_' + game)
     os.makedirs(work, exist_ok=True)
     funcs = load_functions(game)
+    machine_funcs = dict(funcs)    # as the machine code is; funcs may get the generated code's register lists
     native_refs = set()     # filled for auto-decompiled code of Valkyrie (its own addresses)
     fhow = {}
     fmap = load_map('attt2valk.tsv', fhow) if game == 'valk' else None
@@ -395,7 +396,7 @@ def main():
             sys.exit('%s is ambiguous in the symbol tables: %s' % (q, ' '.join('%08X' % c for c in cands)))
         if cands:
             ga = gaddr(cands[0])
-            regs = funcs.get(ga, (0, [], 0, set()))[1]
+            regs = machine_funcs.get(ga, (0, [], 0, set()))[1]
             if [r for r in regs if r != 'ECX']:
                 sys.exit('%s (%08X) has an LTCG register convention: call it through ORIG_FN' % (q, cands[0]))
             syms.append((ga, s))

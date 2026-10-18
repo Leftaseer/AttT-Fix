@@ -50,12 +50,21 @@ machine = {}       # addr -> (register inputs, bytes popped by ret) from symbols
 convs = {}         # addr -> (registers in parameter order, ret pop) of the prototypes as written out
 
 
+stack_slots = {}    # addr -> stack slots the machine code uses (tools/stackparams.py, exact ones only)
+
+
 def load_machine(path):
     for l in open(path):
         if l.startswith('#'):
             continue
         q = l.rstrip('\n').split('\t')
         machine[int(q[0], 16)] = (set(x for x in q[2].split(',') if x and x != 'EBP'), int(q[3] or 0))
+    sp = path.replace('_functions.tsv', '_stackparams.tsv')
+    if os.path.exists(sp):
+        for l in open(sp):
+            q = l.rstrip('\n').split('\t')
+            if l[0] != '#' and q[2] == 'exact':
+                stack_slots[int(q[0], 16)] = int(q[1])
 
 
 def fit_convention(a, pr):
@@ -77,6 +86,8 @@ def fit_convention(a, pr):
     if not regs_in <= set(regs):
         return 'reads registers the prototype lacks (%s)' % ','.join(sorted(regs_in - set(regs)))
     stack = sum(8 if t.strip() in WIDE else 4 for (t, _), s in zip(plist, storage) if s == 'stack')
+    if pop == 0 and stack_slots.get(a, 0) * 4 > stack:
+        return 'stack parameters the decompiler missed'
     native = {'__cdecl': ([], 0), '__stdcall': ([], stack), '__thiscall': (['ECX'], stack),
               '__fastcall': (['ECX', 'EDX'][:len(regs)], stack)}.get(cc)
     if not custom and native and native[0] == regs and native[1] == pop and not va:
@@ -287,13 +298,11 @@ def convert(f, protos, skip, imports, impnames):
     body = re.sub(r'\b([A-Za-z_]\w*)\._(\d+)_(\d+)_\b', piece, body)
     if bad:
         return None, 'piece of a variable'
-    # void * dereferenced as a value (the decompiler means a dword)
+    # void * dereferenced: the decompiler did not know the type of the value (int or float), neither do we
     for t_, n_ in [(x.rsplit(' ', 1) + [''])[:2] for x in params]:
         n_ = n_.lstrip('*')
-        if t_.strip() == 'void' and re.search(r'(?<![\w)])\*%s\b' % re.escape(n_), body) and \
-                not re.search(r'(?<![\w)*])%s\s*(\[|\+|-(?!>))' % re.escape(n_), body):
-            params = [('undefined4 *' + n_) if x.endswith(' *' + n_) or x.endswith('*' + n_) else x for x in params]
-            head = re.sub(r'\bvoid \*%s\b' % re.escape(n_), 'undefined4 *' + n_, head)
+        if t_.strip() == 'void' and re.search(r'(?<![\w)])\*%s\b' % re.escape(n_), body):
+            return None, 'void pointer dereferenced'
     # addresses printed as symbol names
     def addr_ref(m):
         return '((void *)d_%s)' % m.group(2).upper()

@@ -2,7 +2,10 @@
 // bytes each function pops (ret N).  The decompiler often finds fewer parameters (one is only addressed, not
 // read) or more; then every caller is decompiled with arguments missing or invented.  Functions with ret N and
 // a caller-pop convention become __stdcall.  Custom storage (ApplyRegParams) is left alone.
-// Arg: functions.tsv
+// Caller-pop functions (no ret N) get the stack parameters their machine code uses (stackparams.py), when the
+// decompiler found fewer: a parameter that is only passed on to a call is easily missed.
+// Args: functions.tsv [stackparams.tsv]
+import ghidra.program.model.listing.VariableStorage;
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.data.*;
@@ -66,6 +69,54 @@ public class FixStackParams extends GhidraScript {
                     if (r0 > 0) removed++;
                 } catch (Exception e) { fail++; }
             }
+        }
+        if (getScriptArgs().length > 1) {
+            Map<Long, Integer> pops = new HashMap<>();
+            try (BufferedReader r = new BufferedReader(new FileReader(getScriptArgs()[0]))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (line.startsWith("#")) continue;
+                    String[] p = line.split("\t", -1);
+                    pops.put(Long.parseLong(p[0], 16), p[3].isEmpty() ? 0 : Integer.parseInt(p[3]));
+                }
+            }
+            int grown = 0, gfail = 0;
+            try (BufferedReader r = new BufferedReader(new FileReader(getScriptArgs()[1]))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (line.startsWith("#")) continue;
+                    String[] p = line.split("\t", -1);
+                    long a = Long.parseLong(p[0], 16);
+                    int slots = Integer.parseInt(p[1]);
+                    if (!p[2].equals("exact") || pops.getOrDefault(a, 0) != 0) continue;
+                    Function f = getFunctionAt(toAddr(a));
+                    if (f == null || f.isThunk() || f.isExternal()) continue;
+                    int have = 0;
+                    for (Parameter q : f.getParameters())
+                        if (q.isStackVariable()) have = Math.max(have, (q.getStackOffset() - 4 + q.getLength() + 3) / 4);
+                    if (have >= slots) continue;
+                    try {
+                        boolean custom = f.hasCustomVariableStorage();
+                        List<Variable> all = new ArrayList<>();
+                        for (Parameter q : f.getParameters()) {
+                            if (q.isAutoParameter()) continue;
+                            all.add(custom ? new ParameterImpl(q.getName(), q.getDataType(), q.getVariableStorage(), currentProgram)
+                                           : new ParameterImpl(q.getName(), q.getDataType(), currentProgram));
+                        }
+                        for (int k = have; k < slots; k++) {
+                            String n = "param_" + (all.size() + 1);
+                            all.add(custom ? new ParameterImpl(n, Undefined4DataType.dataType,
+                                                 new VariableStorage(currentProgram, 4 + 4 * k, 4), currentProgram)
+                                           : new ParameterImpl(n, Undefined4DataType.dataType, currentProgram));
+                        }
+                        f.updateFunction(f.getCallingConventionName(), f.getReturn(), all,
+                            custom ? Function.FunctionUpdateType.CUSTOM_STORAGE : Function.FunctionUpdateType.DYNAMIC_STORAGE_FORMAL_PARAMS,
+                            true, SourceType.ANALYSIS);
+                        grown++;
+                    } catch (Exception e) { gfail++; }
+                }
+            }
+            println("caller-pop functions given the stack parameters they use: " + grown + ", failed " + gfail);
         }
         println("parameters added to " + added + ", removed from " + removed + ", made __stdcall " + conv + ", failed " + fail);
     }

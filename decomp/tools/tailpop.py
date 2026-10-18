@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Bytes popped by functions that end in a tail jump: such a function has no ret of its own, so regparams.py
+finds no ret N, but its callers' stack is cleaned by the function it jumps to (thiscall wrappers like
+'mov ecx, [ecx+1C4]; jmp Method').  Follows jmp chains to a function with a known ret and writes the pop into
+column 4 of functions.tsv (in place).
+
+usage: tailpop.py EXE REGPARAMS.tsv symbols/GAME_functions.tsv"""
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from pe import PE
+import capstone
+from capstone import x86
+
+pe = PE(sys.argv[1])
+known = {}          # addr -> pop, for functions with a ret
+for l in open(sys.argv[2]):
+    q = l.rstrip('\n').split('\t')
+    if len(q) > 2 and q[2]:
+        known[int(q[0], 16)] = int(q[2].split(',')[0])
+rows, sizes = [], {}
+for l in open(sys.argv[3]):
+    rows.append(l)
+    if l[0] != '#':
+        q = l.split('\t')
+        sizes[int(q[0], 16)] = int(q[1])
+md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+md.detail = True
+tails = {}          # function without a ret -> set of functions it tail-jumps to
+for a, size in sizes.items():
+    if a in known:
+        continue
+    t = set()
+    try:
+        for i in md.disasm(pe.read(a, size), a):
+            if i.mnemonic == 'jmp' and i.operands[0].type == x86.X86_OP_IMM:
+                d = i.operands[0].imm
+                if d in sizes and not (a <= d < a + size):
+                    t.add(d)
+    except Exception:
+        pass
+    if t:
+        tails[a] = t
+
+
+def pop_of(a, depth=0):
+    if a in known:
+        return known[a]
+    if depth > 8 or a not in tails:
+        return None
+    ps = set(pop_of(d, depth + 1) for d in tails[a])
+    return ps.pop() if len(ps) == 1 else None
+
+
+fixed = 0
+with open(sys.argv[3], 'w') as f:
+    for l in rows:
+        if l[0] != '#':
+            q = l.rstrip('\n').split('\t')
+            a = int(q[0], 16)
+            if a not in known and a in tails:
+                p = pop_of(a)
+                if p is not None and str(p) != q[3]:
+                    q[3] = str(p)
+                    fixed += 1
+                    l = '\t'.join(q) + '\n'
+        f.write(l)
+print('ret pop taken from the tail-jump target for %d functions' % fixed)

@@ -235,8 +235,8 @@ def main():
         else:
             cc, custom, ret, plist = pr
             entry = h.to_rebuilt(va)
-            head = h.orig.read(va, 5)
-            h.new_head = bytes(h.uc.mem_read(entry, 5))
+            head = h.orig.read(va, max(5, size))          # the whole body: the build changes more than the jmp
+            h.new_head = bytes(h.uc.mem_read(entry, len(head)))
             h.cov = set()
             h.cov_lo, h.cov_hi = entry, entry + size
             n_ok = n_same_fault = 0
@@ -281,7 +281,8 @@ def main():
                 for i, (x, y) in enumerate(zip(m1, m2)):
                     if x != y:
                         j = next(j for j in range(len(x)) if x[j] != y[j])
-                        diff.append('mem region %d +%#x' % (i, j))
+                        base = (h.regions + [(HEAP, 0), (h.arg_sp, 0)])[i][0]
+                        diff.append('mem %08X: %s / %s' % (base + j, x[j:j + 8].hex(), y[j:j + 8].hex()))
                         break
                 if diff:
                     status, detail = 'differs', 'case %d: %s' % (case, ', '.join(diff))
