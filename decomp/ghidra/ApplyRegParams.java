@@ -13,7 +13,21 @@ public class ApplyRegParams extends GhidraScript {
     static final String[] ORDER = {"ECX", "EAX", "EDX", "EBX", "ESI", "EDI"};
     @Override
     public void run() throws Exception {
-        int thisc = 0, fast = 0, custom = 0, fail = 0;
+        int thisc = 0, fast = 0, custom = 0, fail = 0, reset = 0;
+        // start from the conventions' own storage: earlier runs may have used other register lists
+        for (Function f : currentProgram.getFunctionManager().getFunctions(true)) {
+            if (!f.hasCustomVariableStorage()) continue;
+            try {
+                List<Variable> keep = new ArrayList<>();
+                for (Parameter q : f.getParameters())
+                    if (q.isStackVariable()) keep.add(new ParameterImpl(q.getName(), q.getDataType(), currentProgram));
+                f.updateFunction(f.getCallingConventionName(), f.getReturn(), keep,
+                    Function.FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, true, SourceType.ANALYSIS);
+                f.setCustomVariableStorage(false);
+                reset++;
+            } catch (Exception e) { fail++; }
+        }
+        println("reset " + reset + " functions with custom storage");
         try (BufferedReader r = new BufferedReader(new FileReader(getScriptArgs()[0]))) {
             String line;
             while ((line = r.readLine()) != null) {

@@ -29,13 +29,18 @@ def omap(va):
         if n in starts and v <= va <= v + sz: return starts[n] + va - v
     if bo <= va < osecs[0][1]: return bn + va - bo
 relocs = set(bo + e.rva for b in po.DIRECTORY_ENTRY_BASERELOC for e in b.entries if e.type == 3)
+skip = set()
+near = set()
+for r in repl:
+    skip.update(range(r, r + 9))       # the jmp and the pointer bytes it cuts through
+    near.update(range(r - 3, r + 5))
 bad = 0; checked = 0; nrel = 0
 for n, v, sz in osecs:
     if n not in starts: continue
     ns = starts[n]
     a = v; end = v + sz
     while a < end:
-        if a in relocs and a + 4 <= end and not any(r - 4 < a < r + 5 for r in repl):
+        if a in relocs and a + 4 <= end and a not in near:
             to = struct.unpack_from('<I', mo, a - bo)[0]
             tn = struct.unpack_from('<I', mn, ns + a - v - bn)[0]
             nrel += 1
@@ -48,7 +53,7 @@ for n, v, sz in osecs:
                 bad += 1
                 if bad < 20: print('reloc mismatch at %08X: orig %08X new %08X' % (a, to, tn))
             a += 4; continue
-        if any(r <= a < r + 9 for r in repl):   # the jmp and the pointer bytes it cuts through
+        if a in skip:
             a += 1; continue
         if mo[a - bo] != mn[ns + a - v - bn]:
             bad += 1

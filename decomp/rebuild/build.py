@@ -112,13 +112,34 @@ def nm_symbols(obj):
     return defined, undefined
 
 
+_demangled = {}
+
+
+def demangle_all(syms):
+    """demangle many MSVC names with one llvm-undname run (it prints: input, demangled, empty line)"""
+    todo = sorted(set(s for s in syms if s.startswith('?') and s not in _demangled))
+    if todo:
+        out = subprocess.run(['llvm-undname'], input='\n'.join(todo) + '\n', capture_output=True, text=True).stdout
+        lines = out.split('\n')
+        i = 0
+        while i + 1 < len(lines):
+            src, d = lines[i], lines[i + 1]
+            if src in todo:
+                m = re.search(r'([\w:~<>]+)\(', d)
+                _demangled[src] = m.group(1) if m else d
+                i += 3
+            else:
+                i += 1
+        for s in todo:
+            _demangled.setdefault(s, s)
+
+
 def demangle(sym):
     if not sym.startswith('?'):
         return sym.lstrip('_@').split('@')[0]
-    out = subprocess.run(['llvm-undname'], input=sym + '\n', capture_output=True, text=True).stdout.strip().splitlines()
-    d = out[-1] if out else sym
-    m = re.search(r'([\w:~<>]+)\(', d)
-    return m.group(1) if m else d
+    if sym not in _demangled:
+        demangle_all([sym])
+    return _demangled[sym]
 
 
 def symbol_conv(sym, member):
@@ -142,7 +163,7 @@ def symbol_conv(sym, member):
 def adapter_asm(name, target, conv, regs, nstack, retpop, preserve):
     """Entry used by original callers.  conv 'cdecl': target(regs..., stack args...), caller pops;
     conv 'thiscall': ECX passes through, target pops the stack args.  Volatile registers in preserve are kept."""
-    a = ['\t.globl\t%s' % name, '%s:' % name]
+    a = ['\t.globl\t_%s' % name, '_%s:' % name]
     saved = [r for r in ('EAX', 'ECX', 'EDX') if r in preserve]
     for r in saved:
         a.append('\tpushl\t%%%s' % r.lower())
@@ -183,6 +204,8 @@ def main():
     ap.add_argument('--out', default=os.path.join(HERE, 'build', 'ATThrone.exe'))
     ap.add_argument('--laa', action='store_true', help='mark the result Large Address Aware')
     ap.add_argument('--only', help='comma-separated source files (default: all of rebuild/src)')
+    ap.add_argument('--auto', help='folder made by tools/autodecomp.py for this game (addresses of the game itself)')
+    ap.add_argument('--auto-list', help='only these auto-decompiled functions (file with one address per line)')
     a = ap.parse_args()
 
     pe = PE(a.exe)
@@ -192,12 +215,13 @@ def main():
     work = os.path.join(os.path.dirname(os.path.abspath(a.out)), 'work_' + game)
     os.makedirs(work, exist_ok=True)
     funcs = load_functions(game)
+    native_refs = set()     # filled for auto-decompiled code of Valkyrie (its own addresses)
     fhow = {}
     fmap = load_map('attt2valk.tsv', fhow) if game == 'valk' else None
     dmap = load_map('attt2valk_data.tsv') if game == 'valk' else None
 
     def gaddr(x, data=False):
-        if game == 'attt':
+        if game == 'attt' or (x in native_refs):
             return x
         m = (dmap if data else fmap) or {}
         if x not in m:
@@ -223,6 +247,45 @@ def main():
         extra = ['-std=c++17', '-fno-exceptions', '-fno-rtti'] if fn.endswith('.cpp') else ['-std=c11']
         run(['clang'] + cflags + extra + ['-c', fn, '-o', obj])
         objs.append(obj)
+    native = set()          # DECOMP addresses that are already addresses of this game (auto-decompiled code)
+    custom_auto = {}        # auto functions written as cdecl with the register parameters first
+    if a.auto:
+        allow = None
+        if a.auto_list:
+            allow = set(int(l.split()[0], 16) for l in open(a.auto_list) if l.strip() and not l.startswith('#'))
+        aflags = ['--target=i686-pc-windows-msvc', '-O1', '-march=pentium4', '-msse2', '-fms-extensions', '-ffreestanding',
+                  '-fno-builtin', '-fno-stack-protector', '-x', 'c', '-std=gnu11', '-w',
+                  '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types',
+                  '-Wno-error=incompatible-function-pointer-types', '-Wno-error=int-to-pointer-cast', '-Wno-error=return-type',
+                  '-I', os.path.join(HERE, 'include'), '-I', os.path.abspath(a.auto)]
+        hand = set(d[0] for d in decomp) if game == 'attt' else set(gaddr(d[0]) for d in decomp)
+        for fn in sorted(glob.glob(os.path.join(a.auto, 'auto_*.c'))):
+            src = fn
+            if allow is not None:
+                text = open(fn, encoding='utf-8').read()
+                parts = re.split(r'(?=^/\* @func [0-9A-F]{8}(?: custom)? \*/$)', text, flags=re.M)
+                head, funcs_ = parts[0], parts[1:]
+                keep = [x for x in funcs_ if int(x[9:17], 16) in allow]
+                if not keep:
+                    continue
+                src = os.path.join(work, 'sel_' + os.path.basename(fn))
+                open(src, 'w', encoding='utf-8').write(head + ''.join(keep))
+            for m in re.finditer(r'^/\* @func ([0-9A-F]{8}) custom \*/$', open(src, encoding='utf-8').read(), flags=re.M):
+                custom_auto[int(m.group(1), 16)] = True
+            pre = run(['clang'] + aflags + ['-DDECOMP_SCAN', '-E', '-P', src])
+            for m in re.finditer(r'__decomp_marker__\(\s*([0-9A-Fa-f]{8})\s*\)\s*([^{;]*?)\b(f_[0-9A-F]{8})\s*(\((?:[^()]|\([^()]*\))*\))', pre):
+                ad = int(m.group(1), 16)
+                if ad in hand:
+                    continue
+                cm = re.search(r'__(cdecl|stdcall|fastcall|thiscall)', m.group(2))
+                decomp.append((ad, m.group(3), split_params(m.group(4)), False, src, cm.group(1) if cm else 'cdecl'))
+                native.add(ad)
+            for m in re.finditer(r'(__cdecl|__stdcall|__fastcall|__thiscall)\s+sub_([0-9A-Fa-f]{8})\s*(\((?:[^()]|\([^()]*\))*\))', pre):
+                conv_of = {'__cdecl': 'FN', '__stdcall': 'STDCALL', '__fastcall': 'FASTCALL', '__thiscall': 'THISCALL'}
+                protos.setdefault(int(m.group(2), 16), (conv_of[m.group(1)], split_params(m.group(3))))
+            obj = os.path.join(work, 'auto_' + os.path.basename(fn) + '.obj')
+            run(['clang'] + aflags + ['-c', src, '-o', obj])
+            objs.append(obj)
     rt = os.path.join(work, 'rt_support.obj')
     run(['clang'] + cflags + ['-c', os.path.join(HERE, 'rt_support.c'), '-o', rt])
     objs.append(rt)
@@ -235,30 +298,37 @@ def main():
     undefined -= defined
 
     syms, repl, asm = [], [], ['\t.text']
+    skipped = []
     # replacements
+    demangle_all(list(defined) + list(undefined))
     by_name = {}
     for s in defined:
         by_name.setdefault(demangle(s), []).append(s)
-    for addr, name, nparams, member, fn in decomp:
+    for entry in decomp:
+        addr, name, nparams, member, fn = entry[:5]
+        forced_conv = entry[5] if len(entry) > 5 else None
         cands = by_name.get(name) or by_name.get(name.split('::')[-1]) or []
         cands = [c for c in cands if not c.startswith('_sub_') and not c.startswith('raw_')]
         if len(cands) != 1:
             sys.exit('%s: cannot find the compiled symbol of %s (candidates: %s)' % (fn, name, cands))
         sym = cands[0]
-        ga = gaddr(addr)
-        if game == 'valk' and fhow.get(addr) not in TRUSTED:
+        ga = addr if addr in native else gaddr(addr)
+        if game == 'valk' and addr not in native and fhow.get(addr) not in TRUSTED:
             sys.exit('%s: %s: the Valkyrie match of %08X is only "%s"; check it and mark it "manual" in '
                      'symbols/attt2valk.tsv, or exclude the function with #if DECOMP_GAME_ATTT'
                      % (fn, name, addr, fhow.get(addr)))
         size, regs, retpop, clob = funcs.get(ga, (0, [], 0, {'EAX', 'ECX', 'EDX'}))
         preserve = {'EAX', 'ECX', 'EDX'} - clob - set(regs)
-        conv = symbol_conv(sym, member)
+        conv = forced_conv or symbol_conv(sym, member)
         if conv == 'thiscall':
             nstack = nparams
             direct = set(regs) <= {'ECX'} and retpop == 4 * nstack
         elif conv == 'cdecl':
             nstack = nparams - len(regs)
             direct = not regs and retpop == 0
+            if addr in native and regs and forced_conv == 'cdecl' and not custom_auto.get(addr, False):
+                skipped.append((addr, 'registers the prototype does not take'))
+                continue
         else:
             nstack = nparams
             direct = (conv == 'stdcall' and not regs and retpop == 4 * nstack) or \
@@ -268,7 +338,11 @@ def main():
             continue
         if conv == 'stdcall' and not regs:
             conv = 'thiscall'      # same stack handling: the target pops its stack arguments, no registers
-        if conv not in ('cdecl', 'thiscall') or (conv == 'thiscall' and not set(regs) <= {'ECX'}):
+        if conv not in ('cdecl', 'thiscall') or (conv == 'thiscall' and not set(regs) <= {'ECX'}) or \
+                (conv == 'cdecl' and addr in native and regs and nstack < 0):
+            if addr in native:      # the decompiler's prototype does not fit the machine code: leave the original
+                skipped.append((addr, 'convention'))
+                continue
             sys.exit('%s: %s: original %08X takes %s and pops %d bytes; write the replacement as a cdecl function '
                      'with the register parameters first (%s)' % (fn, name, ga, ','.join(regs) or 'no registers',
                                                                    retpop, ', '.join(REG_ORDER)))
@@ -290,9 +364,9 @@ def main():
     for ad_, n_ in byaddr.items():
         names.setdefault(n_, []).append(ad_)
     for s in sorted(undefined):
-        if not s.startswith('?'):
+        if not s.startswith('?') and not (s.startswith('__a') or s.startswith('__ftol')):
             continue
-        q = demangle(s)
+        q = demangle(s) if s.startswith('?') else s[1:]
         cands = names.get(q, [])
         if len(cands) > 1:
             sys.exit('%s is ambiguous in the symbol tables: %s' % (q, ' '.join('%08X' % c for c in cands)))
@@ -347,6 +421,8 @@ def main():
                 extra_map[q[0]] = q[1]
     add = {}
     for s_ in sorted(undefined):
+        if re.match(r'^[_@]?(sub|d|raw)_[0-9A-Fa-f]{8}', s_):
+            continue
         if s_.startswith('__imp_'):
             n = s_[6:]
         elif re.match(r'^_\w+@\d+$', s_):
@@ -418,6 +494,11 @@ def main():
     open(a.out, 'wb').write(data)
     print(run([sys.executable, '-I', os.path.join(TOOLS, 'verify_relink.py'), a.exe, a.out, mapf,
                '--replace', os.path.join(work, 'replace.txt')]).strip())
+    if skipped:
+        with open(os.path.join(work, 'skipped.txt'), 'w') as f:
+            for ad, why in skipped:
+                f.write('%08X\t%s\n' % (ad, why))
+        print('%d auto-decompiled functions left out (prototype does not fit; see %s)' % (len(skipped), os.path.join(work, 'skipped.txt')))
     print('%s: %d replaced functions, %d original symbols used -> %s' % (game, len(repl), len(syms), a.out))
 
 

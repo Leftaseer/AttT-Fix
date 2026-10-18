@@ -151,3 +151,7 @@ SLOT CUpdateObject 9 AfterTicks
 0046CEF0 f CInput::ResetKeys                     # key states and the key list of this frame cleared
 0046CF30 f CInput::Reset
 004DEED0 f CUpdateRoot::Update                   # [0x6C8C24]: per-frame update of everything registered
+# compiler helpers linked into the exe (64-bit arithmetic, stack probe)
+005E42B0 f _allrem
+005E43A0 f _alldiv
+005E4080 f _alloca_probe

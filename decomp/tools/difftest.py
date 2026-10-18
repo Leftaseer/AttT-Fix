@@ -142,7 +142,9 @@ class Harness:
 
     def _on_import(self, uc, addr, size, user):
         dll, name = self.imp_by_addr.get(addr, ('?', '?'))
-        f = getattr(self, 'crt_' + name.lstrip('_'), None)
+        alias = {'??2@YAPAXI@Z': 'new', '??3@YAXPAX@Z': 'free_like', '??_V@YAXPAX@Z': 'free_like', '??_U@YAPAXI@Z': 'new',
+                 '_strnicmp': 'strnicmp', '_stricmp': 'stricmp', '_strlwr': 'strlwr'}
+        f = getattr(self, 'crt_' + alias.get(name, name.lstrip('_')), None)
         if f is None:
             uc.emu_stop()
             self.fault = 'unsupported import %s!%s' % (dll, name)
@@ -186,6 +188,129 @@ class Harness:
     def crt_CIcos(self): self._x87_unary(math.cos)
     def crt_CIsqrt(self): self._x87_unary(math.sqrt)
 
+
+    # operator new/delete, more of the C runtime
+    def crt_free_like(self):
+        self._ret(0)
+    def crt_new(self):
+        self._ret(self.alloc(max(1, self._arg(0))))
+    def crt_calloc(self):
+        n = self._arg(0) * self._arg(1)
+        self._ret(self.alloc(max(1, n), bytes(n)))
+    def crt_realloc(self):
+        p, n = self._arg(0), self._arg(1)
+        q = self.alloc(max(1, n))
+        if p:
+            self.uc.mem_write(q, bytes(self.uc.mem_read(p, n)))
+        self._ret(q)
+    def crt_memcmp(self):
+        a, b, n = self._arg(0), self._arg(1), self._arg(2)
+        x, y = bytes(self.uc.mem_read(a, n)), bytes(self.uc.mem_read(b, n))
+        self._ret(0 if x == y else (-1 if x < y else 1))
+    def crt_memchr(self):
+        p, c, n = self._arg(0), self._arg(1) & 0xFF, self._arg(2)
+        d = bytes(self.uc.mem_read(p, n)); i = d.find(bytes([c]))
+        self._ret(0 if i < 0 else p + i)
+    def crt_strcpy(self):
+        d, s_ = self._arg(0), self._cstr(self._arg(1))
+        self.uc.mem_write(d, s_ + b'\0'); self._ret(d)
+    def crt_strncpy(self):
+        d, s_, n = self._arg(0), self._cstr(self._arg(1)), self._arg(2)
+        self.uc.mem_write(d, (s_ + bytes(n))[:n]); self._ret(d)
+    def crt_strcat(self):
+        d = self._arg(0); a_ = self._cstr(d); b_ = self._cstr(self._arg(1))
+        self.uc.mem_write(d + len(a_), b_ + b'\0'); self._ret(d)
+    def crt_strncat(self):
+        d = self._arg(0); a_ = self._cstr(d); b_ = self._cstr(self._arg(1))[:self._arg(2)]
+        self.uc.mem_write(d + len(a_), b_ + b'\0'); self._ret(d)
+    def crt_strchr(self):
+        p = self._arg(0); s_ = self._cstr(p); c = self._arg(1) & 0xFF
+        i = (s_ + b'\0').find(bytes([c])); self._ret(0 if i < 0 else p + i)
+    def crt_strrchr(self):
+        p = self._arg(0); s_ = self._cstr(p); c = self._arg(1) & 0xFF
+        i = (s_ + b'\0').rfind(bytes([c])); self._ret(0 if i < 0 else p + i)
+    def crt_strstr(self):
+        p = self._arg(0); a_ = self._cstr(p); b_ = self._cstr(self._arg(1))
+        i = a_.find(b_); self._ret(0 if i < 0 else p + i)
+    def crt_strncmp(self):
+        n = self._arg(2); a_ = self._cstr(self._arg(0))[:n]; b_ = self._cstr(self._arg(1))[:n]
+        self._ret((a_ > b_) - (a_ < b_))
+    def crt_strnicmp(self):
+        n = self._arg(2); a_ = self._cstr(self._arg(0))[:n].lower(); b_ = self._cstr(self._arg(1))[:n].lower()
+        self._ret((a_ > b_) - (a_ < b_))
+    def crt_stricmp(self):
+        a_ = self._cstr(self._arg(0)).lower(); b_ = self._cstr(self._arg(1)).lower()
+        self._ret((a_ > b_) - (a_ < b_))
+    def crt_strlwr(self):
+        p = self._arg(0); self.uc.mem_write(p, self._cstr(p).lower()); self._ret(p)
+    def crt_atoi(self):
+        import re as _re
+        m = _re.match(rb'\s*([+-]?\d+)', self._cstr(self._arg(0)))
+        self._ret(int(m.group(1)) & 0xFFFFFFFF if m else 0)
+    def crt_tolower(self):
+        c = self._arg(0) & 0xFFFFFFFF; self._ret(c + 32 if 65 <= c <= 90 else c)
+    def crt_toupper(self):
+        c = self._arg(0) & 0xFFFFFFFF; self._ret(c - 32 if 97 <= c <= 122 else c)
+    def _ctype(self, f):
+        c = self._arg(0)
+        self._ret(1 if 0 <= c < 128 and f(chr(c)) else 0)
+    def crt_isdigit(self): self._ctype(str.isdigit)
+    def crt_isalpha(self): self._ctype(str.isalpha)
+    def crt_isspace(self): self._ctype(lambda ch: ch in ' \t\n\r\v\f')
+    def crt_isalnum(self): self._ctype(str.isalnum)
+    def crt_isupper(self): self._ctype(str.isupper)
+    def crt_islower(self): self._ctype(str.islower)
+    def crt_ldiv(self):
+        # ldiv_t returned in EDX:EAX (quot, rem), truncating division
+        n = struct.unpack('<i', struct.pack('<I', self._arg(0)))[0]; d = struct.unpack('<i', struct.pack('<I', self._arg(1)))[0]
+        if d == 0:
+            self.uc.emu_stop(); self.fault = 'division by zero in ldiv'; return
+        q = abs(n) // abs(d) * (1 if (n >= 0) == (d >= 0) else -1); r = n - q * d
+        self.uc.reg_write(UC_X86_REG_EDX, r & 0xFFFFFFFF)
+        self._ret(q & 0xFFFFFFFF)
+    RAND_STATE = 0x0FFF0F00            # inside the STOP page: part of no snapshot, reset per call
+    def crt_srand(self):
+        self.uc.mem_write(self.RAND_STATE, struct.pack('<I', self._arg(0))); self._ret(0)
+    def crt_rand(self):
+        st = struct.unpack('<I', self.uc.mem_read(self.RAND_STATE, 4))[0]
+        st = (st * 214013 + 2531011) & 0xFFFFFFFF
+        self.uc.mem_write(self.RAND_STATE, struct.pack('<I', st))
+        self._ret((st >> 16) & 0x7FFF)
+    def _cdbl(self, i):
+        sp = self.uc.reg_read(UC_X86_REG_ESP)
+        return struct.unpack('<d', self.uc.mem_read(sp + 4 + 8 * i, 8))[0]
+    def _ret_double(self, v):
+        self._ret(None, 0, v)
+    def crt_floor(self): self._ret_double(math.floor(self._cdbl(0)))
+    def crt_ceil(self): self._ret_double(math.ceil(self._cdbl(0)))
+    def crt_sqrt(self): self._ret_double(math.sqrt(self._cdbl(0)) if self._cdbl(0) >= 0 else float('nan'))
+    def crt_pow(self):
+        try: v = math.pow(self._cdbl(0), self._cdbl(1))
+        except (ValueError, OverflowError): v = float('nan')
+        self._ret_double(v)
+    def _x87_binary(self, fn):
+        # st1 op st0 -> st0 (both popped, result pushed)
+        y = self._st0()
+        self.uc.mem_write(STOP + 0x200, b'\xdd\xd8\xf4')
+        eip = self.uc.reg_read(UC_X86_REG_EIP)
+        self.uc.emu_start(STOP + 0x200, STOP + 0x202)
+        x = self._st0()
+        self.uc.emu_start(STOP + 0x200, STOP + 0x202)
+        self.uc.reg_write(UC_X86_REG_EIP, eip)
+        try: v = fn(x, y)
+        except (ValueError, OverflowError, ZeroDivisionError): v = float('nan')
+        self._ret(None, 0, v)
+    def crt_CIpow(self): self._x87_binary(math.pow)
+    def crt_CIatan2(self): self._x87_binary(math.atan2)
+    def crt_CIfmod(self): self._x87_binary(math.fmod)
+    def crt_CIacos(self): self._x87_unary(lambda v: math.acos(v) if -1 <= v <= 1 else float('nan'))
+    def crt_CIasin(self): self._x87_unary(lambda v: math.asin(v) if -1 <= v <= 1 else float('nan'))
+    def crt_CIatan(self): self._x87_unary(math.atan)
+    def crt_CItan(self): self._x87_unary(math.tan)
+    def crt_CIexp(self): self._x87_unary(lambda v: math.exp(v) if v < 700 else float('inf'))
+    def crt_CIlog(self): self._x87_unary(lambda v: math.log(v) if v > 0 else float('nan'))
+    def crt_CIlog10(self): self._x87_unary(lambda v: math.log10(v) if v > 0 else float('nan'))
+
     # --- running
     def snapshot(self):
         regions = [(self.img_range[0], self.img_range[1] - self.img_range[0]), (HEAP, HEAP_SIZE), (STACK, STACK_SIZE)]
@@ -209,6 +334,7 @@ class Harness:
         for r, v in (regs or {}).items():
             uc.reg_write(r, v & 0xFFFFFFFF)
         uc.reg_write(UC_X86_REG_ESP, sp)
+        uc.mem_write(self.RAND_STATE, struct.pack('<I', 1))      # srand(1): the same rand() sequence for both runs
         try:
             uc.emu_start(entry, STOP, count=5_000_000)
         except UcError as e:
