@@ -9,14 +9,15 @@ stack).  Coverage of the original code is measured with block hooks.
 
     verified    at least MIN_OK calls returned normally, all calls behaved the same, coverage >= MIN_COV
     lowcov      the same behaviour, but too few normal returns or too little code covered
-    differs     some call behaved differently (result, memory, or one crashed and the other not)
+    differs     some call behaved differently (result, memory, or the new code crashed and the original not)
+    faultdiff   the original crashed and the new code not (often only a load the compiler dropped)
     unsupported the code reached an import the emulator does not provide
 
 usage: autoverify.py ORIG.exe REBUILT.exe REBUILT.map AUTO_DIR WORK_DIR OUT.tsv [--n 16] [--only ADDR,...]"""
 import argparse, os, re, struct, sys, random, json, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from difftest import Harness, STOP, HEAP, HEAP_SIZE, STACK, STACK_SIZE
-from unicorn import UcError, UC_HOOK_BLOCK
+from unicorn import UcError, UC_HOOK_BLOCK, UC_PROT_ALL
 from unicorn.x86_const import *
 
 REGS = {'ECX': UC_X86_REG_ECX, 'EAX': UC_X86_REG_EAX, 'EDX': UC_X86_REG_EDX, 'EBX': UC_X86_REG_EBX,
@@ -33,6 +34,15 @@ class FastHarness(Harness):
             n = s.Name.rstrip(b'\0')
             if n in (b'.data', b'.ndata'):
                 self.regions.append((self.rb.base + s.VirtualAddress, (s.Misc_VirtualSize + 0xFFF) & ~0xFFF))
+        # low memory: pointers to a few objects, mixed with small values
+        self.uc.mem_map(0, LOW, UC_PROT_ALL)
+        rnd = random.Random(7)
+        objs = [make_object(self, rnd, 512, 2) for _ in range(64)]
+        low = bytearray(LOW)
+        for o in range(0, LOW, 4):
+            struct.pack_into('<I', low, o, rnd.choice(objs) if rnd.random() < 0.6 else rnd.choice([0, 1, 0x10, 0x100]))
+        self.uc.mem_write(0, bytes(low))
+        self.regions.append((0, LOW))
         self.pristine = {b: bytes(self.uc.mem_read(b, n)) for b, n in self.regions}
         self.cov = set()
         self.cov_on = False
@@ -88,7 +98,14 @@ def load_protos(path):
     return p
 
 
-def rand_dword(rnd):
+PTR_RATE = [0.0]     # chance that an untyped dword is a pointer to a further random object (set per case)
+LOW = 0x10000        # the first 64 KiB are mapped and full of pointers: small integers used as pointers work
+
+
+def rand_dword(rnd, h=None, depth=0):
+    c = rnd.random()
+    if h is not None and depth > 0 and c < PTR_RATE[0]:
+        return make_object(h, rnd, 256, depth - 1)
     c = rnd.random()
     if c < 0.25: return rnd.choice([0, 1, 2, 3, 0xFFFFFFFF])
     if c < 0.55: return rnd.randint(0, 100)
@@ -101,7 +118,7 @@ def make_object(h, rnd, size, depth):
     data = bytearray(rnd.getrandbits(8) for _ in range(size))
     for o in range(0, size - 3, 4):
         c = rnd.random()
-        if c < 0.25 and depth > 0:
+        if c < 0.15 + PTR_RATE[0] / 2 and depth > 0:
             struct.pack_into('<I', data, o, make_object(h, rnd, 256, depth - 1))
         elif c < 0.45:
             struct.pack_into('<I', data, o, rand_dword(rnd))
@@ -130,7 +147,7 @@ def make_arg(h, rnd, t, sizes):
     if t in sizes and sizes[t] > 4:           # a structure by value
         n = (sizes[t] + 3) // 4
         return [rand_dword(rnd) for _ in range(n)]
-    return [rand_dword(rnd)]
+    return [rand_dword(rnd, h, 3)]
 
 
 def ret_kind(t):
@@ -172,7 +189,7 @@ def main():
     replaced = []
     for l in open(os.path.join(a.work, 'replace.txt')):
         q = l.split()
-        if len(q) == 2 and re.match(r'^(adp_|f_)', q[1]) and (q[1].startswith('f_') or q[1].startswith('adp_')):
+        if len(q) == 2 and re.match(r'^@?(adp_|f_)', q[1]):
             replaced.append(int(q[0], 16))
     autos = set()
     for fn in os.listdir(a.auto):
@@ -189,6 +206,13 @@ def main():
             continue
         q = l.rstrip('\n').split('\t')
         funcs[int(q[0], 16)] = (int(q[1]), [r for r in q[2].split(',') if r and r != 'EBP'])
+    convs = {}           # register parameters in parameter order, as the generated code declares them
+    cp = os.path.join(a.auto, 'convs.tsv')
+    if os.path.exists(cp):
+        for l in open(cp):
+            if l[0] != '#':
+                q = l.rstrip('\n').split('\t')
+                convs[int(q[0], 16)] = [r for r in q[1].split(',') if r]
     heap_mark = h.heap_ptr
     out = open(a.out, 'w')
     stats = {}
@@ -210,10 +234,11 @@ def main():
             status, detail = None, ''
             for case in range(a.n):
                 h.heap_ptr = heap_mark
+                PTR_RATE[0] = (0.0, 0.3, 0.6)[case % 3]
                 args = [make_arg(h, rnd, t, sizes) for t in plist]
                 regv = {}
                 flat = []
-                order = regs if custom else (['ECX'] if cc == '__thiscall' else ['ECX', 'EDX'] if cc == '__fastcall' else [])
+                order = convs[va] if va in convs else regs if custom else (['ECX'] if cc == '__thiscall' else ['ECX', 'EDX'] if cc == '__fastcall' else [])
                 for i, av in enumerate(args):
                     if i < len(order) and len(av) == 1:
                         regv[REGS[order[i]]] = av[0]
@@ -225,7 +250,9 @@ def main():
                     status, detail = 'unsupported', (f1 if f1 and 'unsupported' in f1 else f2)
                     break
                 if bool(f1) != bool(f2):
-                    status, detail = 'differs', 'case %d: orig %s / new %s' % (case, f1, f2)
+                    # the original faulting where the new code does not is often a load the compiler dropped
+                    status = 'faultdiff' if f1 and not f2 else 'differs'
+                    detail = 'case %d: orig %s / new %s' % (case, f1, f2)
                     break
                 if f1:
                     n_same_fault += 1

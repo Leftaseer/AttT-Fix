@@ -42,7 +42,7 @@ def load_functions(game):
         if l.startswith('#'):
             continue
         a, size, regs, retpop, clob = l.rstrip('\n').split('\t')[:5]
-        f[int(a, 16)] = (int(size), [r for r in regs.split(',') if r and r != 'EBP'],
+        f[int(a, 16)] = (int(size), sorted((r for r in regs.split(',') if r and r != 'EBP'), key=REG_ORDER.index),
                          int(retpop or 0), set(x for x in clob.split(',') if x))
     return f
 
@@ -258,6 +258,18 @@ def main():
                   '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types',
                   '-Wno-error=incompatible-function-pointer-types', '-Wno-error=int-to-pointer-cast', '-Wno-error=return-type',
                   '-I', os.path.join(HERE, 'include'), '-I', os.path.abspath(a.auto)]
+        # the prototypes the generated code uses: the register lists in their parameter order (they may name
+        # registers the function does not read, which is harmless) and the ret pop
+        for l in open(os.path.join(a.auto, 'convs.tsv')):
+            if l.startswith('#'):
+                continue
+            q = l.rstrip('\n').split('\t')
+            ad = int(q[0], 16)
+            size, old, oldpop, clob = funcs.get(ad, (0, [], 0, {'EAX', 'ECX', 'EDX'}))
+            new = [r for r in q[1].split(',') if r]
+            if (ad in protos or any(gaddr(d[0]) == ad for d in decomp)) and (new, int(q[2])) != (old, oldpop):
+                sys.exit('%08X: the hand-written code and the generated code see different conventions' % ad)
+            funcs[ad] = (size, new, int(q[2]), clob)
         hand = set(d[0] for d in decomp) if game == 'attt' else set(gaddr(d[0]) for d in decomp)
         for fn in sorted(glob.glob(os.path.join(a.auto, 'auto_*.c'))):
             src = fn
@@ -318,10 +330,10 @@ def main():
                      'symbols/attt2valk.tsv, or exclude the function with #if DECOMP_GAME_ATTT'
                      % (fn, name, addr, fhow.get(addr)))
         size, regs, retpop, clob = funcs.get(ga, (0, [], 0, {'EAX', 'ECX', 'EDX'}))
-        preserve = {'EAX', 'ECX', 'EDX'} - clob - set(regs)
+        preserve = {'EAX', 'ECX', 'EDX'} - clob      # LTCG callers may use a register argument again after the call
         conv = forced_conv or symbol_conv(sym, member)
         if conv == 'thiscall':
-            nstack = nparams
+            nstack = nparams if member else nparams - 1     # a C function names this as its first parameter
             direct = set(regs) <= {'ECX'} and retpop == 4 * nstack
         elif conv == 'cdecl':
             nstack = nparams - len(regs)
@@ -338,6 +350,9 @@ def main():
             continue
         if conv == 'stdcall' and not regs:
             conv = 'thiscall'      # same stack handling: the target pops its stack arguments, no registers
+        elif conv == 'fastcall' and set(regs) <= {'ECX', 'EDX'}:
+            conv, nstack = 'thiscall', max(0, nstack - 2)   # ECX and EDX pass through the adapter untouched
+            regs = [r for r in regs if r != 'EDX']
         if conv not in ('cdecl', 'thiscall') or (conv == 'thiscall' and not set(regs) <= {'ECX'}) or \
                 (conv == 'cdecl' and addr in native and regs and nstack < 0):
             if addr in native:      # the decompiler's prototype does not fit the machine code: leave the original

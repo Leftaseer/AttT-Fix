@@ -9,9 +9,9 @@ Each function is compiled on its own first; the ones that compile are grouped in
 The result is raw decompiler output - correct only as far as Ghidra is - so tools/difftest.py --auto checks
 every function against the original in the emulator before it is trusted.
 
-usage: autodecomp.py AUTO.jsonl TYPES.h OUTDIR [--game attt] [--max N] [--jobs N]
+usage: autodecomp.py AUTO.jsonl TYPES.h OUTDIR --exe EXE --functions symbols/GAME_functions.tsv [--syms S] [--max N]
 Output (OUTDIR, keep it out of the public repository: it is the game's code): auto_pre.h, auto_NNN.c,
-functions.tsv (address, status, reason)."""
+functions.tsv (address, status, reason), convs.tsv (register parameters of every prototype used)."""
 import argparse, json, os, re, subprocess, sys, glob, hashlib
 from concurrent.futures import ThreadPoolExecutor
 
@@ -37,10 +37,63 @@ def load_protos(path):
             continue
         a, cc, custom, ret, params, varargs = q[:6]
         plist = [x.rsplit(' ', 1) for x in params.split(',') if x.strip()] if params else []
-        p[int(a, 16)] = (cc, custom == 'true', ret, plist, varargs == 'true')
+        storage = q[7].split(',') if len(q) > 7 and q[7] else []
+        p[int(a, 16)] = [cc, custom == 'true', ret, plist, varargs == 'true', storage]
         if len(q) > 6 and q[6] == 'import':
             imports.add(int(a, 16))
     return p, imports
+
+
+REG_ORDER = ['ECX', 'EAX', 'EDX', 'EBX', 'ESI', 'EDI']
+WIDE = {'double', 'longlong', 'ulonglong', 'undefined8', 'qword', 'float10'}
+machine = {}       # addr -> (register inputs, bytes popped by ret) from symbols/<game>_functions.tsv
+convs = {}         # addr -> (registers in parameter order, ret pop) of the prototypes as written out
+
+
+def load_machine(path):
+    for l in open(path):
+        if l.startswith('#'):
+            continue
+        q = l.rstrip('\n').split('\t')
+        machine[int(q[0], 16)] = (set(x for x in q[2].split(',') if x and x != 'EBP'), int(q[3] or 0))
+
+
+def fit_convention(a, pr):
+    """Make the decompiler's prototype agree with the machine code (register inputs found by liveness, the
+    bytes ret pops).  LTCG gave many functions conventions of their own: those are written as cdecl with the
+    register parameters first, and build.py makes adapters and shims from the register list kept in convs.
+    Returns None or the reason the prototype does not fit."""
+    cc, custom, ret, plist, va, storage = pr
+    if a not in machine:
+        return 'no machine-code facts'
+    if len(storage) != len(plist):
+        return 'parameter storage unknown'
+    regs_in, pop = machine[a]
+    regs = [s for s in storage if s != 'stack']
+    if storage[:len(regs)] != regs:
+        return 'register parameter after a stack parameter'
+    if len(set(regs)) != len(regs) or not set(regs) <= set(REG_ORDER):
+        return 'odd register storage'
+    if not regs_in <= set(regs):
+        return 'reads registers the prototype lacks (%s)' % ','.join(sorted(regs_in - set(regs)))
+    stack = sum(8 if t.strip() in WIDE else 4 for (t, _), s in zip(plist, storage) if s == 'stack')
+    native = {'__cdecl': ([], 0), '__stdcall': ([], stack), '__thiscall': (['ECX'], stack),
+              '__fastcall': (['ECX', 'EDX'][:len(regs)], stack)}.get(cc)
+    if not custom and native and native[0] == regs and native[1] == pop and not va:
+        convs[a] = (regs, pop)
+        return None
+    if cc not in native_ok and not custom:
+        return 'unknown calling convention'
+    if va:
+        return 'varargs with registers'
+    if pop not in (0, stack) or (stack != 4 * (len(storage) - len(regs))):
+        return 'stack parameters do not fit the ret'
+    pr[0], pr[1] = '__cdecl', True
+    convs[a] = (regs, pop)
+    return None
+
+
+native_ok = ('__cdecl', '__stdcall', '__thiscall', '__fastcall')
 
 
 def has_indirect_call(code):
@@ -70,8 +123,15 @@ def cc_word(cc, custom):
     return {'__thiscall': '__thiscall', '__fastcall': '__fastcall', '__stdcall': '__stdcall', '__cdecl': '__cdecl'}.get(cc)
 
 
+def wide_ret(ret):
+    """An undefined result narrower than a register is usually the decompiler not knowing: the callers of
+    many functions use all of EAX, so declare it as the whole register."""
+    return 'undefined4' if ret in ('undefined', 'undefined1', 'undefined2', 'undefined3') else ret
+
+
 def proto_text(name, pr):
-    cc, custom, ret, plist, va = pr
+    cc, custom, ret, plist, va = pr[:5]
+    ret = wide_ret(ret)
     w = cc_word(cc, custom)
     if w is None:
         return None
@@ -108,6 +168,9 @@ def convert(f, protos, skip, imports, impnames):
     pr = protos.get(a)
     if not pr:
         return None, 'no prototype'
+    why = fit_convention(a, pr)
+    if why:
+        return None, why
     head = proto_text('f_%08X' % a, pr)
     if head is None:
         return None, 'unknown calling convention'
@@ -121,7 +184,7 @@ def convert(f, protos, skip, imports, impnames):
         raw = names.group(1).strip()
         if raw and raw != 'void':
             params = [x.strip() for x in raw.split(',')]
-    cc, custom, ret, plist, va = pr
+    cc, custom, ret, plist, va = pr[:5]
     if va:
         return None, 'varargs'
     if len(params) != len(plist):
@@ -129,7 +192,7 @@ def convert(f, protos, skip, imports, impnames):
     if ret.startswith('undefined') and not re.search(r'\breturn\s+[^;\s]', body):
         ret = 'void'               # the decompiler guessed a result that the function never sets
     rets[a] = ret
-    head = '%s %s f_%08X(%s)' % (ret, cc_word(cc, custom), a, ', '.join(params) if params else 'void')
+    head = '%s %s f_%08X(%s)' % (wide_ret(ret), cc_word(cc, custom), a, ', '.join(params) if params else 'void')
     # namespace prefixes the decompiler printed before calls (templates included)
     body = re.sub(r'(?:\b[A-Za-z_]\w*(?:<[^;{}()]*?>)?\s*::\s*)+(?=sub_[0-9A-F]{8})', '', body)
     # the SEH frame of C++ functions (fs:[0], printed as a global at FFDFF000): our frame layout differs, so the
@@ -176,14 +239,17 @@ def convert(f, protos, skip, imports, impnames):
         if ca in imports:
             if ca not in impnames:
                 return None, 'import %s not in the import table' % c
-            cc, custom, ret, plist, va = cp
-            w = cc_word(cc, False) or '__cdecl'
-            ps = ', '.join(t for t, n in plist) if plist else 'void'
-            if va:
+            icc, _, iret, iplist, iva = cp[:5]
+            w = cc_word(icc, False) or '__cdecl'
+            ps = ', '.join(t for t, n in iplist) if iplist else 'void'
+            if iva:
                 ps += ', ...'
-            decls.append('DECOMP_C %s (%s *imp_%s)(%s) __asm__("%s");' % (ret, w, c, ps, impnames[ca]))
+            decls.append('DECOMP_C %s (%s *imp_%s)(%s) __asm__("%s");' % (iret, w, c, ps, impnames[ca]))
             decls.append('#define sub_%s (*imp_%s)' % (c, c))
             continue
+        why = fit_convention(ca, cp)
+        if why:
+            return None, 'callee %s: %s' % (c, why)
         t = proto_text('sub_%s' % c, cp)
         if t is None:
             return None, 'callee %s with unknown calling convention' % c
@@ -218,7 +284,9 @@ def main():
     ap.add_argument('--max', type=int, default=0)
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
     ap.add_argument('--per-unit', type=int, default=150)
+    ap.add_argument('--functions', required=True, help='symbols/<game>_functions.tsv (machine-code register inputs)')
     a = ap.parse_args()
+    load_machine(a.functions)
     os.makedirs(a.outdir, exist_ok=True)
     protos, imports = load_protos(a.jsonl + '.protos')
     for fn in a.syms:
@@ -233,7 +301,7 @@ def main():
                     pass
             else:
                 q = l.split('#')[0].split(None, 2)
-                if len(q) == 3:
+                if len(q) == 3 and q[0] != 'SLOT':
                     symaddr.setdefault(q[2].strip().replace(' ', ''), int(q[0], 16))
                     if q[1] == 'f':
                         symname[int(q[0], 16)] = q[2].strip()
@@ -316,6 +384,10 @@ def main():
         n += 1
     import shutil
     shutil.copy(a.jsonl + '.protos', os.path.join(a.outdir, 'protos'))
+    with open(os.path.join(a.outdir, 'convs.tsv'), 'w') as f:
+        f.write('# address\tregister parameters in order\tret pop bytes (prototypes as the generated code uses them)\n')
+        for k in sorted(convs):
+            f.write('%08X\t%s\t%d\n' % (k, ','.join(convs[k][0]), convs[k][1]))
     with open(os.path.join(a.outdir, 'rets.tsv'), 'w') as f:
         for k in sorted(rets):
             f.write('%08X\t%s\n' % (k, rets[k]))
