@@ -323,12 +323,29 @@ def main():
         lib = d[:-4] + '.lib'
         run(['llvm-dlltool', '-m', 'i386', '-d', d, '-l', lib])
         libs.append(lib)
+    # new code and data go into .ntext/.nrdata/.ndata/.nbss and the import tables into .zidata, all placed after
+    # the original sections, which keep their original addresses (AttTFix and other tools use absolute addresses)
+    run([sys.executable, '-I', os.path.join(TOOLS, 'coffrename.py')] + objs)
     rsp = open(os.path.join(work, 'link.rsp')).read().split()
+    rsp += ['/merge:.idata=.zidata', '/merge:.didat=.zidata']
     if a.laa:
         rsp.append('/largeaddressaware')
     mapf = os.path.splitext(a.out)[0] + '.map'
-    run(['lld-link'] + rsp + ['/out:' + a.out, '/map:' + mapf, os.path.join(work, 'orig.obj')] + objs +
-        [os.path.join(work, 'resources.res')] + libs)
+    out = run(['lld-link'] + rsp + ['/out:' + a.out, '/map:' + mapf, os.path.join(work, 'orig.obj')] + objs +
+              [os.path.join(work, 'resources.res')] + libs)
+    # same TimeDateStamp as the original, so tools that recognise the game by it (AttTFix) keep working
+    import pefile
+    npe = pefile.PE(a.out)
+    for s_ in pe.pe.sections:
+        n_ = s_.Name.rstrip(b'\0')
+        for t_ in npe.sections:
+            if t_.Name.rstrip(b'\0') == n_ and n_ in (b'.text', b'.rdata', b'.data') and t_.VirtualAddress != s_.VirtualAddress:
+                sys.exit('original section %s moved: %08X -> %08X' % (n_.decode(), s_.VirtualAddress, t_.VirtualAddress))
+    npe.FILE_HEADER.TimeDateStamp = pe.pe.FILE_HEADER.TimeDateStamp
+    npe.OPTIONAL_HEADER.CheckSum = npe.generate_checksum()
+    data = npe.write()
+    npe.close()
+    open(a.out, 'wb').write(data)
     print(run([sys.executable, '-I', os.path.join(TOOLS, 'verify_relink.py'), a.exe, a.out, mapf,
                '--replace', os.path.join(work, 'replace.txt')]).strip())
     print('%s: %d replaced functions, %d original symbols used -> %s' % (game, len(repl), len(syms), a.out))

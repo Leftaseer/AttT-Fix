@@ -22,6 +22,6 @@ DECOMP(004064D0)
 int math_abs(lua_State *L)
 {
     lua_Number x = luaL_checknumber(L, 1);
-    lua_pushnumber(L, x < 0 ? -x : x);
+    lua_pushnumber(L, __builtin_fabsf(x));
     return 1;
 }
