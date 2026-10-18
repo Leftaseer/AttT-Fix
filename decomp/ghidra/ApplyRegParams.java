@@ -22,7 +22,7 @@ public class ApplyRegParams extends GhidraScript {
                 for (Parameter q : f.getParameters())
                     if (q.isStackVariable()) keep.add(new ParameterImpl(q.getName(), q.getDataType(), currentProgram));
                 f.updateFunction(f.getCallingConventionName(), f.getReturn(), keep,
-                    Function.FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, true, SourceType.ANALYSIS);
+                    Function.FunctionUpdateType.DYNAMIC_STORAGE_FORMAL_PARAMS, true, SourceType.ANALYSIS);
                 f.setCustomVariableStorage(false);
                 reset++;
             } catch (Exception e) { fail++; }

@@ -123,6 +123,12 @@ public class TypesC {
             w.println("#pragma pack(pop)");
         }
     }
+    // undefined bytes of a structure: the decompiler names them field_0xNN (offset in this structure)
+    static void gap(StringBuilder b, int from, int to) {
+        int named = Math.min(to, from + 0x1000);
+        for (int o = from; o < named; o++) b.append(String.format("    unsigned char field_0x%x;\n", o));
+        if (to > named) b.append("    unsigned char pad_").append(named).append("[").append(to - named).append("];\n");
+    }
     String def(DataType d) {
         String n = tname(d);
         if (d instanceof ghidra.program.model.data.Enum)
@@ -135,7 +141,7 @@ public class TypesC {
             for (DataTypeComponent c : ((Structure) d).getDefinedComponents()) {
                 if (c.isBitFieldComponent() || c.getLength() == 0) continue;
                 if (c.getOffset() < off) continue;
-                if (c.getOffset() > off) { b.append("    unsigned char pad_").append(pad++).append("[").append(c.getOffset() - off).append("];\n"); off = c.getOffset(); }
+                if (c.getOffset() > off) { gap(b, off, c.getOffset()); off = c.getOffset(); }
                 String fn = c.getFieldName() != null ? san(c.getFieldName()) : String.format("field_0x%x", c.getOffset());
                 DataType ct = c.getDataType();
                 String dl = (ct == null || (ct.getLength() > 0 && ct.getLength() != c.getLength()))
@@ -144,7 +150,7 @@ public class TypesC {
                 b.append("    ").append(dl).append(";\n");
                 off = c.getOffset() + c.getLength();
             }
-            if (d.getLength() > off) b.append("    unsigned char pad_").append(pad++).append("[").append(d.getLength() - off).append("];\n");
+            if (d.getLength() > off) gap(b, off, d.getLength());
         } else {
             for (DataTypeComponent c : ((Composite) d).getComponents()) {
                 String fn = c.getFieldName() != null ? san(c.getFieldName()) : "u" + c.getOrdinal();

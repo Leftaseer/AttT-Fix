@@ -214,11 +214,20 @@ def main():
                 q = l.rstrip('\n').split('\t')
                 convs[int(q[0], 16)] = [r for r in q[1].split(',') if r]
     heap_mark = h.heap_ptr
+    # everything mapped, restored before each function: a function under test can write anywhere (code, import
+    # table, TEB, the CRT state), and later functions must not inherit that
+    world = [(b, e - b + 1, bytes(h.uc.mem_read(b, e - b + 1))) for b, e, _ in h.uc.mem_regions()]
     out = open(a.out, 'w')
     stats = {}
     t0 = time.time()
     for k, va in enumerate(todo):
         rnd = random.Random(a.seed * 1000003 + va)
+        for b, n, data in world:
+            h.uc.mem_write(b, data)
+        h.uc.reg_write(UC_X86_REG_FPCW, 0x27F)      # x87 state a faulting function may have left behind
+        h.uc.reg_write(UC_X86_REG_FPSW, 0)
+        h.uc.reg_write(UC_X86_REG_FPTAG, 0xFFFF)
+        h.uc.reg_write(UC_X86_REG_EFLAGS, 0x202)
         pr = protos.get(va)
         size, regs = funcs.get(va, (0, []))
         if not pr:

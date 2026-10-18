@@ -18,6 +18,10 @@ CGameException::CGameException(const std::string &msg, const char *file, int lin
         ORIG_CALL(0042EEC0)(where, sizeof(where), "\n---in file - '%s'\n---line = %d", file, line);
         text += where;
     }
+#ifdef DECOMP_DEBUG_LOG
+    /* every engine error, also the ones caught and handled: WINEDEBUG=+debugstr or DebugView shows them */
+    OutputDebugStringA(text.raw());
+#endif
 }
 
 ORIG_DATA(0069916C);  /* _ThrowInfo of CGameException */

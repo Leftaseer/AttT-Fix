@@ -98,6 +98,52 @@ int math_abs(lua_State *L)
 * Код компилируется clang под ABI MSVC (`i686-pc-windows-msvc`), т. е. классы, vtable и `__thiscall` совместимы
   с оригиналом.
 
+### Проверка в игре
+
+`tools/rungame.py` запускает настоящую игру под Wine на виртуальном X-сервере (программный OpenGL Mesa),
+нажимает клавиши и кнопки по сценарию и снимает скриншоты, так что exe можно проверять без видеокарты и экрана:
+
+```
+python3 decomp/rebuild/build.py --exe ATThrone.exe --out build/ATThrone.exe -D DECOMP_DEBUG_LOG
+GAME_DIR=/путь/к/игре python3 decomp/tools/rungame.py build/ATThrone.exe test 'wait 25; key Escape; wait 5; shot menu'
+```
+
+`-D DECOMP_DEBUG_LOG` выводит каждую ошибку движка (`CGameException`, в том числе перехваченные) через
+`OutputDebugString` — в Wine это видно с `WINEDEBUG=+debugstr`. Что нужно Wine — в начале `rungame.py`: 32-битная
+Mesa, родная `d3dx9_29.dll` из DirectX June 2010 (встроенная в Wine не компилирует эффекты игры) и экран 1280×960,
+разрешение `graphic.cfg` по умолчанию.
+
+## Автоматическая декомпиляция
+
+Кроме ручного кода, есть конвейер, который превращает вывод декомпилятора Ghidra в компилируемый C и подключает
+его к сборке целыми тысячами функций. Сгенерированный код — это код игры, поэтому он **не хранится в
+репозитории**, а создаётся локально из своего exe:
+
+```
+analyzeHeadless PROJ attt -process attt.exe -noanalysis -readOnly -scriptPath decomp/ghidra \
+    -postScript AutoExport.java attt_auto.jsonl attt_auto_types.h
+python3 decomp/tools/autodecomp.py attt_auto.jsonl attt_auto_types.h auto/attt --exe ATThrone.exe \
+    --functions decomp/symbols/attt_functions.tsv --syms decomp/symbols/attt.sym --syms decomp/symbols/attt_manual.sym
+python3 decomp/rebuild/build.py --exe ATThrone.exe --out build/ATThrone.exe --auto auto/attt
+```
+
+(шаг 5 `analyze.sh` делает первые два). Функция берётся, только если всё в ней можно скомпилировать честно:
+
+* прототипы (её и всех вызываемых) сверяются с машинным кодом — регистровые входы LTCG, сколько байт снимает
+  `ret`, используют ли вызывающие EAX (`retlive.py`); соглашения LTCG пишутся как cdecl с регистрами впереди
+  (`convs.tsv`), переходники делает `build.py`;
+* отбрасываются функции с непрямыми вызовами (соглашение цели неизвестно), с регистрами, которые декомпилятор
+  не смог приписать, со switch без таблицы, с `try/catch` (по таблицам исключений MSVC: регистрацию SEH-кадра
+  можно убрать, только если кадр лишь вызывает деструкторы), с нетипизированными глобалами и т. п. — причина
+  каждой в `auto/attt/functions.tsv`;
+* до экспорта в Ghidra исправляются прототипы: `FixNoReturn` (ложные «не возвращается»), `ApplyRegParams`,
+  `FixStackParams` (число стековых параметров по `ret N`) — иначе неверны и вызывающие функции.
+
+Проверка: `autoverify.py` сравнивает каждую функцию с оригиналом в эмуляторе на случайных входах;
+`autobisect.py` двоичным поиском находит функции, которые меняют поведение игры (Wine), и `build.py
+--auto-exclude` их исключает. Случайные входы покрывают мало кода методов со сложными объектами, поэтому
+основная проверка — запуск игры.
+
 ## Полный анализ заново
 
 ```

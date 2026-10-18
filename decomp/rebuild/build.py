@@ -205,7 +205,10 @@ def main():
     ap.add_argument('--laa', action='store_true', help='mark the result Large Address Aware')
     ap.add_argument('--only', help='comma-separated source files (default: all of rebuild/src)')
     ap.add_argument('--auto', help='folder made by tools/autodecomp.py for this game (addresses of the game itself)')
+    ap.add_argument('-D', dest='defines', action='append', default=[], help='preprocessor define for the sources '
+                    '(e.g. -D DECOMP_DEBUG_LOG: engine errors go to OutputDebugString)')
     ap.add_argument('--auto-list', help='only these auto-decompiled functions (file with one address per line)')
+    ap.add_argument('--auto-exclude', help='not these auto-decompiled functions (e.g. bad.txt of tools/autobisect.py)')
     a = ap.parse_args()
 
     pe = PE(a.exe)
@@ -238,7 +241,7 @@ def main():
               '-fno-builtin', '-ffreestanding', '-fno-stack-protector', '-I', os.path.join(HERE, 'include'),
               # Win32 / Direct3D 9 declarations from mingw-w64 work with the MSVC ABI this way
               '-fgnuc-version=4.2.1', '-D_X86_', '-DWIN32_LEAN_AND_MEAN', '-isystem', mingw_inc,
-              '-I', os.path.join(HERE, 'src'), '-D', 'DECOMP_GAME_%s=1' % game.upper()]
+              '-I', os.path.join(HERE, 'src'), '-D', 'DECOMP_GAME_%s=1' % game.upper()] + ['-D' + d for d in a.defines]
     decomp, protos = scan_sources(files, cflags)
     # compile
     objs = []
@@ -253,6 +256,11 @@ def main():
         allow = None
         if a.auto_list:
             allow = set(int(l.split()[0], 16) for l in open(a.auto_list) if l.strip() and not l.startswith('#'))
+        if a.auto_exclude:
+            if allow is None:
+                allow = set(int(l.split('\t')[0], 16) for l in open(os.path.join(a.auto, 'functions.tsv'))
+                            if l.split('\t')[1] == 'compiled')
+            allow -= set(int(l.split()[0], 16) for l in open(a.auto_exclude) if l.strip() and not l.startswith('#'))
         aflags = ['--target=i686-pc-windows-msvc', '-O1', '-march=pentium4', '-msse2', '-fms-extensions', '-ffreestanding',
                   '-fno-builtin', '-fno-stack-protector', '-x', 'c', '-std=gnu11', '-w',
                   '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types',

@@ -21,7 +21,7 @@ REBUILD = os.path.join(HERE, '..', 'rebuild')
 BLOCK = [
     (r'\bunaff_\w+', 'unaffected register'), (r'\bextraout_\w+', 'extra output register'),
     (r'\bin_stack_\w+', 'stack outside the frame'), (r'\bin_[A-Z]{2,4}\b', 'register input'),
-(r'WARNING: (?!Globals starting|Removing unreachable|Load size|Type propagation)', 'decompiler warning'),
+    (r'WARNING: (?!Globals starting|Removing unreachable|Load size|Type propagation|Subroutine does not return)', 'decompiler warning'),
     (r'UNRESOLVED', 'unresolved name'), (r'halt_baddata|halt_unimplemented|software_\w+\(|swi\(', 'bad instruction'),
     (r'\bLOCK\(\)|\bUNLOCK\(\)', 'locked instruction'), (r'_vbase_destructor|__alloca_probe', 'compiler helper'),
     (r'\bin_FS_OFFSET\b', 'TEB access'), (r'\bxRam|\bunique0x', 'unmapped storage'),
@@ -153,6 +153,29 @@ def body_of(code):
 symaddr = {}
 symname = {}
 rets = {}
+image = [None]      # the PE of the game (exception tables)
+eax_used = set()    # functions whose callers use EAX after the call (tools/retlive.py)
+
+
+def catches(handler):
+    """True unless handler is the frame handler stub of a C++ function without try blocks (only destructors to
+    run): 'mov eax, FuncInfo; jmp __CxxFrameHandler3', possibly after a GS cookie check.  Dropping the
+    registration of a frame that catches would lose the catch."""
+    pe = image[0]
+    try:
+        code = pe.read(handler, 0x30)
+    except Exception:
+        return True
+    for i in range(len(code) - 5):
+        if code[i] == 0xB8:
+            fi = int.from_bytes(code[i + 1:i + 5], 'little')
+            try:
+                magic = pe.u32(fi)
+            except Exception:
+                continue
+            if magic in (0x19930520, 0x19930521, 0x19930522):
+                return pe.u32(fi + 12) != 0          # nTryBlocks
+    return True
 
 
 def convert(f, protos, skip, imports, impnames):
@@ -191,18 +214,49 @@ def convert(f, protos, skip, imports, impnames):
         return None, 'parameter count differs from the prototype'
     if ret.startswith('undefined') and not re.search(r'\breturn\s+[^;\s]', body):
         ret = 'void'               # the decompiler guessed a result that the function never sets
+    if ret == 'void' and a in eax_used:
+        return None, 'callers use EAX, the decompiler found no result'
     rets[a] = ret
     head = '%s %s f_%08X(%s)' % (wide_ret(ret), cc_word(cc, custom), a, ', '.join(params) if params else 'void')
     # namespace prefixes the decompiler printed before calls (templates included)
     body = re.sub(r'(?:\b[A-Za-z_]\w*(?:<[^;{}()]*?>)?\s*::\s*)+(?=sub_[0-9A-F]{8})', '', body)
     # the SEH frame of C++ functions (fs:[0], printed as a global at FFDFF000): our frame layout differs, so the
     # registration is dropped; an exception then passes through without running this function's destructors
+    if 'G_FFDFF000' in body:
+        hs = re.findall(r'\b(?:pu|pc|p)\w*Stack_\w+\s*=\s*&?(?:LAB|FUN)_([0-9a-fA-F]{8})\b', body)
+        if len(hs) != 1:
+            return None, 'exception frame without a known handler'
+        if catches(int(hs[0], 16)):
+            return None, 'catches exceptions'
     body = re.sub(r'\n[^\n;]*\bG_FFDFF000\b[^\n;]*;', '\n', body)
     # vftable of the function's own class
     own = symname.get(a, '')
     if '::' in own:
         cls = own.rsplit('::', 1)[0]
-        body = re.sub(r'(?<![\w:])vftable\b', cls + '::vftable', body)
+        body = re.sub(r'(?<![\w:.>])(vftable(?:_\w+)?)\b', cls + r'::\1', body)
+    # labels keep their names (the address substitution below is for LAB_ used as a value)
+    body = re.sub(r'\bgoto\s+(LAB_[0-9a-fA-F]{8})\b', r'goto L\1', body)
+    body = re.sub(r'^(\s*)(LAB_[0-9a-fA-F]{8}):', r'\1L\2:', body, flags=re.M)
+    # pieces of a variable: v._1_3_ is the 3 bytes at offset 1 of v
+    bad = []
+    def piece(m):
+        var, off, size = m.group(1), int(m.group(2)), int(m.group(3))
+        if size not in (1, 2, 3, 4, 8):
+            bad.append(m.group(0))
+        if size == 3 and re.match(r'\s*=[^=]', body[m.end():m.end() + 3]):
+            bad.append(m.group(0))   # a 3-byte store has no C type
+        t = {1: 'unsigned char', 2: 'unsigned short', 3: 'unsigned int', 4: 'unsigned int', 8: 'unsigned long long'}.get(size, 'int')
+        return '(*(%s *)((char *)&%s + %d))' % (t, var, off)
+    body = re.sub(r'\b([A-Za-z_]\w*)\._(\d+)_(\d+)_\b', piece, body)
+    if bad:
+        return None, 'piece of a variable'
+    # void * dereferenced as a value (the decompiler means a dword)
+    for t_, n_ in [(x.rsplit(' ', 1) + [''])[:2] for x in params]:
+        n_ = n_.lstrip('*')
+        if t_.strip() == 'void' and re.search(r'(?<![\w)])\*%s\b' % re.escape(n_), body) and \
+                not re.search(r'(?<![\w)*])%s\s*(\[|\+|-(?!>))' % re.escape(n_), body):
+            params = [('undefined4 *' + n_) if x.endswith(' *' + n_) or x.endswith('*' + n_) else x for x in params]
+            head = re.sub(r'\bvoid \*%s\b' % re.escape(n_), 'undefined4 *' + n_, head)
     # addresses printed as symbol names
     def addr_ref(m):
         return '((void *)d_%s)' % m.group(2).upper()
@@ -215,6 +269,10 @@ def convert(f, protos, skip, imports, impnames):
         extra.add('%08X' % ad)
         return '((void *)d_%08X)' % ad
     body = re.sub(r'&?\b(LAB|PTR_LAB|PTR_FUN|PTR_DAT|PTR_s|FUN|s_\w+?|u_\w+?)_([0-9a-fA-F]{8})\b', addr_ref, body)
+    # the address of untyped data is just an address
+    body = re.sub(r'&(?:DAT|UNK)_([0-9a-fA-F]{8})\b(?!\s*[\[.])', lambda m: '((void *)d_%s)' % m.group(1).upper(), body)
+    for x in re.findall(r'\(\(void \*\)d_([0-9A-F]{8})\)', body):
+        extra.add(x)
     if re.search(r'(?<![\w.>])(DAT_|PTR_|BYTE_|WORD_|DWORD_|UNK_)[0-9a-fA-F]{8}\b', body):
         return None, 'global of unknown type'
     try:
@@ -229,6 +287,8 @@ def convert(f, protos, skip, imports, impnames):
         extra.add(x)
     if '::' in body:
         return None, 'C++ name left'
+    if any(not (0x400000 <= int(x, 16) < 0x1000000) for x in extra):
+        return None, 'address outside the image'
 
     decls = []
     for c in f['callees']:
@@ -287,6 +347,9 @@ def main():
     ap.add_argument('--functions', required=True, help='symbols/<game>_functions.tsv (machine-code register inputs)')
     a = ap.parse_args()
     load_machine(a.functions)
+    rl = a.functions.replace('_functions.tsv', '_retlive.tsv')
+    if os.path.exists(rl):
+        eax_used.update(int(l, 16) for l in open(rl) if l.strip() and l[0] != '#')
     os.makedirs(a.outdir, exist_ok=True)
     protos, imports = load_protos(a.jsonl + '.protos')
     for fn in a.syms:
@@ -308,6 +371,7 @@ def main():
     sys.path.insert(0, HERE)
     from pe import PE
     pe = PE(a.exe)
+    image[0] = pe
     impnames = {}
     for addr, (dll, name) in pe.imports.items():
         impnames[addr] = ('__imp_' + name) if name.startswith('?') else ('__imp__' + name)
