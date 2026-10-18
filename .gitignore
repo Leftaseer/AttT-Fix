@@ -9,3 +9,5 @@ src/AttTFix.sym
 *.dmp
 *.csv
 AttTFix.ini
+decomp/rebuild/build/
+__pycache__/

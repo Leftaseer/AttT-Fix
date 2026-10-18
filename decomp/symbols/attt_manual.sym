@@ -1,0 +1,127 @@
+# Hand-written names for Ascension to the Throne (ATThrone.exe 1.1.128, TimeDateStamp 475EABAF).
+# Format: ADDRESS KIND NAME [# note]   KIND: f = function, d = data.  Sources: AttTFix research (claude/*.md, src/*.cpp).
+# Lua
+004031F0 f lua_pushcclosure
+004034F0 f lua_setfield
+0057D220 f CLua::RunBuffer                       # thiscall(buf, len, name), ret 0xC
+00432620 f CLuaWrapper::DoFile                   # thiscall(name), ret 4
+008D122C d g_luaState                            # lua_State* used by the engine
+00406CD0 f math_random                            # Lua math.random
+# engine / main loop
+0042F640 f WinMainLoop                           # GetMessage when [0x6BF6E0]==0
+0042EB70 f WndProc
+006BF6E0 d g_appActive
+0042F160 f CEngine::Instance                     # returns CEngine*; +0x2C tree crossfade start, +0x30 end, +0x34 visible, +0x38 TreeVisibleDelta
+0044A9C0 f CEngine::Frame
+0044E480 f CEngine::Render
+0044DD20 f CEngine::RestoreDevice
+0044D9D0 f LuaGlobal_ChangeSettings
+005406F0 f CEngine::WriteGraphicSettings         # in-game writer of graphic.cfg values
+00441DF0 f CConfig::LoadGraphicCfg               # graphic.cfg, 66 bytes
+00451E90 f CFileSystem::OpenPaks                 # Resource0..N.pak
+00449F80 f CEngine::SetActive                    # (bool) sound volume + game timer
+00449FE0 f CEngine::Screenshot
+004E4220 f CTimer::FrameWait
+0044F75E d SkipIntroBranch                       # test al,al before the intro videos
+006C8C10 d g_d3dDevice
+006C8964 d g_screenWidth
+006C8960 d g_screenHeight
+006C895C d g_screenWidthF
+006C8958 d g_screenHeightF
+006C8C24 d g_updateRoot
+006CA2C4 d g_currentCamera
+006CA4B4 d g_soundManager
+006C04B4 d g_pakXorKey                           # 16-byte key for pak version 200
+008D1208 d g_debugPrint                          # void(*)(const char*), no-op by default
+# camera
+00521BC0 f CCamera::BuildProjection3D
+004357B0 f CCamera::SetOrtho2D
+004363D0 f CCamera::Update                       # rebuild view + frustum
+0060B07C d k_aspect4by3_a
+0060B870 d k_aspect4by3_b
+006C344C d g_camRotBattle
+006C3DB8 d g_camRotWorld
+0060A308 d k_cursorSpeed
+# updaters
+00424D90 f CUpdateObject::Update               # accumulator +0x28, step +0x24 (ms); calls Tick (slot 5) per step
+00464AC0 f CHero::Update
+004AC820 f CRenderObject::BuildWorldMatrix       # S*R*T into +0x168
+004AC890 f CRenderObject::SetWorldTransform
+# collisions
+0043F2F0 f PointInPolygon
+# effects
+004480C0 f CEffect::Begin
+004480F0 f CEffect::End
+00448110 f CEffect::BeginPass
+00448140 f CEffect::EndPass
+00448180 f CEffect::SetTechnique
+00448280 f CEffect::SetInt
+# trees / forest
+0055EDF0 f NForest::TreeMassive::Render
+0055C690 f NForest::TreeMassive::RenderTrees
+00455CF0 f NForest::Tree::Render
+004558C0 f NForest::Tree::RenderTrunk
+00455960 f NForest::Tree::RenderFoliage
+0055E820 f NForest::TreeMassive::Classify
+0055C500 f NForest::TreeMassive::CompareDist     # qsort comparator
+0055DF60 f NForest::TreeMassive::RenderBillboards
+0055A830 f CForestsCreator::Generate
+00870F00 d g_visibleTrees                        # 16-byte {idx, dist2, ...}
+008CF048 d g_visibleTreeCount
+00458120 f CFrustum::TestCorners                 # thiscall(corners), ret 4
+0045C3E0 f CGizmo::DistanceTest
+00463E20 f CRenderObject::GetLodLevel
+# particles
+0054AF30 f NParticleSystem::CParticle::Update
+005520D0 f NParticleSystem::CParticleSystem::BuildQuads
+# skinning / animation
+004B9110 f NSkinAnimation::CSkeletonMeshSubObject::Skin
+004BA850 f NSkinAnimation::CSkeletonMeshSubObject::Draw
+004BAB70 f NSkinAnimation::CSkeletonMeshSubObject::Draw2
+004BAC50 f NSkinAnimation::CSkinMesh::DrawSubObjects
+004C07C0 f NSkinAnimation::CSkinMesh::Load        # thiscall(std::string), ret 0x1C
+004BCC60 f NSkinAnimation::CSkinMeshSubObject::Read
+004C0DE0 f NSkinAnimation::CSkinMesh::Draw
+004C0E30 f NSkinAnimation::CSkinMesh::DrawCurrent
+004C0E60 f NSkinAnimation::CSkinMesh::Draw3
+004C0EA0 f NSkinAnimation::CSkinMesh::DrawNoWorld
+004306D0 f CTweenAnim::SetFrame
+004773F0 f CTweenAnim::Blend
+004746E0 f NSkinAnimation::CMatrixMeshSubObject::Draw
+00474BC0 f DrawAttachedObject
+# sound
+00518D90 f NSound::ListenerUpdater::Tick
+004C18F0 f NSound::Sound::CommitDeferredSettings
+004C19A0 f NSound::Sound::SetListenerPosition
+004C1AA0 f NSound::Sound::SetListenerOrientation
+004C2B90 f NSound::Sound3D::GetStatus
+004C2E10 f NSound::Sound3D::SetPosition
+004C53A0 f NSound::Sound3D::Stop
+00428350 f NSound::AmbientSoundManager::UpdateAt
+00434550 f CButterflyManger::Update
+004F91D0 f CWaterCircleManager::Update
+004F8CB0 f CWaterCircle::Update
+# sun / flares / shadows / textures
+00535850 f CSun::ReadBackBufferPixel
+005352E0 f CSun::TestVisibility
+0052B420 f CFlares::Render
+0052B1F0 f CFlares::Update
+00527DF0 f CClouds::Serialize
+00527ED0 f CClouds::RenderShadowPass
+00529CF0 f CClouds::Render
+004B6E70 f CShadowManager::RenderCasters
+004B6880 f CShadowManager::CollectCastersNoBuildings
+004B6D70 f CShadowManager::CollectCasters
+004B6B20 f CShadowManager::CollectCell
+0058EB50 f CRenderObject3D::InFrustum            # thiscall(obj), corners at obj+0x244
+004EC910 f CUnitShadow::Render
+004DF860 f CTexture::CreateRenderTarget
+004E02B4 d CTexture_LoadDDS_CreateTexture_ret
+# GUI
+004AC170 f GuiScaleX
+004D1740 f CHud::Begin
+# Virtual slot names (SLOT class index name): every override of the slot in derived classes gets the name.
+SLOT CUpdateObject 1 Update                      # per frame, dt
+SLOT CUpdateObject 2 Render
+SLOT CUpdateObject 5 Tick                        # fixed 33.3 ms step
+SLOT CUpdateObject 9 AfterTicks

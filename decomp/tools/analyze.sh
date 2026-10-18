@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Full analysis of both games from the user's own executables:
+#   Ghidra project with names, register conventions and class structures, symbol tables in decomp/symbols,
+#   raw decompilation split into units (one .cpp per class / source file) in $WORK/decomp.
+#
+# usage: GHIDRA=/path/to/ghidra_11.x WORK=/path/to/workdir decomp/tools/analyze.sh ATThrone_AttT.exe ATThrone_Valkyrie.exe
+# needs: Ghidra 11.x (+ JDK 21), python3 with pefile and capstone, llvm (llvm-undname).
+# Takes about an hour on 4 cores.  Nothing here is written into the repository except decomp/symbols.
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+SYMS="$HERE/../symbols"
+GH="$HERE/../ghidra"
+: "${GHIDRA:?set GHIDRA to the Ghidra install directory}"
+: "${WORK:?set WORK to a work directory}"
+HL="$GHIDRA/support/analyzeHeadless"
+mkdir -p "$WORK"/{bin,proj,out,logs,decomp}
+cp "$1" "$WORK/bin/attt.exe"
+cp "$2" "$WORK/bin/valk.exe"
+O="$WORK/out"
+py() { python3 -I "$HERE/$1" "${@:2}"; }
+
+# 1. import, auto analysis, functions Ghidra misses (after int3 padding), parameter ID
+for g in attt valk; do
+  "$HL" "$WORK/proj" $g -import "$WORK/bin/$g.exe" -max-cpu 4 > "$WORK/logs/import_$g.log" 2>&1
+  "$HL" "$WORK/proj" $g -process $g.exe -scriptPath "$GH" -preScript AddMissingFunctions.java \
+        -postScript ParamId.java > "$WORK/logs/pass2_$g.log" 2>&1
+  "$HL" "$WORK/proj" $g -process $g.exe -noanalysis -readOnly -scriptPath "$GH" \
+        -postScript DumpInfo.java "$O/${g}_g1" > "$WORK/logs/dump_$g.log" 2>&1
+  cut -f1 "$O/${g}_g1/functions.tsv" | grep -v EXTERNAL > "$O/${g}_starts.tsv"
+  py binfeat.py "$WORK/bin/$g.exe" "$O/${g}_starts.tsv" "$O/${g}_binfeat.json"
+  py rtti.py "$WORK/bin/$g.exe" "$O/${g}_rtti.json"
+  py vnames.py "$WORK/bin/$g.exe" "$O/${g}_rtti.json" "$O/${g}_rtti.sym"
+  py staticinit.py "$WORK/bin/$g.exe" "$O/${g}_lunar.json"
+  py regparams.py "$WORK/bin/$g.exe" "$O/${g}_binfeat.json" "$O/${g}_regparams.tsv"
+  py regclobber.py "$WORK/bin/$g.exe" "$O/${g}_binfeat.json" "$O/${g}_clobber.tsv"
+done
+py luaglobals.py "$WORK/bin/attt.exe" 4031F0 4034F0 "$O/attt_luaglobals.tsv"
+py luaglobals.py "$WORK/bin/valk.exe" 403010 403320 "$O/valk_luaglobals.tsv"
+
+# 2. Lua 5.1 library functions (optional: needs the Lua 5.1.2 sources and i686-w64-mingw32-gcc)
+LUALIB=/dev/null
+if [ -n "${LUA_SRC:-}" ]; then
+  mkdir -p "$WORK/lua_o2"
+  for f in "$LUA_SRC"/*.c; do
+    i686-w64-mingw32-gcc -O2 -fno-toplevel-reorder -fno-optimize-sibling-calls -fno-reorder-functions -c "$f" \
+      -o "$WORK/lua_o2/$(basename "${f%.c}").o"
+  done
+  py srcfeat.py "$O/lua_feat.json" $(ls "$WORK"/lua_o2/*.o | grep -v -E '/(lua|luac|print)\.o$')
+  py libmatch.py "$O/lua_feat.json" "$LUA_SRC" "$O/attt_binfeat.json" "$WORK/bin/attt.exe" "$O/attt_lua.tsv" \
+     seed=4031F0:lua_pushcclosure seed=4034F0:lua_setfield range=401000:430000
+  LUALIB="$O/attt_lua.tsv"
+fi
+
+# 3. symbol tables: AttT, then the function/data maps to Valkyrie and the Valkyrie table
+py buildsyms.py --exe "$WORK/bin/attt.exe" --rtti "$O/attt_rtti.json" --rttisym "$O/attt_rtti.sym" \
+   --lunar "$O/attt_lunar.json" --luaglobals "$O/attt_luaglobals.tsv" --lualib "$LUALIB" \
+   --manual "$SYMS/attt_manual.sym" --out "$SYMS/attt.sym"
+XMATCH_EXTRA="$O/attt_lunar.json,$O/valk_lunar.json,$O/attt_luaglobals.tsv,$O/valk_luaglobals.tsv" \
+  py crossmatch.py "$WORK/bin/attt.exe" "$O/attt_binfeat.json" "$O/attt_rtti.json" \
+                   "$WORK/bin/valk.exe" "$O/valk_binfeat.json" "$O/valk_rtti.json" "$SYMS/attt2valk.tsv"
+py datamap.py "$WORK/bin/attt.exe" "$O/attt_binfeat.json" "$WORK/bin/valk.exe" "$O/valk_binfeat.json" \
+   "$SYMS/attt2valk.tsv" "$SYMS/attt2valk_data.tsv"
+py portsyms.py "$SYMS/attt.sym" "$SYMS/attt2valk.tsv" "$HERE/../../src/exeaddr.h" "$O/valk_from_attt.sym"
+py portsyms.py "$SYMS/attt_manual.sym" "$SYMS/attt2valk.tsv" "$HERE/../../src/exeaddr.h" "$O/valk_manual.sym"
+py buildsyms.py --exe "$WORK/bin/valk.exe" --rtti "$O/valk_rtti.json" --rttisym "$O/valk_rtti.sym" \
+   --lunar "$O/valk_lunar.json" --luaglobals "$O/valk_luaglobals.tsv" --ported "$O/valk_from_attt.sym" \
+   --manual "$O/valk_manual.sym" --out "$SYMS/valk.sym"
+for g in attt valk; do
+  py ctors.py "$WORK/bin/$g.exe" "$O/${g}_rtti.json" "$O/${g}_binfeat.json" "$SYMS/$g.sym" "$SYMS/${g}_ctors.sym" "$O/${g}_sizes.json"
+  python3 -I - "$O" "$SYMS" $g <<'EOF'
+import json, sys
+o, s, g = sys.argv[1:4]
+bf = json.load(open('%s/%s_binfeat.json' % (o, g)))
+rp = {l.split('\t')[0]: l.rstrip('\n').split('\t') for l in open('%s/%s_regparams.tsv' % (o, g))}
+cl = {l.split('\t')[0]: l.rstrip('\n').split('\t')[1] for l in open('%s/%s_clobber.tsv' % (o, g))}
+with open('%s/%s_functions.tsv' % (s, g), 'w') as f:
+    f.write('# address\tsize\tregister inputs\tret pop bytes\tvolatile registers changed (transitively)\n')
+    for a in sorted(bf):
+        r = rp.get(a, [a, '', ''])
+        f.write('%s\t%d\t%s\t%s\t%s\n' % (a, bf[a]['size'], r[1], r[2].split(',')[0] if r[2] else '0', cl.get(a, 'EAX,ECX,EDX')))
+EOF
+done
+
+# 4. back into Ghidra: register conventions, names, thiscall methods, class structures; export
+for g in attt valk; do
+  "$HL" "$WORK/proj" $g -process $g.exe -noanalysis -scriptPath "$GH" \
+     -postScript ApplyRegParams.java "$O/${g}_regparams.tsv" \
+     -postScript ApplySymbols.java "$SYMS/$g.sym,$SYMS/${g}_ctors.sym" \
+     -postScript ClassThiscall.java "$O/${g}_regparams.tsv" \
+     -postScript FillClassStructs.java "$O/${g}_sizes.json" "$O/${g}_rtti.json" \
+     -postScript ExportDecomp.java "$WORK/decomp/$g.jsonl" > "$WORK/logs/annotate_$g.log" 2>&1
+  py organize.py "$WORK/decomp/$g.jsonl" "$SYMS/$g.sym" "$O/${g}_binfeat.json" "$WORK/decomp/$g" --game $g
+done
+echo "done: Ghidra projects in $WORK/proj, decompilation in $WORK/decomp"

@@ -1,0 +1,9 @@
+# Imports used by the decompiled code but not by the original exe: NAME DLL (C names without the leading _)
+memcpy MSVCR80.dll
+memset MSVCR80.dll
+memmove MSVCR80.dll
+strlen MSVCR80.dll
+strcmp MSVCR80.dll
+sprintf MSVCR80.dll
+malloc MSVCR80.dll
+free MSVCR80.dll
