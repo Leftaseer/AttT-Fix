@@ -32,7 +32,15 @@ def sweep():
             off += 0 if last is None else 1     # capstone stopped at undecodable bytes: skip one
 
 
+pushes = {}         # IAT slot -> pushes right before each call (its arguments, for imports that pop them)
+run = 0
 for i in sweep():
+    m = i.mnemonic
+    if m == 'push':
+        run += 1
+    elif m in ('call', 'ret', 'jmp') or (m in ('add', 'sub') and i.op_str.startswith('esp,')) or 'fs:' in i.op_str \
+            or m.startswith('j'):
+        pass                # handled below / ends a run
     if prev is not None:
         if i.mnemonic == 'add' and i.op_str.startswith('esp, ') and i.operands[1].type == x86.X86_OP_IMM:
             n = i.operands[1].imm
@@ -43,11 +51,17 @@ for i in sweep():
     if i.mnemonic == 'call' and i.operands[0].type == x86.X86_OP_MEM and i.operands[0].mem.base == 0 and \
             i.operands[0].mem.index == 0 and i.operands[0].mem.disp in slots:
         prev = i.operands[0].mem.disp
+        pushes.setdefault(prev, []).append(run)
+    if m != 'push' and not (m.startswith('mov') or m == 'lea' or m.startswith('fst') or m.startswith('fld')):
+        run = 0             # arguments are pushed with only movs and leas between them
 with open(sys.argv[2], 'w') as f:
     # the commonest non-zero cleanup: the compiler sometimes removes the arguments of two calls with one add
-    f.write('# IAT slot\tcommonest add esp after a call (argument bytes of a caller-pop import)\tcalls\n')
+    f.write('# IAT slot\tcommonest add esp after a call (argument bytes of a caller-pop import)\tcalls'
+            '\tcommonest number of pushes right before a call\n')
     for a in sorted(seen):
         nz = [n for n in seen[a] if n]
         mode = max(set(nz), key=nz.count) if nz else 0
-        f.write('%08X\t%d\t%d\n' % (a, mode, len(seen[a])))
+        ps = pushes.get(a, [0])
+        pm = max(set(ps), key=ps.count)
+        f.write('%08X\t%d\t%d\t%d\n' % (a, mode, len(seen[a]), pm))
 print('%d imports called' % len(seen))

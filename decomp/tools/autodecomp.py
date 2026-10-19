@@ -65,7 +65,7 @@ def load_machine(path):
         for l in open(ia):
             q = l.rstrip('\n').split('\t')
             if l[0] != '#':
-                import_args[int(q[0], 16)] = int(q[1])
+                import_args[int(q[0], 16)] = (int(q[1]), int(q[3]) if len(q) > 3 else 0)
     sp = path.replace('_functions.tsv', '_stackparams.tsv')
     if os.path.exists(sp):
         for l in open(sp):
@@ -366,9 +366,12 @@ def convert(f, protos, skip, imports, impnames):
             if ca not in impnames:
                 return None, 'import %s not in the import table' % c
             icc, _, iret, iplist, iva = cp[:5]
-            if icc not in ('__stdcall', '__thiscall', '__fastcall') and not iva and ca in import_args:
-                have = sum(8 if t.strip() in WIDE else 4 for t, _ in iplist)
-                if import_args[ca] > have:
+            if not iva and ca in import_args:
+                ps_ = iplist[1:] if icc == '__thiscall' else iplist[2:] if icc == '__fastcall' else iplist
+                have = sum(8 if t.strip() in WIDE else 4 for t, _ in ps_)
+                cleaned, pushed = import_args[ca]
+                need = 4 * pushed if icc in ('__stdcall', '__thiscall', '__fastcall') else cleaned
+                if need > have:
                     return None, 'import %s takes more arguments than its prototype' % c
             w = cc_word(icc, False) or '__cdecl'
             ps = ', '.join(t for t, n in iplist) if iplist else 'void'
