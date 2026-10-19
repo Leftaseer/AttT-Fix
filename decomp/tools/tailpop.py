@@ -4,7 +4,7 @@ finds no ret N, but its callers' stack is cleaned by the function it jumps to (t
 'mov ecx, [ecx+1C4]; jmp Method').  Follows jmp chains to a function with a known ret and writes the pop into
 column 4 of functions.tsv (in place).
 
-usage: tailpop.py EXE REGPARAMS.tsv symbols/GAME_functions.tsv"""
+usage: tailpop.py EXE REGPARAMS.tsv symbols/GAME_functions.tsv [AUTO.jsonl.protos (import conventions)]"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
@@ -25,6 +25,28 @@ for l in open(sys.argv[3]):
         sizes[int(q[0], 16)] = int(q[1])
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
+# import thunks (jmp [IAT]): the import's own convention, from AutoExport's .protos when given
+imp_pop = {}
+if len(sys.argv) > 4:
+    W8 = {'double', 'longlong', 'ulonglong', 'undefined8', 'qword'}
+    for l in open(sys.argv[4], encoding='utf-8'):
+        q = l.rstrip('\n').split('\t')
+        if len(q) > 6 and q[6] == 'import':
+            ps = [x.strip().rsplit(' ', 1)[0] for x in q[4].split(',') if x.strip()] if q[4] else []
+            if q[1] == '__thiscall':
+                ps = ps[1:]
+            n = sum(8 if t in W8 else 4 for t in ps)
+            imp_pop[int(q[0], 16)] = n if q[1] in ('__stdcall', '__thiscall') and q[5] != 'true' else 0
+for a, size in sizes.items():
+    if a in known:
+        continue
+    try:
+        i = next(md.disasm(pe.read(a, 8), a, 1))
+    except (StopIteration, Exception):
+        continue
+    if i.mnemonic == 'jmp' and i.operands[0].type == x86.X86_OP_MEM and i.operands[0].mem.base == 0 and \
+            i.operands[0].mem.disp in imp_pop:
+        known[a] = imp_pop[i.operands[0].mem.disp]
 tails = {}          # function without a ret -> set of functions it tail-jumps to
 for a, size in sizes.items():
     if a in known:
@@ -57,7 +79,10 @@ with open(sys.argv[3], 'w') as f:
         if l[0] != '#':
             q = l.rstrip('\n').split('\t')
             a = int(q[0], 16)
-            if a not in known and a in tails:
+            if a in known and q[3] == '?':
+                q[3] = str(known[a]); fixed += 1
+                l = '\t'.join(q) + '\n'
+            elif a not in known and a in tails:
                 p = pop_of(a)
                 if p is not None and str(p) != q[3]:
                     q[3] = str(p)

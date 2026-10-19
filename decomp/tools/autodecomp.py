@@ -58,7 +58,7 @@ def load_machine(path):
         if l.startswith('#'):
             continue
         q = l.rstrip('\n').split('\t')
-        machine[int(q[0], 16)] = (set(x for x in q[2].split(',') if x and x != 'EBP'), int(q[3] or 0))
+        machine[int(q[0], 16)] = (set(x for x in q[2].split(',') if x and x != 'EBP'), None if q[3] == '?' else int(q[3] or 0))
     sp = path.replace('_functions.tsv', '_stackparams.tsv')
     if os.path.exists(sp):
         for l in open(sp):
@@ -78,6 +78,8 @@ def fit_convention(a, pr):
     if len(storage) != len(plist):
         return 'parameter storage unknown'
     regs_in, pop = machine[a]
+    if pop is None:
+        return 'ret pop unknown (no ret found)'
     regs = [s for s in storage if s != 'stack']
     if storage[:len(regs)] != regs:
         return 'register parameter after a stack parameter'
@@ -392,6 +394,8 @@ def main():
     ap.add_argument('--max', type=int, default=0)
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
     ap.add_argument('--per-unit', type=int, default=150)
+    ap.add_argument('--exclude-range', action='append', default=[], metavar='LO-HI',
+                    help='addresses left out (e.g. 401000-420600, the Lua 5.1 library: build it from its sources)')
     ap.add_argument('--functions', required=True, help='symbols/<game>_functions.tsv (machine-code register inputs)')
     a = ap.parse_args()
     load_machine(a.functions)
@@ -450,7 +454,11 @@ def main():
         funcs = funcs[:a.max]
     status = {}
     cands = []
+    ranges = [tuple(int(x, 16) for x in r.split('-')) for r in a.exclude_range]
     for f in funcs:
+        if any(lo <= int(f['a'], 16) < hi for lo, hi in ranges):
+            status[f['a']] = ('rejected', 'excluded range')
+            continue
         res, why = convert(f, protos, skip, imports, impnames)
         if res is None:
             status[f['a']] = ('rejected', why)

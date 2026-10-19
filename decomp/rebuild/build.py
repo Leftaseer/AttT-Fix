@@ -43,7 +43,7 @@ def load_functions(game):
             continue
         a, size, regs, retpop, clob = l.rstrip('\n').split('\t')[:5]
         f[int(a, 16)] = (int(size), sorted((r for r in regs.split(',') if r and r != 'EBP'), key=REG_ORDER.index),
-                         int(retpop or 0), set(x for x in clob.split(',') if x))
+                         0 if retpop == '?' else int(retpop or 0), set(x for x in clob.split(',') if x))
     return f
 
 

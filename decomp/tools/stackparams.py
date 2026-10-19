@@ -20,7 +20,7 @@ for l in open(sys.argv[2]):
     if l[0] == '#':
         continue
     q = l.rstrip('\n').split('\t')
-    funcs[int(q[0], 16)] = (int(q[1]), int(q[3] or 0))
+    funcs[int(q[0], 16)] = (int(q[1]), 0 if q[3] == '?' else int(q[3] or 0))
 imports = {}           # IAT slot -> bytes the imported function pops (from AutoExport's .protos, optional)
 if len(sys.argv) > 4:
     W8 = {'double', 'longlong', 'ulonglong', 'undefined8', 'qword'}

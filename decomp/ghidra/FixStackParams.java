@@ -24,6 +24,7 @@ public class FixStackParams extends GhidraScript {
                 String[] p = line.split("\t", -1);
                 Function f = getFunctionAt(toAddr(Long.parseLong(p[0], 16)));
                 if (f == null || f.isThunk() || f.hasCustomVariableStorage() || f.isExternal()) continue;
+                if (p[3].equals("?")) continue;
                 int pop = p[3].isEmpty() ? 0 : Integer.parseInt(p[3]);
                 String cc = f.getCallingConventionName();
                 if (pop == 0) continue;                   // caller-pop: the ret says nothing about the count
@@ -77,7 +78,7 @@ public class FixStackParams extends GhidraScript {
                 while ((line = r.readLine()) != null) {
                     if (line.startsWith("#")) continue;
                     String[] p = line.split("\t", -1);
-                    pops.put(Long.parseLong(p[0], 16), p[3].isEmpty() ? 0 : Integer.parseInt(p[3]));
+                    pops.put(Long.parseLong(p[0], 16), p[3].isEmpty() ? 0 : p[3].equals("?") ? -1 : Integer.parseInt(p[3]));
                 }
             }
             int grown = 0, gfail = 0;

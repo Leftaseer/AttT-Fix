@@ -25,8 +25,16 @@ if len(sys.argv) > 5:
         if l[0] != '#': slots[int(q[0], 16)] = int(q[1])
     for l in open(sys.argv[5]):
         q = l.rstrip('\n').split('\t')
-        if l[0] != '#': pops[int(q[0], 16)] = int(q[3] or 0)
+        if l[0] != '#': pops[int(q[0], 16)] = 0 if q[3] == '?' else int(q[3] or 0)
 SAVED = {'EBX', 'ESI', 'EDI', 'EBP'}
+
+
+TEXT = p.text_range()
+
+
+def own(t, start):
+    """a jump target outside the known size that still belongs to this function (no function starts there)"""
+    return t not in bf and TEXT[0] <= t < TEXT[1] and abs(t - start) <= 0x20000
 
 
 def analyse(start):
@@ -51,7 +59,13 @@ def analyse(start):
         pending = []; bound = 0
         while True:
             steps += 1
-            if (a, w) in seen or a not in ins: break
+            if (a, w) in seen: break
+            if a not in ins:
+                # code past the size of the function (its body is not contiguous): follow it until another function
+                if a in bf or not (TEXT[0] <= a < TEXT[1]) or abs(a - start) > 0x20000: break
+                got = list(md.disasm(p.read(a, 16), a, 1))
+                if not got: break
+                ins[a] = got[0]
             seen.add((a, w)); i = ins[a]
             m = i.mnemonic
             try:
@@ -115,14 +129,14 @@ def analyse(start):
             if m == 'int3' or m == 'hlt': break
             if m == 'jmp':
                 o = i.operands[0]
-                if o.type == X.X86_OP_IMM and start <= o.imm < end: a = o.imm; continue
+                if o.type == X.X86_OP_IMM and (start <= o.imm < end or own(o.imm, start)): a = o.imm; continue
                 if o.type == X.X86_OP_IMM:     # tail call: the target's register inputs
                     for n, b in BIT.items():
                         if callee_in.get(o.imm, 0) & b and not w & b: inputs |= b
                 break  # tail call or switch: stop
             if m.startswith('j') or m.startswith('loop'):
                 o = i.operands[0]
-                if o.type == X.X86_OP_IMM and start <= o.imm < end: work.append((o.imm, w))
+                if o.type == X.X86_OP_IMM and (start <= o.imm < end or own(o.imm, start)): work.append((o.imm, w))
             a = a + i.size
     return inputs, retpop
 

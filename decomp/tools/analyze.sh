@@ -81,7 +81,7 @@ with open('%s/%s_functions.tsv' % (s, g), 'w') as f:
     f.write('# address\tsize\tregister inputs\tret pop bytes\tvolatile registers changed (transitively)\n')
     for a in sorted(bf):
         r = rp.get(a, [a, '', ''])
-        f.write('%s\t%d\t%s\t%s\t%s\n' % (a, bf[a]['size'], r[1], r[2].split(',')[0] if r[2] else '0', cl.get(a, 'EAX,ECX,EDX')))
+        f.write('%s\t%d\t%s\t%s\t%s\n' % (a, bf[a]['size'], r[1], r[2] if r[2] and ',' not in r[2] else '?', cl.get(a, 'EAX,ECX,EDX')))
 EOF
     py tailpop.py "$WORK/bin/$g.exe" "$O/${g}_regparams.tsv" "$SYMS/${g}_functions.tsv"
     py retlive.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_retlive.tsv"
@@ -107,5 +107,5 @@ done
    -postScript AutoExport.java "$WORK/decomp/attt_auto.jsonl" "$WORK/decomp/attt_auto_types.h" > "$WORK/logs/auto_attt.log" 2>&1
 py autodecomp.py "$WORK/decomp/attt_auto.jsonl" "$WORK/decomp/attt_auto_types.h" "$WORK/auto/attt" \
    --exe "$WORK/bin/attt.exe" --functions "$SYMS/attt_functions.tsv" \
-   --syms "$O/attt_g1/symbols.tsv" --syms "$SYMS/attt.sym" --syms "$SYMS/attt_manual.sym"
+   --syms "$O/attt_g1/symbols.tsv" --syms "$SYMS/attt.sym" --syms "$SYMS/attt_manual.sym" --exclude-range 401000-420600   # Lua 5.1.2: from its sources
 echo "done: Ghidra projects in $WORK/proj, decompilation in $WORK/decomp, compilable C in $WORK/auto/attt"
