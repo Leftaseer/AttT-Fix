@@ -262,7 +262,8 @@ def main():
                 allow = set(int(l.split('\t')[0], 16) for l in open(os.path.join(a.auto, 'functions.tsv'))
                             if l.split('\t')[1] == 'compiled')
             allow -= set(int(l.split()[0], 16) for l in open(a.auto_exclude) if l.strip() and not l.startswith('#'))
-        aflags = ['--target=i686-pc-windows-msvc', '-O1', '-march=pentium4', '-msse2', '-fms-extensions', '-ffreestanding',
+        # x87 arithmetic like the original (its float code is x87; SSE rounds every step to float)
+        aflags = ['--target=i686-pc-windows-msvc', '-O1', '-march=pentium-mmx', '-mfpmath=387', '-fms-extensions', '-ffreestanding',
                   '-fno-builtin', '-fno-stack-protector', '-x', 'c', '-std=gnu11', '-w',
                   '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types',
                   '-Wno-error=incompatible-function-pointer-types', '-Wno-error=int-to-pointer-cast', '-Wno-error=return-type',

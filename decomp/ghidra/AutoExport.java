@@ -72,6 +72,55 @@ public class AutoExport extends GhidraScript {
         return l == 1 ? "undefined1" : l == 2 ? "undefined2" : l == 8 ? "undefined8" : l == 4 ? "undefined4" : "undefined4";
     }
 
+    // A value that moves between a float type and an integer type without a conversion op (COPY, CAST, a load or
+    // store through a pointer of the other kind, a call argument, the result): the decompiler means the same bits,
+    // C converts the number.  Such functions cannot be compiled faithfully as printed.
+    static DataType base(DataType d) {
+        while (d instanceof TypeDef) d = ((TypeDef) d).getBaseDataType();
+        return d;
+    }
+    static boolean isFloat(DataType d) { return base(d) instanceof AbstractFloatDataType; }
+    static DataType htype(Varnode v) {
+        if (v == null) return null;
+        HighVariable h = v.getHigh();
+        return h == null ? null : h.getDataType();
+    }
+    static DataType pointee(DataType d) {
+        d = base(d);
+        return d instanceof Pointer ? ((Pointer) d).getDataType() : null;
+    }
+    static boolean mix(DataType a, DataType b) {
+        if (a == null || b == null) return false;
+        if (base(a) instanceof Undefined || base(b) instanceof Undefined) {
+            // undefinedN prints as an unsigned integer type
+        }
+        return isFloat(a) != isFloat(b) && base(a).getLength() == base(b).getLength() && !(base(a) instanceof Pointer && false);
+    }
+    String floatMix(HighFunction hf, Function f) {
+        Iterator<PcodeOpAST> it = hf.getPcodeOps();
+        while (it.hasNext()) {
+            PcodeOpAST op = it.next();
+            int c = op.getOpcode();
+            Varnode out = op.getOutput();
+            if (c == PcodeOp.COPY || c == PcodeOp.CAST || c == PcodeOp.MULTIEQUAL || c == PcodeOp.INDIRECT) {
+                if (mix(htype(out), htype(op.getInput(0)))) return "copy at " + op.getSeqnum().getTarget();
+            } else if (c == PcodeOp.STORE) {
+                if (mix(pointee(htype(op.getInput(1))), htype(op.getInput(2)))) return "store at " + op.getSeqnum().getTarget();
+            } else if (c == PcodeOp.LOAD) {
+                if (mix(pointee(htype(op.getInput(1))), htype(out))) return "load at " + op.getSeqnum().getTarget();
+            } else if (c == PcodeOp.CALL) {
+                Function t = getFunctionAt(op.getInput(0).getAddress());
+                if (t == null) continue;
+                Parameter[] ps = t.getParameters();
+                for (int k = 1; k < op.getNumInputs() && k - 1 < ps.length; k++)
+                    if (mix(ps[k - 1].getDataType(), htype(op.getInput(k)))) return "argument at " + op.getSeqnum().getTarget();
+            } else if (c == PcodeOp.RETURN && op.getNumInputs() > 1) {
+                if (mix(f.getReturnType(), htype(op.getInput(1)))) return "result at " + op.getSeqnum().getTarget();
+            }
+        }
+        return null;
+    }
+
     String render(DecompileResults r, Function f, Map<Long, String> globals, Map<Long, String> callees,
                   Set<DataType> used, Map<Long, String> strings) {
         ClangTokenGroup g = r.getCCodeMarkup();
@@ -185,6 +234,9 @@ public class AutoExport extends GhidraScript {
                 sb.append(",\"size\":").append(f.getBody().getNumAddresses());
                 sb.append(",\"cc\":").append(js(f.getCallingConventionName()));
                 sb.append(",\"custom\":").append(f.hasCustomVariableStorage());
+                String fm = null;
+                try { fm = floatMix(r.getHighFunction(), f); } catch (Exception e) { fm = "check failed"; }
+                if (fm != null) sb.append(",\"floatmix\":").append(js(fm));
                 sb.append(",\"code\":").append(js(code));
                 sb.append(",\"globals\":{");
                 boolean first = true;

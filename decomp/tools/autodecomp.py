@@ -225,6 +225,8 @@ def convert(f, protos, skip, imports, impnames):
     if a in skip:
         return None, 'hand-decompiled'
     code = f['code']
+    if f.get('floatmix'):
+        return None, 'float and integer bits mixed (%s)' % f['floatmix'].split(' at ')[0]
     for pat, why in BLOCK:
         if re.search(pat, code):
             return None, why

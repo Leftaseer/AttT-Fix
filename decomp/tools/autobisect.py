@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ap = argparse.ArgumentParser()
 ap.add_argument('orig'); ap.add_argument('auto'); ap.add_argument('work')
 ap.add_argument('--test')
+ap.add_argument('--range', help='LO,HI: resume a search known to pass with LO functions and fail with HI')
 a = ap.parse_args()
 os.makedirs(a.work, exist_ok=True)
 allf = sorted(l.split('\t')[0] for l in open(os.path.join(a.auto, 'functions.tsv')) if l.split('\t')[1] == 'compiled')
@@ -42,12 +43,17 @@ def test(lst):
     return ok
 
 
+resume = [int(x) for x in a.range.split(',')] if a.range else None
 while True:
     cand = [x for x in allf if x not in bad]
-    if test(cand):
-        log.write('all remaining pass\n'); log.flush()
-        break
-    lo, hi = 0, len(cand)          # the prefix of length lo passes, of length hi fails
+    if resume:
+        lo, hi = resume
+        resume = None
+    else:
+        if test(cand):
+            log.write('all remaining pass\n'); log.flush()
+            break
+        lo, hi = 0, len(cand)      # the prefix of length lo passes, of length hi fails
     while hi - lo > 1:
         mid = (lo + hi) // 2
         if test(cand[:mid]):
