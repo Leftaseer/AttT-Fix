@@ -25,7 +25,7 @@ BLOCK = [
     (r'UNRESOLVED', 'unresolved name'), (r'halt_baddata|halt_unimplemented|software_\w+\(|swi\(', 'bad instruction'),
     (r'\bLOCK\(\)|\bUNLOCK\(\)', 'locked instruction'), (r'_vbase_destructor|__alloca_probe', 'compiler helper'),
     (r'\bin_FS_OFFSET\b', 'TEB access'), (r'\bxRam|\bunique0x', 'unmapped storage'),
-    (r'\.\.\.\)', 'varargs'), (r'\bCONCAT\d{3,}|\bSUB\d{3,}', 'wide value'),
+    (r'\.\.\.\)', 'varargs'), (r'\bfloat10\s*\*', 'pointer to float10 (10 bytes in the decompiler, 8 in C)'), (r'\bCONCAT\d{3,}|\bSUB\d{3,}', 'wide value'),
 ]
 
 
