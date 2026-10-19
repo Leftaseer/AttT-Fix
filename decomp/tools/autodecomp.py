@@ -50,6 +50,7 @@ machine = {}       # addr -> (register inputs, bytes popped by ret) from symbols
 convs = {}         # addr -> (registers in parameter order, ret pop) of the prototypes as written out
 
 
+import_args = {}    # IAT slot -> argument bytes callers remove after calling it (tools/importargs.py)
 stack_slots = {}    # addr -> stack slots the machine code uses (tools/stackparams.py, exact ones only)
 
 
@@ -59,6 +60,12 @@ def load_machine(path):
             continue
         q = l.rstrip('\n').split('\t')
         machine[int(q[0], 16)] = (set(x for x in q[2].split(',') if x and x != 'EBP'), None if q[3] == '?' else int(q[3] or 0))
+    ia = path.replace('_functions.tsv', '_importargs.tsv')
+    if os.path.exists(ia):
+        for l in open(ia):
+            q = l.rstrip('\n').split('\t')
+            if l[0] != '#':
+                import_args[int(q[0], 16)] = int(q[1])
     sp = path.replace('_functions.tsv', '_stackparams.tsv')
     if os.path.exists(sp):
         for l in open(sp):
@@ -359,6 +366,10 @@ def convert(f, protos, skip, imports, impnames):
             if ca not in impnames:
                 return None, 'import %s not in the import table' % c
             icc, _, iret, iplist, iva = cp[:5]
+            if icc not in ('__stdcall', '__thiscall', '__fastcall') and not iva and ca in import_args:
+                have = sum(8 if t.strip() in WIDE else 4 for t, _ in iplist)
+                if import_args[ca] > have:
+                    return None, 'import %s takes more arguments than its prototype' % c
             w = cc_word(icc, False) or '__cdecl'
             ps = ', '.join(t for t, n in iplist) if iplist else 'void'
             if iva:
