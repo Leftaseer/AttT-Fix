@@ -363,7 +363,7 @@ def convert(f, protos, skip, imports, impnames):
             ps = ', '.join(t for t, n in iplist) if iplist else 'void'
             if iva:
                 ps += ', ...'
-            decls.append('DECOMP_C %s (%s *imp_%s)(%s) __asm__("%s");' % (iret, w, c, ps, impnames[ca]))
+            decls.append('DECOMP_C %s (%s *imp_%s)(%s) __asm__("%s");' % (wide_ret(iret), w, c, ps, impnames[ca]))
             decls.append('#define sub_%s (*imp_%s)' % (c, c))
             continue
         why = fit_convention(ca, cp)
