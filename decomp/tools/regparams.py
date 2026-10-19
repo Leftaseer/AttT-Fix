@@ -4,7 +4,7 @@ being written.  Saves of callee-saved registers (push ebx/esi/edi/ebp) and 'push
 space in the prologue are not reads; a call reads the register inputs of its callee (and clobbers EAX/ECX/EDX),
 a tail jump those of its target, so the analysis repeats until nothing changes.  Detects MSVC /LTCG custom
 conventions (a function that passes EAX on to a callee takes EAX too).
-usage: regparams.py EXE BINFEAT.json OUT.tsv   ->  ADDR <tab> regs (e.g. ECX,EAX) <tab> ret-pop-bytes"""
+usage: regparams.py EXE BINFEAT.json OUT.tsv [STACKPARAMS.tsv FUNCTIONS.tsv]   ->  ADDR <tab> regs (e.g. ECX,EAX) <tab> ret-pop-bytes"""
 import sys, json; sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(__file__))); from pe import PE
 import capstone
 from capstone import x86_const as X
@@ -18,6 +18,14 @@ BIT = {'EAX': 1, 'ECX': 2, 'EDX': 4, 'EBX': 8, 'ESI': 16, 'EDI': 32, 'EBP': 64}
 def regs(i, names):
     return set(FULL[i.reg_name(r)] for r in names if i.reg_name(r) in FULL)
 callee_in = {}       # function -> register input bits (previous pass)
+slots, pops = {}, {}  # stack parameter slots (stackparams.py) and ret pops of the callees, when given
+if len(sys.argv) > 5:
+    for l in open(sys.argv[4]):
+        q = l.rstrip('\n').split('\t')
+        if l[0] != '#': slots[int(q[0], 16)] = int(q[1])
+    for l in open(sys.argv[5]):
+        q = l.rstrip('\n').split('\t')
+        if l[0] != '#': pops[int(q[0], 16)] = int(q[3] or 0)
 SAVED = {'EBX', 'ESI', 'EDI', 'EBP'}
 
 
@@ -27,10 +35,20 @@ def analyse(start):
     if not code: return 0, set()
     ins = {}
     for i in md.disasm(code, start): ins[i.address] = i
-    inputs = 0; retpop = set(); prologue = True
+    # callee-saved registers the function overwrites somewhere: pushes of those are saves
+    clobbers = set()
+    for i in ins.values():
+        if i.mnemonic == 'pop':
+            continue
+        try:
+            clobbers |= regs(i, i.regs_access()[1]) & SAVED
+        except Exception:
+            pass
+    inputs = 0; retpop = set(); pending = []; entry_run = True
     seen = set(); work = [(start, 0)]; steps = 0
     while work and steps < 20000:
         a, w = work.pop()
+        pending = []; bound = 0
         while True:
             steps += 1
             if (a, w) in seen or a not in ins: break
@@ -41,17 +59,25 @@ def analyse(start):
             except Exception:
                 break
             r = regs(i, rd); wrr = regs(i, wr)
-            if m == 'push' and i.operands[0].type == X.X86_OP_REG:
-                pr = FULL.get(i.reg_name(i.operands[0].reg))
-                if pr in SAVED or (pr == 'ECX' and prologue):
-                    r = set()
-            if not (m == 'push' or (m == 'mov' and i.op_str in ('ebp, esp',)) or
-                    (m in ('sub', 'and') and i.op_str.startswith('esp,')) or 'fs:' in i.op_str or
-                    (m == 'mov' and i.op_str.startswith('eax, dword ptr [0x')) or      # security cookie
-                    (m == 'xor' and i.op_str in ('eax, esp', 'eax, ebp')) or
-                    (m == 'mov' and i.op_str.endswith('], eax') and ('[esp' in i.op_str or '[ebp' in i.op_str)) or
-                    (m == 'lea' and i.op_str.startswith('eax, ['))):
-                prologue = False
+            if m != 'push':
+                entry_run = False
+            if m == 'push':
+                # a pushed register is read only if the slot goes to a call as an argument (decided at the call);
+                # otherwise it is a save or reserves stack space
+                o = i.operands[0]
+                pr = FULL.get(i.reg_name(o.reg)) if o.type == X.X86_OP_REG else None
+                # pushes that open the function are saves
+                pending.append(pr if pr and not w & BIT[pr] and not entry_run and pr not in clobbers else None)
+                r = set() if o.type == X.X86_OP_REG else r
+            elif m == 'pop':
+                if pending: pending.pop()
+                bound = min(bound, len(pending))
+            elif m in ('test', 'cmp') or m.startswith('j'):
+                bound = len(pending)
+            elif m in ('add', 'sub') and i.op_str.startswith('esp, ') and i.operands[1].type == X.X86_OP_IMM:
+                k = i.operands[1].imm // 4
+                if m == 'add': pending = pending[:max(0, len(pending) - k)]; bound = min(bound, len(pending))
+                else: pending.extend([None] * min(k, 64))
             if m == 'pop': r = set()
             if m in ('xor', 'sub', 'sbb') and len(i.operands) == 2 and i.operands[0].type == X.X86_OP_REG and i.operands[1].type == X.X86_OP_REG and i.operands[0].reg == i.operands[1].reg:
                 r = set() if m != 'sbb' else r
@@ -59,6 +85,14 @@ def analyse(start):
                 o = i.operands[0]
                 ci = callee_in.get(o.imm, 0) if o.type == X.X86_OP_IMM else 0
                 r = set(n for n, b in BIT.items() if ci & b)
+                # an indirect call takes the pushes since the last test or branch (saves come before those)
+                k = slots.get(o.imm, len(pending) - bound) if o.type == X.X86_OP_IMM else len(pending) - bound
+                for x in pending[len(pending) - k:] if k else []:
+                    if x and (o.type == X.X86_OP_IMM or x in ('EAX', 'ECX', 'EDX')):
+                        r.add(x)      # before an indirect call a pushed EBX/ESI/EDI/EBP is far more often a save
+                if o.type == X.X86_OP_IMM and pops.get(o.imm):
+                    pending = pending[:max(0, len(pending) - pops[o.imm] // 4)]
+                bound = min(bound, len(pending))
             # alignment padding: lea r,[r] / mov r,r
             if (m == 'lea' and i.op_str.split(',')[0].strip() == i.op_str.split('[')[-1].rstrip(']').strip()) or \
                     (m == 'mov' and len(i.operands) == 2 and i.operands[0].type == X.X86_OP_REG and
@@ -71,7 +105,10 @@ def analyse(start):
                 r = set()
             for x in r:
                 if not w & BIT[x]: inputs |= BIT[x]
-            for x in wrr: w |= BIT[x]
+            for x in wrr:
+                w |= BIT[x]
+                # a register written after being pushed was saved there, not passed
+                pending = [None if y == x else y for y in pending] if m != 'call' else pending
             if m == 'call': w |= BIT['EAX'] | BIT['ECX'] | BIT['EDX']
             if m in ('ret', 'retf'):
                 retpop.add(i.operands[0].imm if i.operands else 0); break

@@ -33,6 +33,15 @@ class Unsupported(Exception):
     pass
 
 
+_S = '?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@'
+STRING_ALIAS = {
+    '??0' + _S + 'QAE@XZ': 'str_ctor', '??0' + _S + 'QAE@PBD@Z': 'str_ctor_cstr', '??0' + _S + 'QAE@ABV01@@Z': 'str_ctor_copy',
+    '??1' + _S + 'QAE@XZ': 'str_dtor', '??4' + _S + 'QAEAAV01@ABV01@@Z': 'str_assign',
+    '??4' + _S + 'QAEAAV01@PBD@Z': 'str_assign_cstr', '?c_str@' + _S[2:] + 'QBEPBDXZ': 'str_cstr',
+    '?size@' + _S[2:] + 'QBEIXZ': 'str_size', '?length@' + _S[2:] + 'QBEIXZ': 'str_size',
+}
+
+
 class Harness:
     def __init__(self, orig_exe, rebuilt_exe, rebuilt_map):
         self.orig = PE(orig_exe)
@@ -144,12 +153,69 @@ class Harness:
         dll, name = self.imp_by_addr.get(addr, ('?', '?'))
         alias = {'??2@YAPAXI@Z': 'new', '??3@YAXPAX@Z': 'free_like', '??_V@YAXPAX@Z': 'free_like', '??_U@YAPAXI@Z': 'new',
                  '_strnicmp': 'strnicmp', '_stricmp': 'stricmp', '_strlwr': 'strlwr'}
+        alias.update(STRING_ALIAS)
         f = getattr(self, 'crt_' + alias.get(name, name.lstrip('_')), None)
         if f is None:
             uc.emu_stop()
             self.fault = 'unsupported import %s!%s' % (dll, name)
             return
         f()
+
+    # --- std::string of MSVCP80 (VC8 layout, 28 bytes: allocator, 16-byte buffer or pointer, size, capacity)
+    def _ecx(self):
+        return self.uc.reg_read(UC_X86_REG_ECX)
+
+    def _str_get(self, p):
+        size, res = struct.unpack('<II', self.uc.mem_read(p + 20, 8))
+        if size > 0x100000:
+            raise ValueError('bad string')
+        data = self.uc.mem_read(p + 4, 4)
+        ptr = (p + 4) if res < 16 else struct.unpack('<I', data)[0]
+        return bytes(self.uc.mem_read(ptr, size))
+
+    def _str_set(self, p, b):
+        if len(b) < 16:
+            self.uc.mem_write(p + 4, b + b'\0' * (16 - len(b)))
+            res = 15
+        else:
+            q = self.alloc(len(b) + 1, b + b'\0')
+            self.uc.mem_write(p + 4, struct.pack('<I', q))
+            res = len(b)
+        self.uc.mem_write(p + 20, struct.pack('<II', len(b), res))
+
+    def _str_op(self, fn, pop, ret_this=True):
+        try:
+            this = self._ecx()
+            r = fn(this)
+        except (ValueError, UcError):
+            self.uc.emu_stop(); self.fault = 'bad std::string'; return
+        self._ret(this if ret_this else r, pop)
+
+    def crt_str_ctor(self): self._str_op(lambda t: self._str_set(t, b''), 0)
+    def crt_str_ctor_cstr(self): self._str_op(lambda t: self._str_set(t, self._cstr(self._arg(0))), 4)
+    def crt_str_ctor_copy(self): self._str_op(lambda t: self._str_set(t, self._str_get(self._arg(0))), 4)
+    def crt_str_dtor(self): self._str_op(lambda t: None, 0)
+    def crt_str_assign(self): self._str_op(lambda t: self._str_set(t, self._str_get(self._arg(0))), 4)
+    def crt_str_assign_cstr(self): self._str_op(lambda t: self._str_set(t, self._cstr(self._arg(0))), 4)
+    def crt_str_cstr(self):
+        self._str_op(lambda t: (t + 4) if struct.unpack('<I', self.uc.mem_read(t + 24, 4))[0] < 16
+                     else struct.unpack('<I', self.uc.mem_read(t + 4, 4))[0], 0, ret_this=False)
+    def crt_str_size(self):
+        self._str_op(lambda t: struct.unpack('<I', self.uc.mem_read(t + 20, 4))[0], 0, ret_this=False)
+
+    def crt_strcspn(self):
+        a, b = self._cstr(self._arg(0)), set(self._cstr(self._arg(1)))
+        n = 0
+        while n < len(a) and a[n] not in b:
+            n += 1
+        self._ret(n)
+
+    def crt_memmove_s(self):
+        d, dn, src, n = (self._arg(i) for i in range(4))
+        if n > dn:
+            self._ret(22); return
+        self.uc.mem_write(d, bytes(self.uc.mem_read(src, n)))
+        self._ret(0)
 
     def crt_malloc(self):
         self._ret(self.alloc(self._arg(0)))
