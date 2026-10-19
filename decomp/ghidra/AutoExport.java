@@ -179,6 +179,25 @@ public class AutoExport extends GhidraScript {
                     sb.append("UNRESOLVED_STRING");
                     continue;
                 }
+                // a symbol name whose address is an input of the token's p-code op (vftable of a constructor): the
+                // name alone is ambiguous (a class has a vftable for each base), the address is not
+                if (vn == null && t.getPcodeOp() != null && text.matches("&?[A-Za-z_][\\w:<>,`' ]*") &&
+                        !text.matches("(true|false|NULL)")) {
+                    String bare = text.replace("&", "");
+                    bare = bare.contains("::") ? bare.substring(bare.lastIndexOf("::") + 2) : bare;
+                    Long found = null;
+                    for (Varnode in : t.getPcodeOp().getInputs()) {
+                        if (in == null || !(in.isConstant() || in.isAddress())) continue;
+                        Address ad = toAddr(in.getOffset());
+                        for (Symbol sy : currentProgram.getSymbolTable().getSymbols(ad))
+                            if (sy.getName().equals(bare)) found = in.getOffset();
+                    }
+                    if (found != null) {
+                        globals.put(found, "code|0");
+                        sb.append(String.format("((void *)G_%08X)", found));
+                        continue;
+                    }
+                }
                 // addresses printed with a symbol name (vftable, LAB_, FUN_, PTR_...)
                 if (vn != null && vn.isConstant() && text.matches("&?[A-Za-z_][\\w:<>,`' ]*") && !text.matches("(true|false|NULL)")) {
                     long a = vn.getOffset();

@@ -196,6 +196,12 @@ def body_of(code):
 
 symaddr = {}
 symname = {}
+ambiguous = set()   # names given to more than one address
+
+
+def add_sym(name, addr):
+    if symaddr.setdefault(name, addr) != addr:
+        ambiguous.add(name)
 rets = {}
 image = [None]      # the PE of the game (exception tables)
 eax_used = set()    # functions whose callers use EAX after the call (tools/retlive.py)
@@ -268,13 +274,16 @@ def convert(f, protos, skip, imports, impnames):
     body = re.sub(r'(?:\b[A-Za-z_]\w*(?:<[^;{}()]*?>)?\s*::\s*)+(?=sub_[0-9A-F]{8})', '', body)
     # the SEH frame of C++ functions (fs:[0], printed as a global at FFDFF000): our frame layout differs, so the
     # registration is dropped; an exception then passes through without running this function's destructors
+    # the address of a symbol is printed as &Class::name: our ((void *)G_X) already is that address
+    body = re.sub(r'&?\s*(?:\b[A-Za-z_]\w*(?:<[^;{}()]*?>)?\s*::\s*)*(\(\(void \*\)G_[0-9A-F]{8}\))', r'\1', body)
     if 'G_FFDFF000' in body:
-        hs = re.findall(r'\b(?:pu|pc|p)\w*Stack_\w+\s*=\s*&?(?:LAB|FUN)_([0-9a-fA-F]{8})\b', body)
+        hs = re.findall(r'\b(?:pu|pc|p)\w*Stack_\w+\s*=\s*(?:&?(?:LAB|FUN)_|\(\(void \*\)G_)([0-9a-fA-F]{8})\b', body)
         if len(hs) != 1:
             return None, 'exception frame without a known handler'
         if catches(int(hs[0], 16)):
             return None, 'catches exceptions'
     body = re.sub(r'\n[^\n;]*\bG_FFDFF000\b[^\n;]*;', '\n', body)
+
     # vftable of the function's own class
     own = symname.get(a, '')
     if '::' in own:
@@ -314,7 +323,7 @@ def convert(f, protos, skip, imports, impnames):
     def sym_ref(m):
         q = m.group(0).lstrip('&').replace(' ', '')
         ad = symaddr.get(q)
-        if ad is None:
+        if ad is None or q in ambiguous:
             raise KeyError(q)
         extra.add('%08X' % ad)
         return '((void *)d_%08X)' % ad
@@ -411,13 +420,13 @@ def main():
             if '\t' in l:
                 q = l.rstrip('\n').split('\t')
                 try:
-                    symaddr.setdefault(q[1].replace(' ', ''), int(q[0], 16))
+                    add_sym(q[1].replace(' ', ''), int(q[0], 16))
                 except ValueError:
                     pass
             else:
                 q = l.split('#')[0].split(None, 2)
                 if len(q) == 3 and q[0] != 'SLOT':
-                    symaddr.setdefault(q[2].strip().replace(' ', ''), int(q[0], 16))
+                    add_sym(q[2].strip().replace(' ', ''), int(q[0], 16))
                     if q[1] == 'f':
                         symname[int(q[0], 16)] = q[2].strip()
     sys.path.insert(0, HERE)
