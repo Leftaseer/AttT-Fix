@@ -382,6 +382,9 @@ def convert(f, protos, skip, imports, impnames):
             decls.append('#define G_%s ((%s *)d_%s)' % (g, parts[1], g))
         else:
             decls.append('#define G_%s (*(%s *)d_%s)' % (g, parts[0], g))
+    for key, t in f.get('sized', {}).items():
+        decls.append('DECOMP_C char d_%s[];' % key[:8])
+        decls.append('#define GV_%s (*(%s *)d_%s)' % (key, t, key[:8]))
     for s in f['strings']:
         decls.append('DECOMP_C char d_%s[];' % s)
         decls.append('#define S_%s d_%s' % (s, s))

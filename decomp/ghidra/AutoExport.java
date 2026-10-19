@@ -122,7 +122,7 @@ public class AutoExport extends GhidraScript {
     }
 
     String render(DecompileResults r, Function f, Map<Long, String> globals, Map<Long, String> callees,
-                  Set<DataType> used, Map<Long, String> strings) {
+                  Set<DataType> used, Map<Long, String> strings, Map<String, String> sized) {
         ClangTokenGroup g = r.getCCodeMarkup();
         List<ClangNode> toks = new ArrayList<>();
         g.flatten(toks);
@@ -161,6 +161,16 @@ public class AutoExport extends GhidraScript {
                         hs.getStorage().getMinAddress().isMemoryAddress()) {
                         long a = hs.getStorage().getMinAddress().getOffset();
                         DataType dt = hs.getDataType();
+                        int vs = vn != null ? vn.getSize() : 0;
+                        if (vs > 0 && !(dt instanceof Array) && vs != dt.getLength() && (vs == 1 || vs == 2 || vs == 4 || vs == 8)) {
+                            // the symbol's type (often undefined1 where nothing was defined) is not the size of this
+                            // access: an access of its own size
+                            String key = String.format("%08X_%d", a, vs);
+                            String t2 = vs == 1 ? "unsigned char" : vs == 2 ? "unsigned short" : vs == 4 ? "unsigned int" : "unsigned long long";
+                            sized.put(key, t2);
+                            sb.append("GV_").append(key);
+                            continue;
+                        }
                         if (dt instanceof Array)
                             globals.put(a, "ARRAY|" + ctype(((Array) dt).getDataType(), used) + "|" + dt.getLength());
                         else
@@ -243,9 +253,10 @@ public class AutoExport extends GhidraScript {
                 Function f = r.getFunction();
                 if (r.getDecompiledFunction() == null) return null;
                 Map<Long, String> globals = new TreeMap<>(), callees = new TreeMap<>(), strings = new TreeMap<>();
+                Map<String, String> sized = new TreeMap<>();
                 Set<DataType> used = new HashSet<>();
                 String code;
-                try { code = render(r, f, globals, callees, used, strings); }
+                try { code = render(r, f, globals, callees, used, strings, sized); }
                 catch (Exception e) { return null; }
                 usedAll.addAll(used);
                 StringBuilder sb = new StringBuilder();
@@ -262,6 +273,12 @@ public class AutoExport extends GhidraScript {
                 for (Map.Entry<Long, String> e : globals.entrySet()) {
                     if (!first) sb.append(','); first = false;
                     sb.append(String.format("\"%08X\":", e.getKey())).append(js(e.getValue()));
+                }
+                sb.append("},\"sized\":{");
+                first = true;
+                for (Map.Entry<String, String> e : sized.entrySet()) {
+                    if (!first) sb.append(','); first = false;
+                    sb.append(js(e.getKey())).append(':').append(js(e.getValue()));
                 }
                 sb.append("},\"callees\":[");
                 first = true;
