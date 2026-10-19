@@ -70,6 +70,9 @@ struct CInput {                              /* CSingleton<CInput> (0x7CC bytes)
     void Reset();                            /* 0x46CF30 */
 };
 static_assert(sizeof(CInput) == 0x7CC, "CInput is 0x7CC bytes");
+#ifdef DECOMP_TEST_INPUT
+void TestInput(CInput *input);               /* engine.cpp: scripted input of automatic tests */
+#endif
 
 struct CCursor {                             /* CSingleton<CCursor> (0x284 bytes) */
     void **vftable;

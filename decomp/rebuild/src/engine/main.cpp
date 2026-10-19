@@ -235,12 +235,18 @@ void GameMain(const char *cmdLine)
         if (GetKeyState(VK_CONTROL) < 0)
             GetKeyState(VK_HOME);            /* leftover of a debug shortcut, the result is not used */
         if (!g_appActive) {
+#ifdef DECOMP_TEST_INPUT
+            OutputDebugStringA("main loop: inactive, waiting for messages");
+#endif
             if (!GetMessageA(&msg, nullptr, 0, 0))
                 break;
         } else if (PeekMessageA(&msg, nullptr, 0, 0, PM_REMOVE)) {
             if (msg.message == WM_QUIT)
                 break;
         } else {
+#ifdef DECOMP_TEST_INPUT
+            TestInput(CInput::Instance());
+#endif
             if (!g_engine->Step())
                 break;
             continue;

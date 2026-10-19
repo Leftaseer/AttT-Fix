@@ -7,11 +7,12 @@ rebuilt exe can be checked in the game itself on a machine without a GPU or a sc
 Actions (separated by ';'): wait SECONDS | key XDOTOOL_KEY | click X Y | move DX DY [TIMES] | press | focus | shot LABEL
 (the game moves its own cursor by DirectInput, which sees relative motion: use move, then press)
 The game folder is made in $WORK/game/NAME from symlinks to the installed game ($GAME_DIR) plus a copy of EXE;
-screenshots go to $WORK/shots/NAME_LABEL.png; Wine's output, including the engine's errors of a build made with
+the startup videos are skipped (-nologo) unless LOGOS=1; screenshots go to $WORK/shots/NAME_LABEL.png; Wine's output, including the engine's errors of a build made with
 build.py -D DECOMP_DEBUG_LOG, to $WORK/game/NAME/wine.txt.  Prints whether the game was still running at the end
 and the engine's error log if it wrote one.
 
-Needs: wine (32-bit), Xvfb, xdotool, ImageMagick (import), 32-bit Mesa (libgl1-mesa-dri:i386, libglx-mesa0:i386).
+DXVK=dir uses DXVK's d3d9.dll (with 32-bit mesa-vulkan-drivers: lavapipe), RES=800x600 sets the resolution.
+Needs: wine (32-bit), Xvfb, matchbox-window-manager, xdotool, ImageMagick (import), 32-bit Mesa (libgl1-mesa-dri:i386, libglx-mesa0:i386).
 The Wine prefix ($WINEPREFIX, made with wineboot) needs the native d3dx9_29.dll of the DirectX redistributable
 (Feb2006_d3dx9_29_x86.cab in directx_Jun2010_redist.exe) in system32 with the override d3dx9_29=native: Wine's
 own d3dx9 cannot compile the game's effects.  The X screen is 1280x960, the resolution of the default graphic.cfg,
@@ -32,19 +33,43 @@ for f in os.listdir(G):
     if f not in ('ATThrone.exe', 'Saves', 'Screenshots', 'graphic.cfg'):
         os.symlink(os.path.join(G, f), os.path.join(D, f))
 shutil.copy(os.path.join(G, 'graphic.cfg'), D)
+RES = os.environ.get('RES', '1280x960')    # the game's resolution (graphic.cfg starts with width, height) = X screen
+W, H = (int(x) for x in RES.split('x'))
+cfg = bytearray(open(os.path.join(D, 'graphic.cfg'), 'rb').read())
+cfg[0:8] = W.to_bytes(4, 'little') + H.to_bytes(4, 'little')
+open(os.path.join(D, 'graphic.cfg'), 'wb').write(cfg)
 shutil.copy(exe, os.path.join(D, 'ATThrone.exe'))
+# DXVK (Direct3D 9 on Vulkan, here Mesa's lavapipe) is much faster than Wine's own Direct3D on software OpenGL:
+# DXVK=folder of DXVK's x32 DLLs
+if os.environ.get('DXVK'):
+    shutil.copy(os.path.join(os.environ['DXVK'], 'd3d9.dll'), D)
+for dll in filter(None, os.environ.get('DLLS', '').split(':')):   # e.g. DXVK's d3d9.dll (with WINEDLLOVERRIDES=d3d9=n)
+    shutil.copy(dll, D)
+if os.environ.get('TESTINPUT'):            # scripted input for a build made with -D DECOMP_TEST_INPUT
+    shutil.copy(os.environ['TESTINPUT'], os.path.join(D, 'testinput.txt'))
 saves = os.environ.get('SAVES')            # a folder of save games to start with
 if saves:
     for f in os.listdir(saves):
         shutil.copy(os.path.join(saves, f), D + '/Saves')
 
 disp = ':%d' % random.randint(100, 400)
-xv = subprocess.Popen(['Xvfb', disp, '-screen', '0', '1280x960x24', '+extension', 'GLX'],
+xv = subprocess.Popen(['Xvfb', disp, '-screen', '0', '%dx%dx24' % (W, H), '+extension', 'GLX'],
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(2)
+# a window manager keeps the game window active (without one it loses activation after the videos and the main
+# loop stops running the engine)
+wm = None
+if shutil.which('matchbox-window-manager'):
+    wm = subprocess.Popen(['matchbox-window-manager', '-use_titlebar', 'no'], env=dict(os.environ, DISPLAY=disp),
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(1)
+if os.environ.get('DXVK'):
+    os.environ['WINEDLLOVERRIDES'] = 'd3d9=n;' + os.environ.get('WINEDLLOVERRIDES', '')
 env = dict(os.environ, DISPLAY=disp, WINEPREFIX=PREFIX, WINEDEBUG=os.environ.get('WINEDEBUG', 'err+all,+debugstr'))
 out = open(os.path.join(D, 'wine.txt'), 'w')
-game = subprocess.Popen(['wine', 'ATThrone.exe'], cwd=D, env=env, stdout=out, stderr=subprocess.STDOUT)
+# -nologo: the engine's own switch that skips the startup videos (1C logo, logo, intro), as AttTFix's SkipIntro
+args = ['wine', 'ATThrone.exe'] + ([] if os.environ.get('LOGOS') else ['-nologo'])
+game = subprocess.Popen(args, cwd=D, env=env, stdout=out, stderr=subprocess.STDOUT)
 
 
 def xdo(*a):
@@ -85,6 +110,8 @@ try:
 except subprocess.TimeoutExpired:
     pass
 subprocess.run(['wineserver', '-k'], env=env, timeout=30)
+if wm:
+    wm.kill()
 xv.kill()
 print('running at the end' if alive else 'exited with %s' % game.returncode)
 for f in os.listdir(D):

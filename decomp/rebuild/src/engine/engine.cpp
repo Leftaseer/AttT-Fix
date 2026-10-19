@@ -75,6 +75,81 @@ bool CEngine::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return used;
 }
 
+#ifdef DECOMP_TEST_INPUT
+/* Scripted input for automatic tests (tools/rungame.py, where DirectInput sees no mouse): testinput.txt in the
+ * game folder, one event per line, "MS click X Y" or "MS key VK": at MS milliseconds after the first frame the
+ * game's cursor is moved to X,Y and a left click goes the way DirectInput's button events go (the button state
+ * list of CInput and the button event listeners), the down this turn and the up the next.  Called by the main
+ * loop before every CEngine::Step (the menus do not go through CEngine::Frame). */
+ORIG_THISCALL(0044A3F0, void, (void *listeners, void *info));     /* sends an event to its listeners */
+ORIG_DATA(006C9014);    /* listeners of the left button going down */
+ORIG_DATA(006C901C);    /* ... going up */
+ORIG_DATA(0060AC14);    /* nEvent::NullInfo::vftable */
+ORIG_DATA(006C9054);    /* listeners of mouse motion */
+ORIG_DATA(0060C798);    /* evMoveInfo::vftable */
+
+static void TestMove(float dx, float dy)
+{
+    struct { void *vftable; float dx, dy, dz; } move = { d_0060C798, dx, dy, 0.0f };
+    ORIG_CALL(0044A3F0)(d_006C9054, &move);
+}
+
+void TestInput(CInput *input)
+{
+    static FILE *f;
+    static bool opened, pending, upNext;
+    static DWORD start, due;
+    static char line[128];
+    struct { void *vftable; } info = { d_0060AC14 };
+    if (!opened) {
+        opened = true;
+        f = fopen("testinput.txt", "r");
+        start = GetTickCount();
+        OutputDebugStringA(f ? "testinput.txt opened" : "no testinput.txt");
+    }
+    static DWORD beat;
+    if (GetTickCount() - beat > 5000) {
+        beat = GetTickCount();
+        char b[96];
+        sprintf(b, "TestInput alive at %u ms", (unsigned)(beat - start));
+        OutputDebugStringA(b);
+    }
+    if (upNext && input->mouseButtons) {
+        upNext = false;
+        input->mouseButtons[input->mouseButtonCount++] = 1;
+        ORIG_CALL(0044A3F0)(d_006C901C, &info);
+    }
+    for (;;) {
+        if (!pending) {
+            if (!f || !fgets(line, sizeof(line), f))
+                return;
+            unsigned ms = 0;
+            if (sscanf(line, "%u", &ms) != 1)
+                continue;
+            due = start + ms;
+            pending = true;
+        }
+        if ((int)(GetTickCount() - due) < 0)
+            return;
+        pending = false;
+        unsigned ms;
+        int x, y;
+        if (sscanf(line, "%u click %d %d", &ms, &x, &y) == 3 && input->mouseButtons) {
+            OutputDebugStringA(line);
+            TestMove(-10000.0f, -10000.0f);      /* to the corner, then to X,Y */
+            TestMove((float)x, (float)y);
+            input->mouseButtons[input->mouseButtonCount++] = 0;
+            ORIG_CALL(0044A3F0)(d_006C9014, &info);
+            upNext = true;
+            return;
+        } else if (sscanf(line, "%u key %d", &ms, &x) == 2) {
+            PostMessageA(g_hWnd, WM_KEYDOWN, x, 1);
+            PostMessageA(g_hWnd, WM_KEYUP, x, 0xC0000001);
+        }
+    }
+}
+#endif
+
 /* State 1 of the engine: timers, input, PrintScreen (screenshot) and Pause (pauses the game clock), then the
  * updaters, the scene and the GUI. */
 DECOMP(0044A9C0)

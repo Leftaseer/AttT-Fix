@@ -25,6 +25,8 @@ typedef struct _iobuf FILE;
 extern "C" __declspec(dllimport) FILE *__cdecl fopen(const char *name, const char *mode);
 extern "C" __declspec(dllimport) size_t __cdecl fwrite(const void *p, size_t size, size_t n, FILE *f);
 extern "C" __declspec(dllimport) int __cdecl fclose(FILE *f);
+extern "C" __declspec(dllimport) char *__cdecl fgets(char *buf, int n, FILE *f);
+extern "C" __declspec(dllimport) int __cdecl sscanf(const char *s, const char *fmt, ...);
 extern "C" __declspec(dllimport) void __stdcall _CxxThrowException(void *object, void *throwInfo);
 extern "C" __declspec(dllimport) int __cdecl sprintf(char *buf, const char *fmt, ...);
 extern "C" __declspec(dllimport) size_t __cdecl strlen(const char *s);
