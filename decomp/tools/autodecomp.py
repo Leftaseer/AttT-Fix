@@ -389,6 +389,12 @@ def convert(f, protos, skip, imports, impnames):
         decls.append('DECOMP_C %s;' % t)
     for g, info in f['globals'].items():
         parts = info.split('|')
+        if int(g, 16) in impnames:
+            # an import table slot read as data (a function pointer handed on): the rebuilt exe's loader fills the
+            # new import table, not the original slots
+            decls.append('DECOMP_C void *gimp_%s __asm__("%s");' % (g, impnames[int(g, 16)]))
+            decls.append('#define G_%s (*(void **)&gimp_%s)' % (g, g))
+            continue
         decls.append('DECOMP_C char d_%s[];' % g)
         if parts[0] == 'code':
             decls.append('#define G_%s d_%s' % (g, g))

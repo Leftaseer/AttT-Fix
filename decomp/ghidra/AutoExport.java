@@ -167,6 +167,9 @@ public class AutoExport extends GhidraScript {
                             // access: an access of its own size
                             String key = String.format("%08X_%d", a, vs);
                             String t2 = vs == 1 ? "unsigned char" : vs == 2 ? "unsigned short" : vs == 4 ? "unsigned int" : "unsigned long long";
+                            DataType vt = hv != null ? hv.getDataType() : null;
+                            if (vt != null && vt.getLength() == vs && isFloat(vt))
+                                t2 = vs == 4 ? "float" : "double";      // a float stored there (the access says so)
                             sized.put(key, t2);
                             sb.append("GV_").append(key);
                             continue;
