@@ -67,7 +67,11 @@ py buildsyms.py --exe "$WORK/bin/valk.exe" --rtti "$O/valk_rtti.json" --rttisym 
    --manual "$O/valk_manual.sym" --out "$SYMS/valk.sym"
 for g in attt valk; do
   py ctors.py "$WORK/bin/$g.exe" "$O/${g}_rtti.json" "$O/${g}_binfeat.json" "$SYMS/$g.sym" "$SYMS/${g}_ctors.sym" "$O/${g}_sizes.json"
-  python3 -I - "$O" "$SYMS" $g <<'EOF'
+  # twice: the second regparams pass knows the stack parameters of the callees (which pushes are arguments)
+  for pass in 1 2; do
+    [ $pass = 2 ] && py regparams.py "$WORK/bin/$g.exe" "$O/${g}_binfeat.json" "$O/${g}_regparams.tsv" \
+                        "$SYMS/${g}_stackparams.tsv" "$SYMS/${g}_functions.tsv"
+    python3 -I - "$O" "$SYMS" $g <<'EOF'
 import json, sys
 o, s, g = sys.argv[1:4]
 bf = json.load(open('%s/%s_binfeat.json' % (o, g)))
@@ -79,9 +83,10 @@ with open('%s/%s_functions.tsv' % (s, g), 'w') as f:
         r = rp.get(a, [a, '', ''])
         f.write('%s\t%d\t%s\t%s\t%s\n' % (a, bf[a]['size'], r[1], r[2].split(',')[0] if r[2] else '0', cl.get(a, 'EAX,ECX,EDX')))
 EOF
-  py tailpop.py "$WORK/bin/$g.exe" "$O/${g}_regparams.tsv" "$SYMS/${g}_functions.tsv"
-  py retlive.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_retlive.tsv"
-  py stackparams.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv"
+    py tailpop.py "$WORK/bin/$g.exe" "$O/${g}_regparams.tsv" "$SYMS/${g}_functions.tsv"
+    py retlive.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_retlive.tsv"
+    py stackparams.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv"
+  done
 done
 
 # 4. back into Ghidra: register conventions, names, thiscall methods, class structures; export
