@@ -52,6 +52,12 @@ if saves:
     for f in os.listdir(saves):
         shutil.copy(os.path.join(saves, f), D + '/Saves')
 
+# the game crashes at the first scene (0x4C1530) without a sound device: a PulseAudio null sink stands in for one
+if shutil.which('pulseaudio') and subprocess.run(['pulseaudio', '--check']).returncode:
+    subprocess.run(['pulseaudio', '--system=false', '--exit-idle-time=-1', '--daemonize=yes', '-n',
+                    '--load=module-null-sink sink_name=null', '--load=module-native-protocol-unix'],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
 disp = ':%d' % random.randint(100, 400)
 xv = subprocess.Popen(['Xvfb', disp, '-screen', '0', '%dx%dx24' % (W, H), '+extension', 'GLX'],
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
