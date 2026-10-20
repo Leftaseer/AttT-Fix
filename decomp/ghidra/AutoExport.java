@@ -276,6 +276,23 @@ public class AutoExport extends GhidraScript {
                 sb.append(String.format("ICALL_%08X*", t.getPcodeOp().getSeqnum().getTarget().getOffset()));
                 continue;
             }
+            // '*p' of a void pointer ('Load size is inaccurate'): the load's own size and the type its value is used
+            // as are known, written as '*(T *)p' (tools/autodecomp.py rejects a bare void dereference)
+            if (t instanceof ClangOpToken && text.equals("*") && t.getPcodeOp() != null &&
+                    (t.getPcodeOp().getOpcode() == PcodeOp.LOAD || t.getPcodeOp().getOpcode() == PcodeOp.STORE)) {
+                PcodeOp op = t.getPcodeOp();
+                DataType pt = base(htype(op.getInput(1)));
+                DataType pointee = pt instanceof Pointer ? base(((Pointer) pt).getDataType()) : null;
+                if (pt instanceof Pointer && (pointee == null || pointee instanceof VoidDataType)) {
+                    // the value loaded, or the one stored
+                    Varnode o = op.getOpcode() == PcodeOp.LOAD ? op.getOutput() : op.getInput(2);
+                    DataType ot = htype(o);
+                    String c = ot != null && ot.getLength() == o.getSize() && !(base(ot) instanceof VoidDataType)
+                        ? ctype(ot, used) : ctype(Undefined.getUndefinedDataType(o.getSize()), used);
+                    sb.append("*(").append(c).append(" *)");
+                    continue;
+                }
+            }
             // fistp after MSVC's '(int)x' sequence (fnstcw; or 0xC00; fldcw): the decompiler's ROUND is in the
             // rounding mode set just before, truncation
             if (text.equals("ROUND") && t.getPcodeOp() != null && truncatingCW(t.getPcodeOp().getSeqnum().getTarget())) {
