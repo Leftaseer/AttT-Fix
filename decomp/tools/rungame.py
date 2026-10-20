@@ -89,8 +89,8 @@ for act in [s.strip() for s in script.split(';') if s.strip()]:
         break
     if q[0] == 'wait':
         time.sleep(float(q[1]))
-    elif q[0] == 'key':
-        xdo('key', q[1])
+    elif q[0] == 'key':                     # held for a while: DirectInput reads the key state once a frame
+        xdo('keydown', q[1]); time.sleep(0.4); xdo('keyup', q[1])
     elif q[0] == 'click':
         xdo('mousemove', q[1], q[2]); time.sleep(0.3)
         xdo('mousedown', '1'); time.sleep(0.15); xdo('mouseup', '1')
@@ -98,7 +98,7 @@ for act in [s.strip() for s in script.split(';') if s.strip()]:
         for _ in range(int(q[3]) if len(q) > 3 else 1):
             xdo('mousemove_relative', '--', q[1], q[2]); time.sleep(0.05)
     elif q[0] == 'press':                   # mouse button at the current position
-        xdo('mousedown', '1'); time.sleep(0.15); xdo('mouseup', '1')
+        xdo('mousedown', '1'); time.sleep(0.4); xdo('mouseup', '1')
     elif q[0] == 'focus':                   # give the game window the keyboard and mouse (no window manager)
         r = subprocess.run(['xdotool', 'search', '--onlyvisible', '--name', '.'], env=env, capture_output=True, text=True)
         for w in r.stdout.split():
