@@ -49,6 +49,32 @@ md.detail = True
 ESP, EBP = x86.X86_REG_ESP, x86.X86_REG_EBP
 
 
+def frame_helper(a, size):
+    """EBP after a call of a CRT frame helper (__SEH_prolog4, __EH_prolog: they push the SEH record and set up
+    the caller's EBP frame), relative to ESP at the call; None for other functions.  _onexit (0x5E3ED2) reads its
+    parameter as [ebp+8] after 'call __SEH_prolog4': without this it looked like it had none, and the generated
+    atexit called it without the function to register (a crash at exit)."""
+    try:
+        ins = list(md.disasm(pe.read(a, min(size, 48)), a))
+    except Exception:
+        return None
+    pushes = 0
+    for k, i in enumerate(ins[:10]):
+        o = i.operands
+        if i.mnemonic == 'push':
+            pushes += 1
+        elif i.mnemonic == 'mov' and len(o) == 2 and o[0].type == x86.X86_OP_MEM and o[0].mem.base == ESP and \
+                o[1].type == x86.X86_OP_REG and o[1].reg == EBP and k + 1 < len(ins):
+            n = ins[k + 1]
+            if n.mnemonic == 'lea' and n.operands[0].reg == EBP and n.operands[1].mem.base == ESP and \
+                    n.operands[1].mem.disp == o[0].mem.disp:
+                return -4 - 4 * pushes + o[0].mem.disp     # the return address, the pushes, then [esp+K]
+            return None
+        elif i.mnemonic in ('ret', 'call', 'jmp') or i.mnemonic.startswith('j'):
+            return None
+    return None
+
+
 X87_CONTROL = ('fldcw', 'fnstcw', 'fstcw', 'fnstsw', 'fstsw', 'fnstenv', 'fstenv', 'fldenv', 'fnsave', 'fsave',
                'frstor', 'fbld', 'fbstp')
 X87_STORES = ('fnstcw', 'fstcw', 'fnstsw', 'fstsw', 'fnstenv', 'fstenv', 'fnsave', 'fsave')
@@ -155,6 +181,10 @@ def analyse(start, size):
             elif m == 'leave':
                 d = None if bp is None else bp + 4
                 bp = None
+            elif m == 'call' and ops[0].type == x86.X86_OP_IMM and ops[0].imm in helpers:
+                bp = None if d is None else d + helpers[ops[0].imm]
+                d = None               # the helper allocated the frame: EBP-relative accesses from here
+                pushed = 0
             elif m == 'call':
                 if ops[0].type == x86.X86_OP_IMM and ops[0].imm in funcs:
                     if d is not None:
@@ -202,6 +232,13 @@ def analyse(start, size):
         fl.append('%d:%s' % (k, 'f' if w == {4} else 'd'))
     return slots, 'lost' if lost else 'exact', sorted(dword_read - written), fl
 
+
+helpers = {}
+for a, (size, pop) in funcs.items():
+    h = frame_helper(a, size)
+    if h is not None:
+        helpers[a] = h
+print('frame helpers: %s' % ', '.join('%08X (ebp = esp%+d)' % (a, h) for a, h in sorted(helpers.items())))
 
 # arguments the callers of a caller-pop function push: the 'add esp, N' right after each direct call.  A function
 # may ignore some (0x458940 checks an HRESULT and is given __FILE__ and __LINE__ it never reads); with fewer
