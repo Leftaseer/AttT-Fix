@@ -115,7 +115,7 @@ done
 #    (a first export gives the conventions of the imports that icalls.py follows the stack through)
 "$HL" "$WORK/proj" attt -process attt.exe -noanalysis -readOnly -scriptPath "$GH" \
    -postScript AutoExport.java "$WORK/decomp/attt_auto0.jsonl" "$WORK/decomp/attt_auto0_types.h" > "$WORK/logs/auto0_attt.log" 2>&1
-py icalls.py "$WORK/bin/attt.exe" "$SYMS/attt_functions.tsv" "$O/attt_icalls.tsv" "$WORK/decomp/attt_auto0.jsonl.protos"
+py icalls.py "$WORK/bin/attt.exe" "$SYMS/attt_functions.tsv" "$O/attt_icalls.tsv" "$WORK/decomp/attt_auto0.jsonl.protos" "$SYMS/attt.sym"
 "$HL" "$WORK/proj" attt -process attt.exe -noanalysis -scriptPath "$GH" \
    -postScript ICallOverride.java "$O/attt_icalls.tsv" "$O/attt_icall_overrides.tsv" > "$WORK/logs/icall_attt.log" 2>&1
 "$HL" "$WORK/proj" attt -process attt.exe -noanalysis -readOnly -scriptPath "$GH" \

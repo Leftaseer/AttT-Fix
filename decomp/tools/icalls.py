@@ -16,7 +16,8 @@ For each 'call reg' / 'call [mem]' (not an import slot) inside a function:
            'push 0x31; push file; push b; push a; push obj; call [ecx+0xFC]; push eax; call check; add esp, 0xC'
            has five pushes but the callee takes three: the other two are the check's.
 
-usage: icalls.py EXE symbols/GAME_functions.tsv OUT.tsv [AUTO.jsonl.protos (conventions of imports)]"""
+usage: icalls.py EXE symbols/GAME_functions.tsv OUT.tsv [AUTO.jsonl.protos (conventions of imports)]
+                 [symbols/GAME.sym (vftables: the pop of a virtual call the balance leaves open)]"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
@@ -244,10 +245,54 @@ def callee_pops(code, start, calls, cleanup):
     return known
 
 
+# virtual calls whose callee pop the balance leaves open: the functions at that offset of every vftable of the game
+# (symbols/GAME.sym), when their ret pops all agree.  Only for calls with ECX set (a method of the game's classes:
+# COM objects such as Direct3D's pass this on the stack and have no vftable in the symbols) and no more arguments
+# than the pushes before the call.
+vt_pops = {}
+if len(sys.argv) > 5:
+    vts = []
+    for l in open(sys.argv[5], encoding='utf-8'):
+        q = l.split('#')[0].split(None, 2)
+        if len(q) == 3 and q[1] == 'd' and 'vftable' in q[2]:
+            vts.append(int(q[0], 16))
+    lens = {}
+    for v in vts:              # a vftable: the function pointers up to the first dword that is none
+        n = 0
+        while n < 256 and pe.u32(v + 4 * n) in pops:
+            n += 1
+        lens[v] = n
+    for off in range(0, 0x400, 4):
+        seen = set()
+        for v in vts:
+            if off // 4 < lens[v]:
+                seen.add(pops[pe.u32(v + off)])
+        if len(seen) == 1 and None not in seen:
+            vt_pops[off] = seen.pop()
+
+
+def vslot(ins, k):
+    """vftable offset of the indirect call ins[k]: call [reg+off], or call reg after mov reg, [x+off]"""
+    op = ins[k].operands[0]
+    if op.type == x86.X86_OP_MEM and op.mem.base not in (0, ESP, x86.X86_REG_EBP) and op.mem.index == 0:
+        return op.mem.disp
+    if op.type == x86.X86_OP_REG:
+        for j in range(k - 1, max(-1, k - 7), -1):
+            p = ins[j]
+            if p.mnemonic == 'mov' and p.operands[0].type == x86.X86_OP_REG and p.operands[0].reg == op.reg:
+                m = p.operands[1]
+                if m.type == x86.X86_OP_MEM and m.mem.base not in (0, ESP, x86.X86_REG_EBP) and m.mem.index == 0:
+                    return m.mem.disp
+                return None
+            if p.mnemonic.startswith(('call', 'j', 'ret')):
+                return None
+    return None
+
+
 with open(sys.argv[3], 'w') as f:
     f.write('# call address\tfunction\tecx set (1/0)\tadd esp after (-1: none)\tpushes right before'
             '\tbytes the callee pops (ESP balance, -1: unknown)\n')
-    n = solved = 0
+    n = solved = byvt = 0
     for start, size, ecx_in in funcs:
         try:
             ins = list(md.disasm(pe.read(start, size), start))
@@ -269,13 +314,17 @@ with open(sys.argv[3], 'w') as f:
                 elif not m.startswith(MOVES):
                     break
             cleanup[i.address] = cl
-            rows.append((i.address, ecx, cl, pushes))
+            rows.append((i.address, ecx, cl, pushes, vslot(ins, k)))
         if not rows:
             continue
         known = callee_pops(code, start, [r[0] for r in rows], cleanup)
-        for a, ecx, cl, pushes in rows:
+        for a, ecx, cl, pushes, off in rows:
             pop = known.get(a, -1) if cl < 0 else 0
             solved += pop >= 0 and cl < 0
+            if pop < 0 and cl < 0 and ecx == 1 and off in vt_pops and vt_pops[off] // 4 <= pushes:
+                pop = vt_pops[off]
+                byvt += 1
             f.write('%08X\t%08X\t%d\t%d\t%d\t%d\n' % (a, start, ecx, cl, pushes, pop))
             n += 1
-print('%d indirect calls, the pop of %d callee-pop ones from the ESP balance' % (n, solved))
+print('%d indirect calls, the pop of %d callee-pop ones from the ESP balance, %d from the vftables (%d offsets agree)'
+      % (n, solved, byvt, len(vt_pops)))

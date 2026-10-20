@@ -69,6 +69,10 @@ public class ICallOverride extends GhidraScript {
                     else if (o.isRegister() && o.getSize() == 4 &&
                              "EAX".equals(currentProgram.getRegister(o.getAddress(), 4) == null ? null :
                                           currentProgram.getRegister(o.getAddress(), 4).getName())) s.out = "undefined4";
+                    // after simplification the result is often a temporary (it went straight into a variable,
+                    // 'this = (*vf)(...)' in 0x442890): 4 bytes that are no float are EAX all the same
+                    else if (o.getSize() == 4 && !o.isRegister() &&
+                             !(o.getHigh() != null && o.getHigh().getDataType() instanceof AbstractFloatDataType)) s.out = "undefined4";
                     else s.out = "other";
                     sites.add(s);
                 }
