@@ -97,6 +97,30 @@ static void TestMove(float dx, float dy)
     ORIG_CALL(0044A3F0)(d_006C9054, &move);
 }
 
+/* Lua of the test input runs at the end of a frame, where the GUI's own event handlers run: a scene switch
+ * between frames leaves the engine without a scene for the next one */
+static char g_testLua[256];
+static int g_testLuaWait;       /* main loop turns it has waited: the menus do not run CEngine::Frame */
+
+void TestLua()
+{
+    if (!g_testLua[0])
+        return;
+    void *vm = *(void **)d_006C88D4;
+    if (vm)
+        ORIG_CALL(0057D220)(vm, g_testLua, (int)strlen(g_testLua), "=testinput");
+    g_testLua[0] = 0;
+}
+
+/* a line with the game's own cursor (drawn by the hardware, not in screenshots): where a click lands */
+static void TestPos(const char *what, unsigned ms)
+{
+    const float *p = CCursor::Instance()->ScreenPos();
+    char b[96];
+    sprintf(b, "%s %u ms, cursor %d %d", what, ms, (int)p[0], (int)p[1]);
+    OutputDebugStringA(b);
+}
+
 void TestInput(CInput *input)
 {
     static FILE *f;
@@ -113,10 +137,10 @@ void TestInput(CInput *input)
     static DWORD beat;
     if (GetTickCount() - beat > 5000) {
         beat = GetTickCount();
-        char b[96];
-        sprintf(b, "TestInput alive at %u ms", (unsigned)(beat - start));
-        OutputDebugStringA(b);
+        TestPos("TestInput alive at", beat - start);
     }
+    if (g_testLua[0] && ++g_testLuaWait > 30)
+        TestLua();
     if (upNext && input->mouseButtons) {
         upNext = false;
         input->mouseButtons[input->mouseButtonCount++] = 1;
@@ -135,8 +159,9 @@ void TestInput(CInput *input)
         if ((int)(GetTickCount() - due) < 0)
             return;
         pending = false;
-        unsigned ms;
+        unsigned ms = 0;
         int x, y;
+        sscanf(line, "%u", &ms);
         if (sscanf(line, "%u click %d %d", &ms, &x, &y) == 3 && input->mouseButtons) {
             OutputDebugStringA(line);
             TestMove(-10000.0f, -10000.0f);      /* to the corner, then to X,Y */
@@ -145,11 +170,12 @@ void TestInput(CInput *input)
             ORIG_CALL(0044A3F0)(d_006C9014, &info);
             upNext = true;
             return;
+        } else if (strstr(line, " pos")) {
+            TestPos("cursor at", ms);
         } else if (const char *lua = strstr(line, " lua ")) {
             OutputDebugStringA(line);
-            void *vm = *(void **)d_006C88D4;
-            if (vm)
-                ORIG_CALL(0057D220)(vm, lua + 5, (int)strlen(lua + 5), "=testinput");
+            lstrcpynA(g_testLua, lua + 5, sizeof(g_testLua));   /* run inside the next frame (TestLua) */
+            g_testLuaWait = 0;
         } else if (sscanf(line, "%u key %d", &ms, &x) == 2) {
             PostMessageA(g_hWnd, WM_KEYDOWN, x, 1);
             PostMessageA(g_hWnd, WM_KEYUP, x, 0xC0000001);
@@ -181,6 +207,9 @@ void CEngine::Frame()
     overlay->Update(dt);
     scene->Update(dt);
     gui->updater->Update(dt);
+#ifdef DECOMP_TEST_INPUT
+    TestLua();
+#endif
 }
 
 /* State 2: draw the scene and the overlay.  A failed Present is retried through a device reset only for

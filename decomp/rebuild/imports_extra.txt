@@ -8,3 +8,10 @@ sprintf MSVCR80.dll
 malloc MSVCR80.dll
 free MSVCR80.dll
 pow MSVCR80.dll
+AddVectoredExceptionHandler@8 KERNEL32.dll
+GetModuleFileNameA@12 KERNEL32.dll
+IsBadReadPtr@8 KERNEL32.dll
+lstrcpyA@8 KERNEL32.dll
+lstrlenA@4 KERNEL32.dll
+wsprintfA USER32.dll
+lstrcpynA@12 KERNEL32.dll

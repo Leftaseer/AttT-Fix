@@ -20,15 +20,80 @@ CGameException::CGameException(const std::string &msg, const char *file, int lin
     }
 #ifdef DECOMP_DEBUG_LOG
     /* every engine error, also the ones caught and handled: WINEDEBUG=+debugstr or DebugView shows them, and
-     * decomp_debug.log in the game folder keeps them */
+     * decomp_debug.log next to the exe keeps them */
     OutputDebugStringA(text.raw());
-    if (FILE *f = fopen("decomp_debug.log", "a")) {
-        fwrite(text.raw(), 1, strlen(text.raw()), f);
+    DebugLog(text.raw());
+#endif
+}
+
+#ifdef DECOMP_DEBUG_LOG
+/* decomp_debug.log next to the exe (the game's current folder may be another one) */
+void DebugLog(const char *text)
+{
+    static char path[MAX_PATH];
+    if (!path[0]) {
+        GetModuleFileNameA(nullptr, path, MAX_PATH - 20);
+        char *slash = path;
+        for (char *p = path; *p; p++)
+            if (*p == '\\' || *p == '/')
+                slash = p + 1;
+        lstrcpyA(slash, "decomp_debug.log");
+    }
+    if (FILE *f = fopen(path, "a")) {
+        fwrite(text, 1, strlen(text), f);
         fwrite("\n", 1, 1, f);
         fclose(f);
     }
-#endif
 }
+
+/* A crash (access violation, bad instruction, division by zero, stack overflow) is logged with the registers and
+ * every stack value that points into code: the return addresses of the calls that led there, most recent first
+ * (tools/crashlog.py names them from ATThrone.map).  The game's own handler (WinMain's __except) runs after. */
+static LONG CALLBACK CrashLog(EXCEPTION_POINTERS *e)
+{
+    static int logged;
+    DWORD code = e->ExceptionRecord->ExceptionCode;
+    if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION &&
+        code != EXCEPTION_PRIV_INSTRUCTION && code != EXCEPTION_INT_DIVIDE_BY_ZERO && code != EXCEPTION_STACK_OVERFLOW)
+        return EXCEPTION_CONTINUE_SEARCH;
+    if (logged++ >= 3)
+        return EXCEPTION_CONTINUE_SEARCH;
+    CONTEXT *c = e->ContextRecord;
+    char line[256];
+    wsprintfA(line, "crash %08X at %08X (address %08X)", code, (DWORD)e->ExceptionRecord->ExceptionAddress,
+              e->ExceptionRecord->NumberParameters > 1 ? (DWORD)e->ExceptionRecord->ExceptionInformation[1] : 0);
+    DebugLog(line);
+    wsprintfA(line, "  eax %08X ebx %08X ecx %08X edx %08X esi %08X edi %08X ebp %08X esp %08X", c->Eax, c->Ebx,
+              c->Ecx, c->Edx, c->Esi, c->Edi, c->Ebp, c->Esp);
+    DebugLog(line);
+    HMODULE exe = GetModuleHandleA(nullptr);
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)((char *)exe + ((IMAGE_DOS_HEADER *)exe)->e_lfanew);
+    DWORD lo = (DWORD)exe + 0x1000, hi = (DWORD)exe + nt->OptionalHeader.SizeOfImage;
+    DWORD *sp = (DWORD *)c->Esp;
+    int n = 0;
+    char *out = line + lstrlenA(lstrcpyA(line, "  stack:"));
+    for (int i = 0; i < 2048 && n < 48; i++) {
+        DWORD v;
+        if (IsBadReadPtr(sp + i, 4))
+            break;
+        v = sp[i];
+        if (v < lo || v >= hi)
+            continue;
+        /* a return address: the bytes before it are a call (E8 rel32, FF /2) */
+        const unsigned char *b = (const unsigned char *)v;
+        if (IsBadReadPtr(b - 6, 6) || !(b[-5] == 0xE8 || b[-2] == 0xFF || b[-3] == 0xFF || b[-6] == 0xFF))
+            continue;
+        out += wsprintfA(out, " %08X", v);
+        if (++n % 8 == 0) {
+            DebugLog(line);
+            out = line + lstrlenA(lstrcpyA(line, "  stack:"));
+        }
+    }
+    if (n % 8)
+        DebugLog(line);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
 
 ORIG_DATA(0069916C);  /* _ThrowInfo of CGameException */
 ORIG_DATA(00607BC8);
@@ -208,6 +273,10 @@ void GameMain(const char *cmdLine)
 {
     if (!IsOnlyInstance())
         return;
+#ifdef DECOMP_DEBUG_LOG
+    AddVectoredExceptionHandler(1, CrashLog);
+    DebugLog("---- start");
+#endif
     CreateGamePath();
     std::string dir = ((nCfg::GamePath *)g_gamePath)->exePath;
     dir = dir.substr(0, dir.rfind("\\", std::string::npos));

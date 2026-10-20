@@ -78,8 +78,12 @@ struct CInput {                              /* CSingleton<CInput> (0x7CC bytes)
     void Reset();                            /* 0x46CF30 */
 };
 static_assert(sizeof(CInput) == 0x7CC, "CInput is 0x7CC bytes");
+#ifdef DECOMP_DEBUG_LOG
+void DebugLog(const char *text);             /* main.cpp: a line in decomp_debug.log next to the exe */
+#endif
 #ifdef DECOMP_TEST_INPUT
-void TestInput(CInput *input);               /* engine.cpp: scripted input of automatic tests */
+void TestInput(CInput *input);
+void TestLua();                              /* engine.cpp: Lua of the test input, at the end of a frame */               /* engine.cpp: scripted input of automatic tests */
 #endif
 
 struct CCursor {                             /* CSingleton<CCursor> (0x284 bytes) */

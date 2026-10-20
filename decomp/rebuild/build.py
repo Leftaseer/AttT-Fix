@@ -472,6 +472,9 @@ def main():
         dll = extra_map.get(n) or extra_map.get(base or '') or ('MSVCP80.dll' if 'std@@' in n else None)
         if not dll:
             sys.exit('new code imports %s: add "%s <dll>" to rebuild/imports_extra.txt' % (n, n))
+        if base and base not in have:      # 'name@N == name' refers to an export 'name' of the .def: add it too
+            add.setdefault(dll, []).append((base, base))
+            have[base] = dll
         add.setdefault(dll, []).append((n, base or n))
         have[n] = dll
     for dll, names in add.items():
