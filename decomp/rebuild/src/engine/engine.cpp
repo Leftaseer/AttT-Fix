@@ -141,6 +141,15 @@ void TestInput(CInput *input)
     }
     if (g_testLua[0] && ++g_testLuaWait > 30)
         TestLua();
+    {   /* every move of the game's cursor, to see where scripted mouse input lands */
+        static int lx = -1, ly = -1;
+        const float *p = CCursor::Instance()->ScreenPos();
+        if ((int)p[0] != lx || (int)p[1] != ly) {
+            lx = (int)p[0];
+            ly = (int)p[1];
+            TestPos("moved at", GetTickCount() - start);
+        }
+    }
     if (upNext && input->mouseButtons) {
         upNext = false;
         input->mouseButtons[input->mouseButtonCount++] = 1;

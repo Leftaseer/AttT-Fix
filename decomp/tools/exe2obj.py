@@ -9,14 +9,15 @@ references to __imp_ symbols of import libraries generated from the import table
 Usage: exe2obj.py EXE OUTDIR [--syms FILE] [--replace FILE]
   --syms     "ADDR NAME" lines: public symbols defined at those addresses (for new code to use)
   --replace  "ADDR NEWNAME" lines: the function at ADDR is replaced by external NEWNAME:
-             a jmp to NEWNAME is placed at ADDR and every pointer to ADDR is redirected.
+             a jmp to NEWNAME is placed at ADDR and every pointer to ADDR is redirected
+             (--toggle: neither, the start-up code of the build writes the jmps it is told to).
 Outputs: orig.obj, imports/*.def, resources.res, link.rsp (lld-link options)
 """
 import sys, os, struct, argparse, pefile
 
 IMAGE_REL_I386_DIR32 = 6
 IMAGE_REL_I386_REL32 = 0x14
-SCN = {'.text': 0x60000020, '.rdata': 0x40000040, '.data': 0xC0000040}
+SCN = {'.text': 0x60000020, '.rdata': 0x40000040, '.data': 0xC0000040, '.ndata': 0xC0000040}
 ALIGN_4096 = 0x00D00000
 NRELOC_OVFL = 0x01000000
 
@@ -29,6 +30,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('exe'); ap.add_argument('outdir')
     ap.add_argument('--syms'); ap.add_argument('--replace')
+    ap.add_argument('--toggle', action='store_true', help='no jmps and no redirected pointers: the replacements go '
+                    'into decomp_toggle_table (original address, new function) for rebuild/toggle.c to apply at start-up')
     a = ap.parse_args()
     pe = pefile.PE(a.exe)
     base = pe.OPTIONAL_HEADER.ImageBase
@@ -95,7 +98,7 @@ def main():
         if tgt in iat:
             struct.pack_into('<I', s[3], off, 0)
             s[4].append((off, sym(iat[tgt]), IMAGE_REL_I386_DIR32)); stats['iat'] += 1; continue
-        if tgt in repl:
+        if tgt in repl and not a.toggle:
             struct.pack_into('<I', s[3], off, 0)
             s[4].append((off, sym(cname(repl[tgt])), IMAGE_REL_I386_DIR32)); stats['repl'] += 1; continue
         ti = find_sec(tgt)
@@ -110,8 +113,22 @@ def main():
         struct.pack_into('<I', s[3], off, tgt - secs[ti][1])
         s[4].append((off, ti, IMAGE_REL_I386_DIR32)); stats['sec'] += 1
 
-    # replaced functions: jmp NEW at the old entry
-    for va, new in repl.items():
+    # replaced functions: jmp NEW at the old entry, or (--toggle) a table of them for the start-up code
+    if a.toggle:
+        tab = bytearray(struct.pack('<I', len(repl)))
+        rel = []
+        for va, new in sorted(repl.items()):
+            si = find_sec(va)
+            rel.append((len(tab), si, IMAGE_REL_I386_DIR32))
+            tab += struct.pack('<I', va - secs[si][1])
+            rel.append((len(tab), sym(cname(new)), IMAGE_REL_I386_DIR32))
+            tab += struct.pack('<I', 0)
+        secs.append(['.ndata', 0xF0000000, len(tab), tab, rel])
+        sym('_decomp_toggle_table', 0, len(secs), 2)
+        repl_jmp = {}
+    else:
+        repl_jmp = repl
+    for va, new in repl_jmp.items():
         si = find_sec(va); s = secs[si]; off = va - s[1]
         s[3][off] = 0xE9; struct.pack_into('<I', s[3], off + 1, 0)
         s[4] = [x for x in s[4] if not (off < x[0] + 4 and x[0] < off + 5)]

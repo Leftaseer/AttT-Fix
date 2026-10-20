@@ -203,6 +203,8 @@ def main():
     ap.add_argument('--exe', required=True)
     ap.add_argument('--out', default=os.path.join(HERE, 'build', 'ATThrone.exe'))
     ap.add_argument('--laa', action='store_true', help='mark the result Large Address Aware')
+    ap.add_argument('--toggle', action='store_true', help='replacements switched on at start-up (toggle.c, '
+                    'decomp_toggle.txt next to the exe): bisection without a new build for each step')
     ap.add_argument('--only', help='comma-separated source files (default: all of rebuild/src)')
     ap.add_argument('--auto', help='folder made by tools/autodecomp.py for this game (addresses of the game itself)')
     ap.add_argument('-D', dest='defines', action='append', default=[], help='preprocessor define for the sources '
@@ -311,6 +313,10 @@ def main():
     rt = os.path.join(work, 'rt_support.obj')
     run(['clang'] + cflags + ['-c', os.path.join(HERE, 'rt_support.c'), '-o', rt])
     objs.append(rt)
+    if a.toggle:
+        to = os.path.join(work, 'toggle.obj')
+        run(['clang'] + cflags + ['-c', os.path.join(HERE, 'toggle.c'), '-o', to])
+        objs.append(to)
 
     defined, undefined = set(), set()
     for o in objs:
@@ -431,7 +437,8 @@ def main():
             f.write('%08X %s\n' % (ga, s[1:] if s.startswith('_') else s))
 
     run([sys.executable, '-I', os.path.join(TOOLS, 'exe2obj.py'), a.exe, work,
-         '--syms', os.path.join(work, 'syms.txt'), '--replace', os.path.join(work, 'replace.txt')])
+         '--syms', os.path.join(work, 'syms.txt'), '--replace', os.path.join(work, 'replace.txt')] +
+        (['--toggle'] if a.toggle else []))
     # imports the new code needs and the original exe does not use
     have = {}
     for d in glob.glob(os.path.join(work, 'imports', '*.def')):
@@ -504,6 +511,8 @@ def main():
     rsp += ['/merge:.idata=.zidata', '/merge:.didat=.zidata']
     if a.laa:
         rsp.append('/largeaddressaware')
+    if a.toggle:
+        rsp = ['/entry:decomp_entry' if x == '/entry:orig_entry' else x for x in rsp]
     mapf = os.path.splitext(a.out)[0] + '.map'
     out = run(['lld-link'] + rsp + ['/out:' + a.out, '/map:' + mapf, os.path.join(work, 'orig.obj')] + objs +
               [os.path.join(work, 'resources.res')] + libs)

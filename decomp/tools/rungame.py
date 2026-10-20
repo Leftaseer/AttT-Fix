@@ -48,6 +48,8 @@ if os.environ.get('DXVK'):
     shutil.copy(os.path.join(os.environ['DXVK'], 'd3d9.dll'), D)
 for dll in filter(None, os.environ.get('DLLS', '').split(':')):   # e.g. DXVK's d3d9.dll (with WINEDLLOVERRIDES=d3d9=n)
     shutil.copy(dll, D)
+if os.environ.get('TOGGLE'):               # replacements switched off in a build made with build.py --toggle
+    shutil.copy(os.environ['TOGGLE'], os.path.join(D, 'decomp_toggle.txt'))
 if os.environ.get('TESTINPUT'):            # scripted input for a build made with -D DECOMP_TEST_INPUT
     shutil.copy(os.environ['TESTINPUT'], os.path.join(D, 'testinput.txt'))
 saves = os.environ.get('SAVES')            # a folder of save games to start with

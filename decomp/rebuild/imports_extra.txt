@@ -15,3 +15,10 @@ lstrcpyA@8 KERNEL32.dll
 lstrlenA@4 KERNEL32.dll
 wsprintfA USER32.dll
 lstrcpynA@12 KERNEL32.dll
+FlushInstructionCache@12 KERNEL32.dll
+GetCurrentProcess@0 KERNEL32.dll
+VirtualProtect@16 KERNEL32.dll
+CreateFileA@28 KERNEL32.dll
+ReadFile@20 KERNEL32.dll
+WriteFile@20 KERNEL32.dll
+CloseHandle@4 KERNEL32.dll
