@@ -114,6 +114,10 @@ public class AutoExport extends GhidraScript {
                 Parameter[] ps = t.getParameters();
                 for (int k = 1; k < op.getNumInputs() && k - 1 < ps.length; k++)
                     if (mix(ps[k - 1].getDataType(), htype(op.getInput(k)))) return "argument at " + op.getSeqnum().getTarget();
+            } else if (c == PcodeOp.CALLIND) {
+                // the call-site prototypes of ICallOverride.java take undefined4: a float argument would be converted
+                for (int k = 1; k < op.getNumInputs(); k++)
+                    if (isFloat(htype(op.getInput(k)))) return "indirect argument at " + op.getSeqnum().getTarget();
             } else if (c == PcodeOp.RETURN && op.getNumInputs() > 1) {
                 if (mix(f.getReturnType(), htype(op.getInput(1)))) return "result at " + op.getSeqnum().getTarget();
             }
@@ -133,6 +137,13 @@ public class AutoExport extends GhidraScript {
             if (t instanceof ClangBreak) {
                 sb.append('\n');
                 for (int i = 0; i < ((ClangBreak) t).getIndent(); i++) sb.append(' ');
+                continue;
+            }
+            // '(*E)(args)' of an indirect call: the '*' is the CALLIND's own token; tools/autodecomp.py gives the call
+            // the prototype ICallOverride.java wrote for this address
+            if (t instanceof ClangOpToken && text.equals("*") && t.getPcodeOp() != null &&
+                    t.getPcodeOp().getOpcode() == PcodeOp.CALLIND) {
+                sb.append(String.format("ICALL_%08X*", t.getPcodeOp().getSeqnum().getTarget().getOffset()));
                 continue;
             }
             if (t instanceof ClangFuncNameToken) {

@@ -16,10 +16,13 @@ ap = argparse.ArgumentParser()
 ap.add_argument('orig'); ap.add_argument('auto'); ap.add_argument('work')
 ap.add_argument('--test')
 ap.add_argument('-D', dest='defines', action='append', default=[], help='define for build.py (e.g. DECOMP_TEST_INPUT)')
+ap.add_argument('--base', help='functions known to be good (one address per line): always built in, not searched')
 ap.add_argument('--range', help='LO,HI: resume a search known to pass with LO functions and fail with HI')
 a = ap.parse_args()
 os.makedirs(a.work, exist_ok=True)
 allf = sorted(l.split('\t')[0] for l in open(os.path.join(a.auto, 'functions.tsv')) if l.split('\t')[1] == 'compiled')
+base = [l.strip() for l in open(a.base) if l.strip()] if a.base else []
+allf = [x for x in allf if x not in set(base)]
 badf = os.path.join(a.work, 'bad.txt')
 bad = set(l.strip() for l in open(badf)) if os.path.exists(badf) else set()
 log = open(os.path.join(a.work, 'bisect.log'), 'a')
@@ -28,7 +31,7 @@ exe = os.path.join(a.work, 'bis', 'ATThrone.exe')
 
 def test(lst):
     lp = os.path.join(a.work, 'bisect_list.txt')
-    open(lp, 'w').write('\n'.join(lst) + '\n')
+    open(lp, 'w').write('\n'.join(base + lst) + '\n')
     r = subprocess.run([sys.executable, os.path.join(HERE, '..', 'rebuild', 'build.py'), '--exe', a.orig, '--out', exe,
                         '--auto', a.auto, '--auto-list', lp] + sum((['-D', d] for d in a.defines), []), capture_output=True, text=True)
     if r.returncode:

@@ -116,6 +116,63 @@ def fit_convention(a, pr):
 native_ok = ('__cdecl', '__stdcall', '__thiscall', '__fastcall')
 
 
+icalls = {}        # indirect call address -> (convention, stack arguments, result) of ghidra/ICallOverride.java
+
+
+def matching(code, i):
+    """index of the parenthesis closing the one at code[i]"""
+    depth = 0
+    for j in range(i, len(code)):
+        if code[j] == '(':
+            depth += 1
+        elif code[j] == ')':
+            depth -= 1
+            if depth == 0:
+                return j
+    return -1
+
+
+def split_args(text):
+    out, depth, cur = [], 0, ''
+    for ch in text:
+        if ch in '([':
+            depth += 1
+        elif ch in ')]':
+            depth -= 1
+        if ch == ',' and depth == 0:
+            out.append(cur.strip()); cur = ''
+        else:
+            cur += ch
+    if cur.strip():
+        out.append(cur.strip())
+    return out
+
+
+def rewrite_icalls(code):
+    """'(ICALL_A*E)(args)' from AutoExport -> a call of E through a function pointer of the prototype written
+    for the call at A (its convention passes the object in ECX for __thiscall); innermost calls first"""
+    for m in reversed(list(re.finditer(r'\(ICALL_([0-9A-F]{8})\*', code))):
+        a = int(m.group(1), 16)
+        if a not in icalls:
+            return None, 'indirect call without a prototype'
+        cc, nstack, ret = icalls[a]
+        close = matching(code, m.start())
+        k = close + 1
+        while k < len(code) and code[k] in ' \n':
+            k += 1
+        if close < 0 or k >= len(code) or code[k] != '(':
+            return None, 'indirect call not understood'
+        end = matching(code, k)
+        args = split_args(code[k + 1:end])
+        params = (['void *'] if cc == '__thiscall' else []) + ['undefined4'] * nstack
+        if len(args) != len(params):
+            return None, 'indirect call with %d arguments, %d in its prototype' % (len(args), len(params))
+        callee = code[m.end():close]
+        code = code[:m.start()] + '((%s (%s *)(%s))(%s))(%s)' % (
+            ret, cc, ', '.join(params) or 'void', callee, ', '.join(args)) + code[end + 1:]
+    return code, None
+
+
 def has_indirect_call(code):
     """a call through a computed pointer: '(*...)(' or '(**...)(' with the parentheses balanced"""
     for m in re.finditer(r'\(\*', code):
@@ -245,6 +302,9 @@ def convert(f, protos, skip, imports, impnames):
     for pat, why in BLOCK:
         if re.search(pat, code):
             return None, why
+    code, why = rewrite_icalls(code)
+    if code is None:
+        return None, why
     if has_indirect_call(code):
         return None, 'indirect call'
     pr = protos.get(a)
@@ -428,9 +488,15 @@ def main():
     ap.add_argument('--per-unit', type=int, default=150)
     ap.add_argument('--exclude-range', action='append', default=[], metavar='LO-HI',
                     help='addresses left out (e.g. 401000-420600, the Lua 5.1 library: build it from its sources)')
+    ap.add_argument('--icalls', help='call-site prototypes of indirect calls (ghidra/ICallOverride.java output)')
     ap.add_argument('--functions', required=True, help='symbols/<game>_functions.tsv (machine-code register inputs)')
     a = ap.parse_args()
     load_machine(a.functions)
+    if a.icalls:
+        for l in open(a.icalls):
+            q = l.rstrip('\n').split('\t')
+            if l[0] != '#' and len(q) == 4:
+                icalls[int(q[0], 16)] = (q[1], int(q[2]), q[3])
     rl = a.functions.replace('_functions.tsv', '_retlive.tsv')
     if os.path.exists(rl):
         eax_used.update(int(l, 16) for l in open(rl) if l.strip() and l[0] != '#')
