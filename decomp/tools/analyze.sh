@@ -103,10 +103,15 @@ for g in attt valk; do
   py organize.py "$WORK/decomp/$g.jsonl" "$SYMS/$g.sym" "$O/${g}_binfeat.json" "$WORK/decomp/$g" --game $g
 done
 
-# 5. compilable C of every function the decompiler handled cleanly (AttT), for rebuild/build.py --auto
+# 5. compilable C of every function the decompiler handled cleanly (AttT), for rebuild/build.py --auto;
+#    indirect calls get call-site prototypes from the machine code first
+py icalls.py "$WORK/bin/attt.exe" "$SYMS/attt_functions.tsv" "$O/attt_icalls.tsv"
+"$HL" "$WORK/proj" attt -process attt.exe -noanalysis -scriptPath "$GH" \
+   -postScript ICallOverride.java "$O/attt_icalls.tsv" "$O/attt_icall_overrides.tsv" > "$WORK/logs/icall_attt.log" 2>&1
 "$HL" "$WORK/proj" attt -process attt.exe -noanalysis -readOnly -scriptPath "$GH" \
    -postScript AutoExport.java "$WORK/decomp/attt_auto.jsonl" "$WORK/decomp/attt_auto_types.h" > "$WORK/logs/auto_attt.log" 2>&1
 py autodecomp.py "$WORK/decomp/attt_auto.jsonl" "$WORK/decomp/attt_auto_types.h" "$WORK/auto/attt" \
    --exe "$WORK/bin/attt.exe" --functions "$SYMS/attt_functions.tsv" \
-   --syms "$O/attt_g1/symbols.tsv" --syms "$SYMS/attt.sym" --syms "$SYMS/attt_manual.sym" --exclude-range 401000-420600   # Lua 5.1.2: from its sources
+   --syms "$O/attt_g1/symbols.tsv" --syms "$SYMS/attt.sym" --syms "$SYMS/attt_manual.sym" --icalls "$O/attt_icall_overrides.tsv" \
+   --exclude-range 401000-420600   # Lua 5.1.2: from its sources
 echo "done: Ghidra projects in $WORK/proj, decompilation in $WORK/decomp, compilable C in $WORK/auto/attt"

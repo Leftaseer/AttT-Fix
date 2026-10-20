@@ -7,7 +7,10 @@ luaS_newlstr untouched), and every caller is then decompiled without those argum
 
 usage: stackparams.py EXE symbols/GAME_functions.tsv OUT.tsv [AUTO.jsonl.protos (conventions of imports)]
 OUT: address, number of 4-byte stack slots used (0 if none), 'exact' or 'lost' (ESP could not be followed
-everywhere, e.g. after an indirect call with unknown cleanup: the count is a lower bound)."""
+everywhere, e.g. after an indirect call with unknown cleanup: the count is a lower bound), and the slots (0 = the
+first parameter) read as whole dwords and never written: such a parameter is 4 bytes even where the decompiler
+typed it as a byte (0x42AF50 passes its second parameter on as a pointer, typed undefined1 its callers cut the
+pointer down to a byte)."""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
@@ -43,8 +46,9 @@ def analyse(start, size):
         for i in md.disasm(pe.read(start, size), start):
             code[i.address] = i
     except Exception:
-        return 0, 'lost'
+        return 0, 'lost', ()
     top = 0                    # highest byte offset above the return address seen (exclusive)
+    dword_read, written = set(), set()
     lost = False
     todo = [(start, 0, None)]  # address, esp delta (0 = at the return address), ebp delta or None
     pushed = 0                 # bytes pushed since the last call: the arguments of the next one
@@ -69,6 +73,12 @@ def analyse(start, size):
                         off = bp + op.mem.disp
                     if off is not None and off >= 4:
                         top = max(top, off + (op.size if m != 'lea' else 4))
+                        if m != 'lea' and (off - 4) % 4 == 0:
+                            k = (off - 4) // 4
+                            if op.access & capstone.CS_AC_WRITE:
+                                written.add(k)
+                            elif op.size == 4 and op.access & capstone.CS_AC_READ:
+                                dword_read.add(k)
             # ESP and EBP tracking
             ops = i.operands
             if m == 'push':
@@ -132,12 +142,12 @@ def analyse(start, size):
                     todo.append((ops[0].imm, d, bp))
             p = i.address + i.size
     slots = max(0, (top - 4 + 3) // 4)
-    return slots, 'lost' if lost else 'exact'
+    return slots, 'lost' if lost else 'exact', sorted(dword_read - written)
 
 
 with open(sys.argv[3], 'w') as f:
-    f.write('# address\tstack slots used\texact|lost (tools/stackparams.py)\n')
+    f.write('# address\tstack slots used\texact|lost\tslots read as dwords, never written (tools/stackparams.py)\n')
     for a in sorted(funcs):
-        n, how = analyse(a, funcs[a][0])
-        f.write('%08X\t%d\t%s\n' % (a, n, how))
+        n, how, dw = analyse(a, funcs[a][0])
+        f.write('%08X\t%d\t%s\t%s\n' % (a, n, how, ','.join(map(str, dw))))
 print('done')

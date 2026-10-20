@@ -4,6 +4,7 @@
 // a caller-pop convention become __stdcall.  Custom storage (ApplyRegParams) is left alone.
 // Caller-pop functions (no ret N) get the stack parameters their machine code uses (stackparams.py), when the
 // decompiler found fewer: a parameter that is only passed on to a call is easily missed.
+// Byte and word parameters whose slot the machine code reads as a dword (stackparams.py) become undefined4.
 // Args: functions.tsv [stackparams.tsv]
 import ghidra.program.model.listing.VariableStorage;
 import ghidra.app.script.GhidraScript;
@@ -118,6 +119,45 @@ public class FixStackParams extends GhidraScript {
                 }
             }
             println("caller-pop functions given the stack parameters they use: " + grown + ", failed " + gfail);
+            // parameters typed narrower than 4 bytes whose slot the machine code reads as a whole dword (and never
+            // writes): the callers would cut a pointer down to a byte
+            int widened = 0, wfail = 0;
+            try (BufferedReader r = new BufferedReader(new FileReader(getScriptArgs()[1]))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (line.startsWith("#")) continue;
+                    String[] p = line.split("\t", -1);
+                    if (p.length < 4 || p[3].isEmpty()) continue;
+                    Set<Integer> dw = new HashSet<>();
+                    for (String k : p[3].split(",")) dw.add(Integer.parseInt(k));
+                    Function f = getFunctionAt(toAddr(Long.parseLong(p[0], 16)));
+                    if (f == null || f.isThunk() || f.isExternal()) continue;
+                    boolean change = false;
+                    for (Parameter q : f.getParameters())
+                        if (q.isStackVariable() && q.getLength() < 4 && (q.getStackOffset() - 4) % 4 == 0 &&
+                            dw.contains((q.getStackOffset() - 4) / 4)) change = true;
+                    if (!change) continue;
+                    try {
+                        boolean custom = f.hasCustomVariableStorage();
+                        List<Variable> all = new ArrayList<>();
+                        for (Parameter q : f.getParameters()) {
+                            if (q.isAutoParameter()) continue;
+                            DataType t = q.getDataType();
+                            boolean wide = q.isStackVariable() && q.getLength() < 4 && (q.getStackOffset() - 4) % 4 == 0 &&
+                                           dw.contains((q.getStackOffset() - 4) / 4);
+                            if (wide) t = Undefined4DataType.dataType;
+                            all.add(custom ? new ParameterImpl(q.getName(), t, wide ? new VariableStorage(currentProgram,
+                                                 q.getStackOffset(), 4) : q.getVariableStorage(), currentProgram)
+                                           : new ParameterImpl(q.getName(), t, currentProgram));
+                        }
+                        f.updateFunction(f.getCallingConventionName(), f.getReturn(), all,
+                            custom ? Function.FunctionUpdateType.CUSTOM_STORAGE : Function.FunctionUpdateType.DYNAMIC_STORAGE_FORMAL_PARAMS,
+                            true, SourceType.ANALYSIS);
+                        widened++;
+                    } catch (Exception e) { wfail++; }
+                }
+            }
+            println("byte/word parameters read as dwords, widened: " + widened + ", failed " + wfail);
         }
         println("parameters added to " + added + ", removed from " + removed + ", made __stdcall " + conv + ", failed " + fail);
     }
