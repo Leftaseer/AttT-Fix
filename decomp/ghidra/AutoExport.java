@@ -224,6 +224,12 @@ public class AutoExport extends GhidraScript {
                 Varnode in = op.getInput(0), out = op.getOutput();
                 boolean inside = span.contains(op) || (in.getDef() != null && span.contains(in.getDef()));
                 if (!inside || out == null) continue;
+                // the root of the operand: nothing else in it reads the cast's result (an outer '(int *)' of
+                // '(int)f + 0x10' is not the CAST of f)
+                boolean root = true;
+                for (PcodeOp o2 : span)
+                    if (o2 != op) for (Varnode v : o2.getInputs()) if (v == out) root = false;
+                if (!root) continue;
                 if (!mix(htype(out), htype(in))) continue;
                 if (printed == null || base(printed).getLength() != base(htype(out)).getLength() ||
                     isFloat(printed) != isFloat(htype(out))) continue;
