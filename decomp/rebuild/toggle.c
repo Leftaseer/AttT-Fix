@@ -1,7 +1,9 @@
-/* Replacements switched on at start-up (build.py --toggle), for finding a bad replaced function by bisection
- * without a new build each time: the jmp at the entry of every replaced function is written here, before the
- * game's own start-up code runs, unless decomp_toggle.txt next to the exe turns it off.  The pointers to replaced
- * functions (vtables, tables) keep pointing at the old entries, so they follow the switch.
+/* Replacements switched at start-up (build.py --toggle), for finding a bad replaced function by bisection without
+ * a new build each time.  The entry of every replaced function jumps through a slot (data, tools/exe2obj.py
+ * --toggle) holding the new function; for one that decomp_toggle.txt next to the exe turns off, the slot gets the
+ * old entry's first instructions copied out with a jump back, before the game's own start-up code runs.  No code
+ * is written.  The pointers to replaced functions (vtables, tables) keep pointing at the old entries, so they
+ * follow the switch.
  *
  * decomp_toggle.txt: one rule per line, applied in order to every replaced function, all on before the first:
  *     - 00500000-00607000      off: the replaced functions whose original address is in the range
@@ -10,7 +12,8 @@
  * Runs before the C runtime is set up: only kernel32. */
 #include <windows.h>
 
-/* [0] count, then (original address, new function) pairs: made by tools/exe2obj.py --toggle */
+/* [0] count, then (original address, copy of its first instructions or 0 when it cannot be switched off) pairs,
+ * then the slots: made by tools/exe2obj.py --toggle */
 #define TOGGLE_MAX 16384
 extern unsigned decomp_toggle_table[];
 static unsigned char on[TOGGLE_MAX];
@@ -80,19 +83,13 @@ void decomp_apply_toggles(void)
         while (*p && *p != '\n')
             p++;
     }
-    unsigned n = 0;
+    unsigned n = 0, *slot = e + 2 * count;
     for (unsigned i = 0; i < count; i++) {
-        if (!on[i])
-            continue;
-        unsigned char *at = (unsigned char *)e[2 * i];
-        DWORD old;
-        VirtualProtect(at, 5, PAGE_EXECUTE_READWRITE, &old);
-        at[0] = 0xE9;
-        *(unsigned *)(at + 1) = e[2 * i + 1] - (e[2 * i] + 5);
-        VirtualProtect(at, 5, old, &old);
-        n++;
+        if (!on[i] && e[2 * i + 1])
+            slot[i] = e[2 * i + 1];
+        else
+            n++;
     }
-    FlushInstructionCache(GetCurrentProcess(), 0, 0);
     char line[96];
     wsprintfA(line, "%u of %u replaced functions on\r\n", n, count);
     path_next_to_exe(path, "decomp_toggle.log");

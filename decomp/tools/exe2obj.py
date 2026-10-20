@@ -113,21 +113,134 @@ def main():
         struct.pack_into('<I', s[3], off, tgt - secs[ti][1])
         s[4].append((off, ti, IMAGE_REL_I386_DIR32)); stats['sec'] += 1
 
-    # replaced functions: jmp NEW at the old entry, or (--toggle) a table of them for the start-up code
+    # replaced functions: jmp NEW at the old entry.  --toggle: jmp to a stub 'jmp [slot]', the slot (data) holding
+    # NEW, or for a replacement switched off at start-up (rebuild/toggle.c) the old entry's own first instructions
+    # copied out (relative branches re-aimed, absolute addresses relocated) and a jmp back after them: no code is
+    # written at run time.  An entry whose first bytes are jumped into from elsewhere stays plainly replaced.
+    repl_jmp = repl
     if a.toggle:
-        tab = bytearray(struct.pack('<I', len(repl)))
-        rel = []
-        for va, new in sorted(repl.items()):
-            si = find_sec(va)
-            rel.append((len(tab), si, IMAGE_REL_I386_DIR32))
-            tab += struct.pack('<I', va - secs[si][1])
-            rel.append((len(tab), sym(cname(new)), IMAGE_REL_I386_DIR32))
-            tab += struct.pack('<I', 0)
-        secs.append(['.ndata', 0xF0000000, len(tab), tab, rel])
-        sym('_decomp_toggle_table', 0, len(secs), 2)
-        repl_jmp = {}
-    else:
-        repl_jmp = repl
+        import capstone
+        from capstone import x86
+        md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+        md.detail = True
+        relocset = set(relocs)
+        ti_ = find_sec(next(va for va in repl))
+        text = secs[ti_]
+        orig_text = bytes(raw[pe.get_offset_from_rva(text[1] - base):pe.get_offset_from_rva(text[1] - base) + text[2]])
+        # targets of every direct branch in .text (linear sweep), to see which entries are jumped into
+        inner = set()
+        off = 0
+        while off < len(orig_text):
+            last = None
+            for i in md.disasm(orig_text[off:], text[1] + off):
+                last = i
+                if (i.mnemonic.startswith('j') or i.mnemonic.startswith('loop')) and i.operands and \
+                        i.operands[0].type == x86.X86_OP_IMM:
+                    inner.add(i.operands[0].imm)
+            off = (last.address + last.size - text[1] + 1) if last else off + 1
+
+        def abs_target(tgt):
+            """(stored value, symbol) of an absolute address in copied code, as the relocation loop does it"""
+            if tgt in iat:
+                return 0, sym(iat[tgt])
+            t2 = find_sec(tgt)
+            if t2 is None:
+                return tgt - base, imagebase_sym
+            return tgt - secs[t2][1], t2
+
+        stubs, srel = bytearray(), []
+        tab, trel = bytearray(struct.pack('<I', len(repl))), []
+        slots, lrel = bytearray(), []
+        items = sorted(repl.items())
+        plain = {}
+        n_tr = 0
+        for k, (va, newname) in enumerate(items):
+            # trampoline: whole instructions covering the 5 bytes of the jmp
+            code = orig_text[va - text[1]:va - text[1] + 32]
+            tr, trr, cover, ok = bytearray(), [], 0, True
+            for i in md.disasm(code, va):
+                if cover >= 5:
+                    break
+                if any(t in inner for t in range(va + 1, va + cover + i.size)):
+                    ok = False
+                op = i.operands[0] if i.operands else None
+                rel_tgt = op.imm if op is not None and op.type == x86.X86_OP_IMM and \
+                    (i.mnemonic in ('call', 'jmp') or i.mnemonic.startswith('j')) and i.mnemonic not in ('jecxz', 'jcxz') else None
+                if i.mnemonic.startswith('loop') or i.mnemonic in ('jecxz', 'jcxz'):
+                    ok = False
+                if rel_tgt is not None:
+                    ts = find_sec(rel_tgt)
+                    if ts is None:
+                        ok = False
+                        break
+                    if i.mnemonic == 'call':
+                        tr += b'\xE8'
+                    elif i.mnemonic == 'jmp':
+                        tr += b'\xE9'
+                    else:
+                        cc = i.bytes[0] if i.bytes[0] != 0x0F else i.bytes[1] - 0x10
+                        tr += bytes([0x0F, (cc & 0x0F) | 0x80])
+                    trr.append((len(tr), ts, IMAGE_REL_I386_REL32))
+                    tr += struct.pack('<I', rel_tgt - secs[ts][1])
+                else:
+                    b = bytearray(i.bytes)
+                    for p_ in range(i.size - 3):
+                        if i.address + p_ in relocset:
+                            v, sy = abs_target(struct.unpack_from('<I', b, p_)[0])
+                            struct.pack_into('<I', b, p_, v)
+                            trr.append((len(tr) + p_, sy, IMAGE_REL_I386_DIR32))
+                    tr += b
+                cover += i.size
+            if cover < 5:
+                ok = False
+            if not ok:
+                plain[va] = newname
+                tab += struct.pack('<II', va, 0)     # not switchable (rebuild/toggle.c leaves it on)
+                slots += struct.pack('<I', 0)
+                continue
+            # the jmp back after the copied instructions
+            tr += b'\xE9'
+            trr.append((len(tr), ti_, IMAGE_REL_I386_REL32))
+            tr += struct.pack('<I', va + cover - text[1])
+            tr_off = len(stubs)
+            stubs += tr
+            srel += [(tr_off + o, sy, t) for o, sy, t in trr]
+            while len(stubs) % 4:
+                stubs += b'\xCC'
+            # the stub the entry jumps to: jmp [slot]
+            st_off = len(stubs)
+            stubs += b'\xFF\x25'
+            srel.append((len(stubs), 'SLOTS', IMAGE_REL_I386_DIR32))
+            stubs += struct.pack('<I', 4 * k)
+            stubs += b'\xCC\xCC'
+            # slot: the new function (on) until toggle.c puts the trampoline there
+            lrel.append((len(slots), sym(cname(newname)), IMAGE_REL_I386_DIR32))
+            slots += struct.pack('<I', 0)
+            # table: original address, trampoline
+            trel.append((len(tab), ti_, IMAGE_REL_I386_DIR32))
+            tab += struct.pack('<I', va - text[1])
+            trel.append((len(tab), 'STUBS', IMAGE_REL_I386_DIR32))
+            tab += struct.pack('<I', tr_off)
+            # the entry: jmp stub
+            s_ = text
+            o_ = va - s_[1]
+            s_[3][o_] = 0xE9
+            struct.pack_into('<I', s_[3], o_ + 1, st_off)
+            s_[4] = [x for x in s_[4] if not (o_ < x[0] + 4 and x[0] < o_ + 5)]
+            s_[4].append((o_ + 1, 'STUBS', IMAGE_REL_I386_REL32))
+            n_tr += 1
+        SCN['.ntext'] = 0x60000020
+        secs.append(['.ntext', 0xF0000000, len(stubs), stubs, srel])
+        stub_sym = sym('$toggle_stubs', 0, len(secs), 3)
+        secs.append(['.ndata', 0xF1000000, len(tab) + len(slots), tab + slots,
+                     trel + [(len(tab) + o, sy, t) for o, sy, t in lrel]])
+        data_sec = len(secs)
+        slot_sym = sym('$toggle_slots', len(tab), data_sec, 3)
+        sym('_decomp_toggle_table', 0, data_sec, 2)
+        for s_ in secs:
+            s_[4] = [(o, stub_sym if sy == 'STUBS' else slot_sym if sy == 'SLOTS' else sy, t) for o, sy, t in s_[4]]
+        repl_jmp = plain
+        print('toggle: %d switchable, %d always on' % (n_tr, len(plain)))
     for va, new in repl_jmp.items():
         si = find_sec(va); s = secs[si]; off = va - s[1]
         s[3][off] = 0xE9; struct.pack_into('<I', s[3], off + 1, 0)
