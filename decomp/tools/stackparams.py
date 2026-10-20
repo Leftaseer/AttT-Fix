@@ -11,7 +11,9 @@ OUT: address, number of 4-byte stack slots used (0 if none), 'exact' or 'lost' (
 everywhere, e.g. after an indirect call with unknown cleanup: the count is a lower bound), and the slots (0 = the
 first parameter) read as whole dwords and never written: such a parameter is 4 bytes even where the decompiler
 typed it as a byte (0x42AF50 passes its second parameter on as a pointer, typed undefined1 its callers cut the
-pointer down to a byte)."""
+pointer down to a byte); the arguments callers push; and the slots only x87/SSE float instructions use, as
+'k:f' (a float) or 'k:d' (a double in slots k and k+1): sqrt(x) of 0x406260 has x untyped, and its callers
+then pass the bits of a float as an integer."""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
@@ -47,23 +49,42 @@ md.detail = True
 ESP, EBP = x86.X86_REG_ESP, x86.X86_REG_EBP
 
 
+X87_CONTROL = ('fldcw', 'fnstcw', 'fstcw', 'fnstsw', 'fstsw', 'fnstenv', 'fstenv', 'fldenv', 'fnsave', 'fsave',
+               'frstor', 'fbld', 'fbstp')
+X87_STORES = ('fnstcw', 'fstcw', 'fnstsw', 'fstsw', 'fnstenv', 'fstenv', 'fnsave', 'fsave')
+
+
+def float_width(i, op):
+    """4 or 8 if the instruction reads or writes the memory operand as a float or double (x87 or SSE)"""
+    m = i.mnemonic
+    if m.startswith('f') and not m.startswith('fi') and m not in X87_CONTROL:
+        return op.size if op.size in (4, 8) else None
+    if m.startswith(('cvtsi2', 'cvtpi2')):
+        return None
+    if m.endswith(('ss', 'sd', 'ss2sd', 'sd2ss', 'ss2si', 'sd2si')) and m != 'movsd' or (m == 'movsd' and i.operands):
+        return op.size if op.size in (4, 8) else None
+    return None
+
+
 def analyse(start, size):
     code = {}
     try:
         for i in md.disasm(pe.read(start, size), start):
             code[i.address] = i
     except Exception:
-        return 0, 'lost', ()
+        return 0, 'lost', (), ()
     top = 0                    # highest byte offset above the return address seen (exclusive)
     dword_read, written = set(), set()
+    floats, other = {}, set()  # slot -> widths of the float accesses to it; slots accessed otherwise
     lost = False
-    todo = [(start, 0, None)]  # address, esp delta (0 = at the return address), ebp delta or None
+    todo = [(start, 0, None, frozenset())]  # address, esp delta (0 = at the return address), ebp delta or None,
+                                            # parameter slots written on the way
     pushed = 0                 # bytes pushed since the last call: the arguments of the next one
     run = 0                    # pushes right before, with only moves between them
     seen = {}
     steps = 0
     while todo:
-        p, d, bp = todo.pop()
+        p, d, bp, killed = todo.pop()
         while p in code and steps < 20000:
             if p in seen:
                 break
@@ -87,6 +108,22 @@ def analyse(start, size):
                                 written.add(k)
                             elif op.size == 4 and op.access & capstone.CS_AC_READ:
                                 dword_read.add(k)
+                        # what the parameter's value is used as: until a write on this path makes the slot a
+                        # temporary of the function (MSVC reuses dead parameter slots)
+                        cover = range((off - 4) // 4, (off - 4 + max(op.size, 1) + 3) // 4)
+                        fw = float_width(i, op)
+                        acc = capstone.CS_AC_WRITE if m in X87_STORES else op.access   # capstone has them read
+                        if any(k in killed for k in cover):
+                            pass
+                        elif fw and (off - 4) % 4 == 0 and m != 'lea' and acc & capstone.CS_AC_READ:
+                            k = (off - 4) // 4
+                            floats.setdefault(k, set()).add(fw)
+                            if fw == 8:
+                                floats.setdefault(k + 1, set()).add(-8)
+                        elif m == 'lea' or acc & capstone.CS_AC_READ:
+                            other.update(cover)
+                        if m != 'lea' and acc & capstone.CS_AC_WRITE:
+                            killed = killed | set(cover)
             # ESP and EBP tracking
             ops = i.operands
             if m == 'push':
@@ -152,10 +189,18 @@ def analyse(start, size):
                 break                  # tail jump or table
             if m.startswith('j') or m.startswith('loop'):
                 if ops[0].type == x86.X86_OP_IMM:
-                    todo.append((ops[0].imm, d, bp))
+                    todo.append((ops[0].imm, d, bp, killed))
             p = i.address + i.size
     slots = max(0, (top - 4 + 3) // 4)
-    return slots, 'lost' if lost else 'exact', sorted(dword_read - written)
+    fl = []
+    for k in sorted(floats):
+        w = floats[k]
+        if k in other or len(w) != 1 or -8 in w:
+            continue
+        if w == {8} and (k + 1 in other or floats.get(k + 1) != {-8}):
+            continue
+        fl.append('%d:%s' % (k, 'f' if w == {4} else 'd'))
+    return slots, 'lost' if lost else 'exact', sorted(dword_read - written), fl
 
 
 # arguments the callers of a caller-pop function push: the 'add esp, N' right after each direct call.  A function
@@ -186,8 +231,9 @@ def pushed_args(a):
 with open(sys.argv[3], 'w') as f:
     f.write('# address\tstack slots used\texact|lost\tslots read as dwords, never written'
             '\targuments callers push (commonest add esp / 4 after direct calls of a caller-pop function)'
+            '\tslots only floats are read from or written to (k:f float, k:d double in k and k+1)'
             ' (tools/stackparams.py)\n')
     for a in sorted(funcs):
-        n, how, dw = analyse(a, funcs[a][0])
-        f.write('%08X\t%d\t%s\t%s\t%d\n' % (a, n, how, ','.join(map(str, dw)), pushed_args(a)))
+        n, how, dw, fl = analyse(a, funcs[a][0])
+        f.write('%08X\t%d\t%s\t%s\t%d\t%s\n' % (a, n, how, ','.join(map(str, dw)), pushed_args(a), ','.join(fl)))
 print('done')

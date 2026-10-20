@@ -5,7 +5,8 @@
 // Caller-pop functions (no ret N) get the stack parameters their machine code uses (stackparams.py), when the
 // decompiler found fewer: a parameter that is only passed on to a call is easily missed; or as many as their
 // callers push, when that is more (an HRESULT check given __FILE__ and __LINE__ it ignores).
-// Byte and word parameters whose slot the machine code reads as a dword (stackparams.py) become undefined4.
+// Byte and word parameters whose slot the machine code reads as a dword (stackparams.py) become undefined4;
+// untyped or integer ones whose slot only float instructions use become float (or double).
 // Args: functions.tsv [stackparams.tsv]
 import ghidra.program.model.listing.VariableStorage;
 import ghidra.app.script.GhidraScript;
@@ -183,6 +184,44 @@ public class FixStackParams extends GhidraScript {
                 }
             }
             println("byte/word parameters read as dwords, widened: " + widened + ", failed " + wfail);
+            // untyped or integer parameters whose slot only float instructions use (stackparams.py): float, or
+            // double for an 8-byte one; sqrt(x) had x undefined4, and callers passed float bits as an integer
+            int floated = 0, ffail = 0;
+            try (BufferedReader r = new BufferedReader(new FileReader(getScriptArgs()[1]))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (line.startsWith("#")) continue;
+                    String[] p = line.split("\t", -1);
+                    if (p.length < 6 || p[5].isEmpty()) continue;
+                    Map<Integer, String> fl = new HashMap<>();
+                    for (String e : p[5].split(",")) fl.put(Integer.parseInt(e.split(":")[0]), e.split(":")[1]);
+                    Function f = getFunctionAt(toAddr(Long.parseLong(p[0], 16)));
+                    if (f == null || f.isThunk() || f.isExternal()) continue;
+                    boolean custom = f.hasCustomVariableStorage(), change = false;
+                    List<Variable> all = new ArrayList<>();
+                    for (Parameter q : f.getParameters()) {
+                        if (q.isAutoParameter()) continue;
+                        DataType t = q.getDataType();
+                        if (q.isStackVariable() && (q.getStackOffset() - 4) % 4 == 0 && fl.containsKey((q.getStackOffset() - 4) / 4)) {
+                            String w = fl.get((q.getStackOffset() - 4) / 4);
+                            DataType b = t instanceof TypeDef ? ((TypeDef) t).getBaseDataType() : t;
+                            boolean integral = b instanceof Undefined || b instanceof AbstractIntegerDataType || b instanceof DefaultDataType;
+                            if (integral && w.equals("f") && t.getLength() == 4) { t = FloatDataType.dataType; change = true; }
+                            if (integral && w.equals("d") && t.getLength() == 8) { t = DoubleDataType.dataType; change = true; }
+                        }
+                        all.add(custom ? new ParameterImpl(q.getName(), t, q.getVariableStorage(), currentProgram)
+                                       : new ParameterImpl(q.getName(), t, currentProgram));
+                    }
+                    if (!change) continue;
+                    try {
+                        f.updateFunction(f.getCallingConventionName(), f.getReturn(), all,
+                            custom ? Function.FunctionUpdateType.CUSTOM_STORAGE : Function.FunctionUpdateType.DYNAMIC_STORAGE_FORMAL_PARAMS,
+                            true, SourceType.ANALYSIS);
+                        floated++;
+                    } catch (Exception e) { ffail++; }
+                }
+            }
+            println("parameters only used as floats typed float/double in " + floated + " functions, failed " + ffail);
         }
         println("parameters added to " + added + ", removed from " + removed + ", made __stdcall " + conv + ", failed " + fail);
     }

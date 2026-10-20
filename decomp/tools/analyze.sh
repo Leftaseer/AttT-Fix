@@ -85,6 +85,7 @@ with open('%s/%s_functions.tsv' % (s, g), 'w') as f:
 EOF
     py tailpop.py "$WORK/bin/$g.exe" "$O/${g}_regparams.tsv" "$SYMS/${g}_functions.tsv"
     py retlive.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_retlive.tsv" "$SYMS/$g.sym"   # + virtual calls
+    py x87ret.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_x87ret.tsv"   # float results in ST0
     py icalls.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$O/${g}_icalls0.tsv"   # pops of indirect callees
     py stackparams.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv" - "$O/${g}_icalls0.tsv"
     py importargs.py "$WORK/bin/$g.exe" "$SYMS/${g}_importargs.tsv"
@@ -98,6 +99,7 @@ for g in attt valk; do
      -postScript ApplyRegParams.java "$O/${g}_regparams.tsv" \
      -postScript ApplySymbols.java "$SYMS/$g.sym,$SYMS/${g}_ctors.sym" \
      -postScript ClassThiscall.java "$O/${g}_regparams.tsv" \
+     -postScript FloatReturns.java "$SYMS/${g}_x87ret.tsv" \
      -postScript FixStackParams.java "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv" \
      -postScript SetReturns.java "$SYMS/${g}_retlive.tsv" \
      -postScript FpuIntrinsics.java \
