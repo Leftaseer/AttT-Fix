@@ -304,7 +304,15 @@ void GameMain(const char *cmdLine)
         return;
 #ifdef DECOMP_DEBUG_LOG
     AddVectoredExceptionHandler(1, CrashLog);
-    DebugLog("---- start");
+    {   /* when, and which build (its compile time; the exe keeps the original's time stamp): the logs of several
+         * runs and versions pile up in one file */
+        SYSTEMTIME t;
+        GetLocalTime(&t);
+        char line[96];
+        wsprintfA(line, "---- start %04d-%02d-%02d %02d:%02d:%02d, build %s %s", t.wYear, t.wMonth, t.wDay, t.wHour,
+                  t.wMinute, t.wSecond, __DATE__, __TIME__);
+        DebugLog(line);
+    }
 #endif
     CreateGamePath();
     std::string dir = ((nCfg::GamePath *)g_gamePath)->exePath;
