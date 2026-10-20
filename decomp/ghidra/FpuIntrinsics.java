@@ -4,7 +4,9 @@
 // decompiled without the value.  Gives each thunk (and the import) a custom-storage prototype: one argument in
 // ST0, or two in ST1 and ST0 (pow(x, y): x in ST1), the result in ST0.  tools/autodecomp.py calls them through
 // helpers that put the arguments there (rebuild/rt_support.c).
-// Args: none.  Prints the thunk addresses as 'FPU <address> <name> <arguments>'.
+// Also the runtime's _ftol2_sse / _ftol2 (float to integer of ST0, found by their code): x in ST0, the result in
+// EAX or EDX:EAX.
+// Args: none.  Prints the thunk addresses as 'FPU <address> <name> <arguments>', the conversions as 'FTOL'.
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.data.*;
@@ -20,6 +22,21 @@ public class FpuIntrinsics extends GhidraScript {
             ARGS.put(n, 1);
         for (String n : new String[] { "_CIpow", "_CIatan2", "_CIfmod" })
             ARGS.put(n, 2);
+    }
+
+    static boolean at(byte[] b, int k, int... v) {
+        for (int i = 0; i < v.length; i++) if (v[i] >= 0 && (b[k + i] & 0xff) != v[i]) return false;
+        return true;
+    }
+    // _ftol2_sse: cmp dword [x], 0; je y; push ebp; mov ebp, esp; sub esp, 8; and esp, -8; fstp qword [esp];
+    // cvttsd2si eax, [esp].  _ftol2: push ebp; mov ebp, esp; sub esp, 0x20; and esp, -16; fld st0; fst [esp+0x18];
+    // fistp qword [esp+0x10]; fild qword [esp+0x10]
+    static String ftolKind(byte[] b) {
+        if (at(b, 0, 0x83, 0x3d, -1, -1, -1, -1, 0x00, 0x74, -1, 0x55, 0x8b, 0xec, 0x83, 0xec, 0x08, 0x83, 0xe4, 0xf8,
+               0xdd, 0x1c, 0x24, 0xf2, 0x0f, 0x2c, 0x04, 0x24)) return "int";
+        if (at(b, 0, 0x55, 0x8b, 0xec, 0x83, 0xec, 0x20, 0x83, 0xe4, 0xf0, 0xd9, 0xc0, 0xd9, 0x54, 0x24, 0x18, 0xdf, 0x7c,
+               0x24, 0x10, 0xdf, 0x6c, 0x24, 0x10)) return "long long";
+        return null;
     }
 
     void apply(Function f, int n) throws Exception {
@@ -58,5 +75,26 @@ public class FpuIntrinsics extends GhidraScript {
             done++;
         }
         println("x87 intrinsic thunks given their FPU arguments: " + done);
+        // the runtime's float to integer conversions of ST0 (as tools/crtfuncs.py finds them): _ftol2_sse returns
+        // EAX, _ftol2 EDX:EAX.  The decompiler had made _ftol2_sse a __fastcall of ECX and EDX, and its 221 callers
+        // passed registers they had not set.
+        int ftol = 0;
+        Register st0 = currentProgram.getRegister("ST0"), eax = currentProgram.getRegister("EAX"),
+                 edx = currentProgram.getRegister("EDX");
+        for (Function f : currentProgram.getFunctionManager().getFunctions(true)) {
+            byte[] b = new byte[32];
+            try { currentProgram.getMemory().getBytes(f.getEntryPoint(), b); } catch (Exception e) { continue; }
+            String kind = ftolKind(b);
+            if (kind == null) continue;
+            List<Variable> ps = new ArrayList<>();
+            ps.add(new ParameterImpl("x", Float10DataType.dataType, new VariableStorage(currentProgram, st0), currentProgram));
+            ReturnParameterImpl ret = kind.equals("int")
+                ? new ReturnParameterImpl(IntegerDataType.dataType, new VariableStorage(currentProgram, eax), currentProgram)
+                : new ReturnParameterImpl(LongLongDataType.dataType, new VariableStorage(currentProgram, edx, eax), currentProgram);
+            f.updateFunction("__cdecl", ret, ps, Function.FunctionUpdateType.CUSTOM_STORAGE, true, SourceType.USER_DEFINED);
+            println(String.format("FTOL %08X %s", f.getEntryPoint().getOffset(), kind));
+            ftol++;
+        }
+        println("float to integer conversions of ST0: " + ftol);
     }
 }
