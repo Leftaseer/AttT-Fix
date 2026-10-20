@@ -4,7 +4,13 @@ code (both ways at branches, up to a limit) and see whether EAX is read before i
 caller counts as a use (it may pass the value on).  The decompiler sometimes types such a function as void
 (it saw no value being computed for EAX on the way out), and a replacement written that way would return garbage.
 
-usage: retlive.py EXE symbols/GAME_functions.tsv OUT.tsv      (OUT: address of every function whose EAX is used)"""
+Virtual calls count too (SYMS given): when the code after 'call [reg+off]' (or 'call reg' loaded from
+[x+off]) reads EAX, the function at offset off of every vftable is taken as returning something.  One override
+of a slot may return a value its callers use while another one, typed void by the decompiler, leaves 'this' in
+EAX by accident (CRenderObject::vf7 0x437A70: replaced as void, the battle set-up got a null pointer).
+
+usage: retlive.py EXE symbols/GAME_functions.tsv OUT.tsv [symbols/GAME.sym (vftables)]
+OUT: address of every function whose EAX is used"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
@@ -76,12 +82,54 @@ def eax_used_after(addr, limit=80):
     return False
 
 
+def slot_of(a, i):
+    """vftable offset of an indirect call: call [reg+off], or call reg after mov reg, [x+off] just before"""
+    op = i.operands[0]
+    if op.type == x86.X86_OP_MEM and op.mem.base not in (0, x86.X86_REG_ESP, x86.X86_REG_EBP) and op.mem.index == 0:
+        return op.mem.disp
+    if op.type == x86.X86_OP_REG:
+        p = a
+        for _ in range(6):
+            prev = next((insns[p - k] for k in range(1, 8) if p - k in insns and p - k + insns[p - k].size == p), None)
+            if prev is None:
+                return None
+            if prev.mnemonic == 'mov' and prev.operands[0].type == x86.X86_OP_REG and prev.operands[0].reg == op.reg:
+                m = prev.operands[1]
+                if m.type == x86.X86_OP_MEM and m.mem.base not in (0, x86.X86_REG_ESP, x86.X86_REG_EBP) and m.mem.index == 0:
+                    return m.mem.disp
+                return None
+            p = prev.address
+    return None
+
+
 used = set()
+slots = set()        # vftable offsets whose callers use EAX
 for a, i in insns.items():
-    if i.mnemonic == 'call' and i.operands[0].type == x86.X86_OP_IMM:
+    if i.mnemonic != 'call':
+        continue
+    if i.operands[0].type == x86.X86_OP_IMM:
         t = i.operands[0].imm
         if t in funcs and t not in used and eax_used_after(a + i.size):
             used.add(t)
+    elif len(sys.argv) > 4:
+        off = slot_of(a, i)
+        if off is not None and 0 <= off < 0x400 and off % 4 == 0 and off not in slots and eax_used_after(a + i.size):
+            slots.add(off)
+if len(sys.argv) > 4:
+    nv = 0
+    for l in open(sys.argv[4], encoding='utf-8'):
+        q = l.split('#')[0].split(None, 2)
+        if len(q) == 3 and q[1] == 'd' and 'vftable' in q[2]:
+            v = int(q[0], 16)
+            for off in slots:
+                try:
+                    t = pe.u32(v + off)
+                except Exception:
+                    continue
+                if t in funcs and t not in used:
+                    used.add(t)
+                    nv += 1
+    print('virtual calls: %d vftable offsets with EAX used, %d more functions' % (len(slots), nv))
 with open(sys.argv[3], 'w') as f:
     f.write('# functions whose result in EAX some caller uses (tools/retlive.py)\n')
     for a in sorted(used):

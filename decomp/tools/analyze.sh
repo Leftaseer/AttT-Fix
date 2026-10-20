@@ -84,7 +84,7 @@ with open('%s/%s_functions.tsv' % (s, g), 'w') as f:
         f.write('%s\t%d\t%s\t%s\t%s\n' % (a, bf[a]['size'], r[1], r[2] if r[2] and ',' not in r[2] else '?', cl.get(a, 'EAX,ECX,EDX')))
 EOF
     py tailpop.py "$WORK/bin/$g.exe" "$O/${g}_regparams.tsv" "$SYMS/${g}_functions.tsv"
-    py retlive.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_retlive.tsv"
+    py retlive.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_retlive.tsv" "$SYMS/$g.sym"   # + virtual calls
     py stackparams.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv"
     py importargs.py "$WORK/bin/$g.exe" "$SYMS/${g}_importargs.tsv"
   done

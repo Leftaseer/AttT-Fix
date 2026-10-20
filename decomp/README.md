@@ -109,9 +109,24 @@ GAME_DIR=/путь/к/игре python3 decomp/tools/rungame.py build/ATThrone.ex
 ```
 
 `-D DECOMP_DEBUG_LOG` выводит каждую ошибку движка (`CGameException`, в том числе перехваченные) через
-`OutputDebugString` — в Wine это видно с `WINEDEBUG=+debugstr`. Что нужно Wine — в начале `rungame.py`: 32-битная
-Mesa, родная `d3dx9_29.dll` из DirectX June 2010 (встроенная в Wine не компилирует эффекты игры) и экран 1280×960,
-разрешение `graphic.cfg` по умолчанию.
+`OutputDebugString` — в Wine это видно с `WINEDEBUG=+debugstr` — и дописывает в `decomp_debug.log` в папке игры. Что
+нужно Wine — в начале `rungame.py`: 32-битная Mesa, родная `d3dx9_29.dll` из DirectX June 2010 (встроенная в Wine не
+компилирует эффекты игры) и экран 1280×960, разрешение `graphic.cfg` по умолчанию. Быстрее всего игра идёт с DXVK
+(`DXVK=папка x32`) на lavapipe; `NOWM=1` запускает без оконного менеджера (тогда клавиши доходят до игры),
+`WINDOWED=1` — в окне, `GRAPHIC_CFG` — с чужими настройками графики.
+
+Проверка с сохранением: сборка с `-D DECOMP_TEST_INPUT` читает `testinput.txt` (строка `<мс> lua <код>` выполняет Lua в
+скриптовой машине игры), и `tools/gametest_save.sh` загружает сохранение так же, как кнопка «Загрузить»
+(экран загрузки, затем `GUIScene.Load:StrongLoad()`), и играет дальше. С ним `tools/autobisect.py` ищет
+сгенерированную функцию, которая ломает место из сохранения:
+
+```
+SAVES=папка_с_game00.sav TESTINPUT=ti_load.txt DXVK=... WINEPREFIX=... python3 decomp/tools/autobisect.py \
+    ATThrone.exe auto/attt work -D DECOMP_TEST_INPUT --test 'bash decomp/tools/gametest_save.sh {exe}'
+```
+
+Скрипты интерфейса лежат в `Resource*.pak` скомпилированными (Lua 5.1 с 4-байтными числами); `tools/luadis.py`
+показывает их функции с константами.
 
 ## Автоматическая декомпиляция
 
