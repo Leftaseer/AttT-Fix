@@ -21,6 +21,7 @@ REBUILD = os.path.join(HERE, '..', 'rebuild')
 BLOCK = [
     (r'\bunaff_\w+', 'unaffected register'), (r'\bextraout_\w+', 'extra output register'),
     (r'\bin_stack_\w+', 'stack outside the frame'), (r'\bin_[A-Z]{2,4}\b', 'register input'),
+    (r'\bin_ST\d\b', 'x87 register input (a value left on the FPU stack the decompiler lost track of)'),
     (r'WARNING: (?!Globals starting|Removing unreachable|Load size|Type propagation|Subroutine does not return)', 'decompiler warning'),
     (r'UNRESOLVED', 'unresolved name'), (r'halt_baddata|halt_unimplemented|software_\w+\(|swi\(', 'bad instruction'),
     (r'\bLOCK\(\)|\bUNLOCK\(\)', 'locked instruction'), (r'_vbase_destructor|__alloca_probe', 'compiler helper'),

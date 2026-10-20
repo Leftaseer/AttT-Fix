@@ -41,7 +41,8 @@ def insn(a):
 
 PUSH = {'fld', 'fild', 'fbld', 'fldz', 'fld1', 'fldpi', 'fldl2e', 'fldl2t', 'fldlg2', 'fldln2',
         'fsincos', 'fptan', 'fxtract'}
-POP1 = {'fstp', 'fistp', 'fisttp', 'fbstp', 'fcomp', 'ficomp', 'fucomp', 'fcomip', 'fucomip', 'faddp', 'fsubp',
+# (capstone spells fcomip and fucomip 'fcompi' and 'fucompi')
+POP1 = {'fstp', 'fistp', 'fisttp', 'fbstp', 'fcomp', 'ficomp', 'fucomp', 'fcomip', 'fucomip', 'fcompi', 'fucompi', 'faddp', 'fsubp',
         'fsubrp', 'fmulp', 'fdivp', 'fdivrp', 'fpatan', 'fyl2x', 'fyl2xp1', 'ffreep'}
 POP2 = {'fcompp', 'fucompp'}
 CONTROL = {'fldcw', 'fnstcw', 'fstcw', 'fnstsw', 'fstsw', 'fnclex', 'fclex', 'fwait', 'wait', 'fnsave', 'fsave',
