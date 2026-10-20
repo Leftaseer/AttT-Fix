@@ -96,12 +96,13 @@ public class AutoExport extends GhidraScript {
         }
         return isFloat(a) != isFloat(b) && base(a).getLength() == base(b).getLength() && !(base(a) instanceof Pointer && false);
     }
-    String floatMix(HighFunction hf, Function f) {
+    String floatMix(HighFunction hf, Function f, Set<SequenceNumber> bits) {
         Iterator<PcodeOpAST> it = hf.getPcodeOps();
         while (it.hasNext()) {
             PcodeOpAST op = it.next();
             int c = op.getOpcode();
             Varnode out = op.getOutput();
+            if (c == PcodeOp.CAST && bits.contains(op.getSeqnum())) continue;     // printed as BITCAST
             if (c == PcodeOp.COPY || c == PcodeOp.CAST || c == PcodeOp.MULTIEQUAL || c == PcodeOp.INDIRECT) {
                 if (mix(htype(out), htype(op.getInput(0)))) return "copy at " + op.getSeqnum().getTarget();
             } else if (c == PcodeOp.STORE) {
@@ -142,15 +143,121 @@ public class AutoExport extends GhidraScript {
         return false;
     }
 
+    // ---- casts that keep the bits: '(float)x' of a CAST between a float and an integer type of one size means
+    // the same bits to the decompiler and a conversion to C; written BITCAST(float, x) (ghidra_prelude.h).
+    // The cast's own tokens carry no p-code op: the operand is the unary expression after '(type)', and its op is
+    // found from the ops of its tokens.
+    static boolean blank(ClangToken t) { return t instanceof ClangBreak || t.getText().trim().isEmpty(); }
+    static int next(List<ClangNode> toks, int i) {
+        while (i < toks.size() && blank((ClangToken) toks.get(i))) i++;
+        return i;
+    }
+    static String txt(List<ClangNode> toks, int i) { return i < toks.size() ? ((ClangToken) toks.get(i)).getText() : ""; }
+    // index of the ')' closing a cast '(' TYPE '*'... ')' that starts at i, or -1
+    static int castEnd(List<ClangNode> toks, int i) {
+        if (!txt(toks, i).equals("(") || !(toks.get(i) instanceof ClangSyntaxToken)) return -1;
+        int k = next(toks, i + 1);
+        if (k >= toks.size() || !(toks.get(k) instanceof ClangTypeToken)) return -1;
+        k = next(toks, k + 1);
+        while (txt(toks, k).equals("*")) k = next(toks, k + 1);
+        return txt(toks, k).equals(")") ? k : -1;
+    }
+    static int matching(List<ClangNode> toks, int i, String open, String close) {
+        int d = 0;
+        for (int k = i; k < toks.size(); k++) {
+            String x = txt(toks, k);
+            if (x.equals(open)) d++;
+            else if (x.equals(close) && --d == 0) return k;
+        }
+        return -1;
+    }
+    // last token index of the unary expression starting at i (C grammar: prefix operators and casts, then a
+    // primary expression with its postfix operators), or -1
+    static int unaryEnd(List<ClangNode> toks, int i) {
+        i = next(toks, i);
+        if (i >= toks.size()) return -1;
+        String x = txt(toks, i);
+        int c = castEnd(toks, i);
+        if (c >= 0) return unaryEnd(toks, c + 1);
+        if (toks.get(i) instanceof ClangOpToken && (x.equals("*") || x.equals("-") || x.equals("!") || x.equals("~") || x.equals("&")))
+            return unaryEnd(toks, i + 1);
+        int e;
+        if (x.equals("(")) e = matching(toks, i, "(", ")");
+        else if (x.equals(")") || x.equals(",") || x.equals(";")) return -1;
+        else e = i;
+        while (e >= 0) {
+            int k = next(toks, e + 1);
+            String y = txt(toks, k);
+            if (y.equals("[")) e = matching(toks, k, "[", "]");
+            else if (y.equals("(") && castEnd(toks, k) < 0) e = matching(toks, k, "(", ")");
+            else if (y.equals(".") || y.equals("->")) e = next(toks, k + 1);
+            else break;
+        }
+        return e;
+    }
+    // CAST ops printed as '(T)operand' that change between float and integer bits: open-paren index -> its op
+    Map<Integer, PcodeOp> bitCasts(List<ClangNode> toks) {
+        Map<Integer, PcodeOp> res = new HashMap<>();
+        for (int i = 0; i < toks.size(); i++) {
+            int c = castEnd(toks, i);
+            if (c < 0) continue;
+            int e = unaryEnd(toks, c + 1);
+            if (e < 0) continue;
+            Set<PcodeOp> span = new HashSet<>();
+            for (int k = c + 1; k <= e; k++) {
+                PcodeOp op = ((ClangToken) toks.get(k)).getPcodeOp();
+                if (op != null) span.add(op);
+            }
+            DataType printed = ((ClangTypeToken) toks.get(next(toks, i + 1))).getDataType();
+            PcodeOp found = null;
+            int n = 0;
+            // the CAST: an op of the operand's tokens (a lone variable carries the op reading it), or the op that
+            // reads the result of one of them
+            Set<PcodeOp> cand = new LinkedHashSet<>(span);
+            for (PcodeOp op : span) {
+                Varnode o = op.getOutput();
+                if (o == null) continue;
+                for (Iterator<PcodeOp> d = o.getDescendants(); d.hasNext(); ) cand.add(d.next());
+            }
+            for (PcodeOp op : cand) {
+                if (op.getOpcode() != PcodeOp.CAST) continue;
+                Varnode in = op.getInput(0), out = op.getOutput();
+                boolean inside = span.contains(op) || (in.getDef() != null && span.contains(in.getDef()));
+                if (!inside || out == null) continue;
+                if (!mix(htype(out), htype(in))) continue;
+                if (printed == null || base(printed).getLength() != base(htype(out)).getLength() ||
+                    isFloat(printed) != isFloat(htype(out))) continue;
+                found = op;
+                n++;
+            }
+            if (n == 1) res.put(i, found);
+        }
+        return res;
+    }
+
     String render(DecompileResults r, Function f, Map<Long, String> globals, Map<Long, String> callees,
-                  Set<DataType> used, Map<Long, String> strings, Map<String, String> sized) {
+                  Set<DataType> used, Map<Long, String> strings, Map<String, String> sized, Set<SequenceNumber> bits) {
         ClangTokenGroup g = r.getCCodeMarkup();
         List<ClangNode> toks = new ArrayList<>();
         g.flatten(toks);
         StringBuilder sb = new StringBuilder();
-        for (ClangNode n : toks) {
-            ClangToken t = (ClangToken) n;
+        Map<Integer, PcodeOp> bc = bitCasts(toks);
+        Map<Integer, String> before = new HashMap<>(), after = new HashMap<>();
+        for (Map.Entry<Integer, PcodeOp> e : bc.entrySet()) {
+            int i = e.getKey(), c = castEnd(toks, i), end = unaryEnd(toks, c + 1);
+            before.put(i, "BITCAST(");
+            before.put(c, ", (");
+            after.put(end, after.getOrDefault(end, "") + "))");
+            bits.add(e.getValue().getSeqnum());
+        }
+        for (int ti = 0; ti < toks.size(); ti++) {
+            if (after.containsKey(ti - 1)) sb.append(after.get(ti - 1));   // the end of a BITCAST operand
+            ClangToken t = (ClangToken) toks.get(ti);
             String text = t.getText();
+            if (before.containsKey(ti)) {
+                sb.append(before.get(ti));
+                continue;
+            }
             if (t instanceof ClangBreak) {
                 sb.append('\n');
                 for (int i = 0; i < ((ClangBreak) t).getIndent(); i++) sb.append(' ');
@@ -269,6 +376,7 @@ public class AutoExport extends GhidraScript {
             }
             sb.append(text);
         }
+        if (after.containsKey(toks.size() - 1)) sb.append(after.get(toks.size() - 1));
         return sb.toString();
     }
 
@@ -293,7 +401,8 @@ public class AutoExport extends GhidraScript {
                 Map<String, String> sized = new TreeMap<>();
                 Set<DataType> used = new HashSet<>();
                 String code;
-                try { code = render(r, f, globals, callees, used, strings, sized); }
+                Set<SequenceNumber> bits = new HashSet<>();
+                try { code = render(r, f, globals, callees, used, strings, sized, bits); }
                 catch (Exception e) { return null; }
                 usedAll.addAll(used);
                 StringBuilder sb = new StringBuilder();
@@ -302,7 +411,7 @@ public class AutoExport extends GhidraScript {
                 sb.append(",\"cc\":").append(js(f.getCallingConventionName()));
                 sb.append(",\"custom\":").append(f.hasCustomVariableStorage());
                 String fm = null;
-                try { fm = floatMix(r.getHighFunction(), f); } catch (Exception e) { fm = "check failed"; }
+                try { fm = floatMix(r.getHighFunction(), f, bits); } catch (Exception e) { fm = "check failed"; }
                 if (fm != null) sb.append(",\"floatmix\":").append(js(fm));
                 sb.append(",\"code\":").append(js(code));
                 sb.append(",\"globals\":{");

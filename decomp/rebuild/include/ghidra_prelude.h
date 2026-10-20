@@ -94,6 +94,10 @@ static inline double gh_rint(double x) { double r; __asm__("frndint" : "=t"(r) :
 #define ROUND(x) gh_rint(x)
 /* float to integer, towards zero (the decompiler's TRUNC; also MSVC's fistp after its truncating fldcw) */
 #define TRUNC(x) ((long long)(x))
+/* the decompiler's CAST between a float and an integer type of one size keeps the bits (AutoExport.java) */
+#define BITCAST(T, x) ({ __typeof__(x) gh_bc_v = (x); T gh_bc_r; \
+    _Static_assert(sizeof gh_bc_v == sizeof gh_bc_r, "BITCAST of different sizes"); \
+    __builtin_memcpy(&gh_bc_r, &gh_bc_v, sizeof gh_bc_r); gh_bc_r; })
 #define FLOOR(x) __builtin_floor(x)
 #define CEIL(x) __builtin_ceil(x)
 #define POPCOUNT(x) __builtin_popcount(x)
