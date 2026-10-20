@@ -79,7 +79,8 @@ bool CEngine::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 /* Scripted input for automatic tests (tools/rungame.py, where DirectInput sees no mouse): testinput.txt in the
  * game folder, one event per line, "MS click X Y" or "MS key VK": at MS milliseconds after the first frame the
  * game's cursor is moved to X,Y and a left click goes the way DirectInput's button events go (the button state
- * list of CInput and the button event listeners), the down this turn and the up the next.  Called by the main
+ * list of CInput and the button event listeners), the down this turn and the up the next; "MS lua CODE" runs a
+ * Lua chunk in the game's script machine (e.g. loading a save game from the main menu).  Called by the main
  * loop before every CEngine::Step (the menus do not go through CEngine::Frame). */
 ORIG_THISCALL(0044A3F0, void, (void *listeners, void *info));     /* sends an event to its listeners */
 ORIG_DATA(006C9014);    /* listeners of the left button going down */
@@ -87,6 +88,8 @@ ORIG_DATA(006C901C);    /* ... going up */
 ORIG_DATA(0060AC14);    /* nEvent::NullInfo::vftable */
 ORIG_DATA(006C9054);    /* listeners of mouse motion */
 ORIG_DATA(0060C798);    /* evMoveInfo::vftable */
+ORIG_THISCALL(0057D220, void, (void *vm, const char *buf, int len, const char *name));   /* runs a Lua chunk */
+ORIG_DATA(006C88D4);    /* the script machine (its lua_State is used by every DoFile) */
 
 static void TestMove(float dx, float dy)
 {
@@ -142,6 +145,11 @@ void TestInput(CInput *input)
             ORIG_CALL(0044A3F0)(d_006C9014, &info);
             upNext = true;
             return;
+        } else if (const char *lua = strstr(line, " lua ")) {
+            OutputDebugStringA(line);
+            void *vm = *(void **)d_006C88D4;
+            if (vm)
+                ORIG_CALL(0057D220)(vm, lua + 5, (int)strlen(lua + 5), "=testinput");
         } else if (sscanf(line, "%u key %d", &ms, &x) == 2) {
             PostMessageA(g_hWnd, WM_KEYDOWN, x, 1);
             PostMessageA(g_hWnd, WM_KEYUP, x, 0xC0000001);

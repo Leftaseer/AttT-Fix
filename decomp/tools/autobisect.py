@@ -15,6 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ap = argparse.ArgumentParser()
 ap.add_argument('orig'); ap.add_argument('auto'); ap.add_argument('work')
 ap.add_argument('--test')
+ap.add_argument('-D', dest='defines', action='append', default=[], help='define for build.py (e.g. DECOMP_TEST_INPUT)')
 ap.add_argument('--range', help='LO,HI: resume a search known to pass with LO functions and fail with HI')
 a = ap.parse_args()
 os.makedirs(a.work, exist_ok=True)
@@ -29,7 +30,7 @@ def test(lst):
     lp = os.path.join(a.work, 'bisect_list.txt')
     open(lp, 'w').write('\n'.join(lst) + '\n')
     r = subprocess.run([sys.executable, os.path.join(HERE, '..', 'rebuild', 'build.py'), '--exe', a.orig, '--out', exe,
-                        '--auto', a.auto, '--auto-list', lp], capture_output=True, text=True)
+                        '--auto', a.auto, '--auto-list', lp] + sum((['-D', d] for d in a.defines), []), capture_output=True, text=True)
     if r.returncode:
         log.write('build failed: %s\n' % r.stderr[-800:]); log.flush()
         sys.exit('build failed')

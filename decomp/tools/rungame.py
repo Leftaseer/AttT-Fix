@@ -4,7 +4,7 @@ rebuilt exe can be checked in the game itself on a machine without a GPU or a sc
 
     rungame.py EXE NAME 'wait 25; key Escape; wait 5; shot menu; click 640 480; wait 10; shot after'
 
-Actions (separated by ';'): wait SECONDS | key XDOTOOL_KEY | click X Y | move DX DY [TIMES] | press | focus | geom | shot LABEL
+Actions (separated by ';'): wait SECONDS | key XDOTOOL_KEY | click X Y | abs X Y | move DX DY [TIMES] | press | focus | geom | shot LABEL
 (the game moves its own cursor by DirectInput, which sees relative motion: use move, then press)
 The game folder is made in $WORK/game/NAME from symlinks to the installed game ($GAME_DIR) plus a copy of EXE;
 the startup videos are skipped (-nologo) unless LOGOS=1; screenshots go to $WORK/shots/NAME_LABEL.png; Wine's output, including the engine's errors of a build made with
@@ -100,6 +100,8 @@ for act in [s.strip() for s in script.split(';') if s.strip()]:
     elif q[0] == 'move':                    # relative motion (DirectInput sees only relative movement)
         for _ in range(int(q[3]) if len(q) > 3 else 1):
             xdo('mousemove_relative', '--', q[1], q[2]); time.sleep(0.05)
+    elif q[0] == 'abs':                     # move the X pointer to X Y (the game sees the motion as relative)
+        xdo('mousemove', q[1], q[2])
     elif q[0] == 'press':                   # mouse button at the current position
         xdo('mousedown', '1'); time.sleep(0.4); xdo('mouseup', '1')
     elif q[0] == 'focus':                   # give the game window the keyboard and mouse (no window manager)

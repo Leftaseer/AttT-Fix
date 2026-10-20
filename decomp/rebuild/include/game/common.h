@@ -30,3 +30,4 @@ extern "C" __declspec(dllimport) int __cdecl sscanf(const char *s, const char *f
 extern "C" __declspec(dllimport) void __stdcall _CxxThrowException(void *object, void *throwInfo);
 extern "C" __declspec(dllimport) int __cdecl sprintf(char *buf, const char *fmt, ...);
 extern "C" __declspec(dllimport) size_t __cdecl strlen(const char *s);
+extern "C" __declspec(dllimport) char *__cdecl strstr(const char *s, const char *sub);
