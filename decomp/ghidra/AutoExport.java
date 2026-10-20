@@ -125,6 +125,23 @@ public class AutoExport extends GhidraScript {
         return null;
     }
 
+    // the x87 rounding mode at a fistp is truncation: 'fldcw' of a word with 0xC00 or-ed in, within the few
+    // instructions before it (MSVC's inline float to integer conversion)
+    boolean truncatingCW(Address at) {
+        Instruction i = getInstructionAt(at);
+        boolean cw = false;
+        for (int k = 0; i != null && k < 24; k++, i = i.getPrevious()) {
+            String m = i.getMnemonicString();
+            if (m.equals("CALL") || m.equals("RET") || m.startsWith("J")) return false;
+            if (m.equals("FLDCW")) {
+                if (cw) return false;            // the one before restored a mode: not this conversion's
+                cw = true;
+            }
+            if (cw && m.equals("OR") && i.toString().toLowerCase().contains("0xc00")) return true;
+        }
+        return false;
+    }
+
     String render(DecompileResults r, Function f, Map<Long, String> globals, Map<Long, String> callees,
                   Set<DataType> used, Map<Long, String> strings, Map<String, String> sized) {
         ClangTokenGroup g = r.getCCodeMarkup();
@@ -144,6 +161,12 @@ public class AutoExport extends GhidraScript {
             if (t instanceof ClangOpToken && text.equals("*") && t.getPcodeOp() != null &&
                     t.getPcodeOp().getOpcode() == PcodeOp.CALLIND) {
                 sb.append(String.format("ICALL_%08X*", t.getPcodeOp().getSeqnum().getTarget().getOffset()));
+                continue;
+            }
+            // fistp after MSVC's '(int)x' sequence (fnstcw; or 0xC00; fldcw): the decompiler's ROUND is in the
+            // rounding mode set just before, truncation
+            if (text.equals("ROUND") && t.getPcodeOp() != null && truncatingCW(t.getPcodeOp().getSeqnum().getTarget())) {
+                sb.append("TRUNC");
                 continue;
             }
             if (t instanceof ClangFuncNameToken) {

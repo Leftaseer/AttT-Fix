@@ -116,6 +116,10 @@ def fit_convention(a, pr):
 native_ok = ('__cdecl', '__stdcall', '__thiscall', '__fastcall')
 
 
+FPU_ARGS = {'_CIsin': 1, '_CIcos': 1, '_CItan': 1, '_CIsqrt': 1, '_CIatan': 1, '_CIasin': 1, '_CIacos': 1,
+            '_CIexp': 1, '_CIlog': 1, '_CIlog10': 1, '_CIsinh': 1, '_CIcosh': 1, '_CItanh': 1,
+            '_CIpow': 2, '_CIatan2': 2, '_CIfmod': 2}
+fpu_thunks = {}    # 'jmp [import]' thunk of an x87 intrinsic -> (name, arguments): ghidra/FpuIntrinsics.java
 icalls = {}        # indirect call address -> (convention, stack arguments, result) of ghidra/ICallOverride.java
 
 
@@ -419,6 +423,12 @@ def convert(f, protos, skip, imports, impnames):
     decls = []
     for c in f['callees']:
         ca = int(c, 16)
+        if ca in fpu_thunks:
+            # x87 intrinsic (arguments on the FPU stack): rebuild/rt_support.c puts them there and calls it
+            name, n = fpu_thunks[ca]
+            decls.append('DECOMP_C double decomp%s(%s);' % (name, ', '.join(['double'] * n)))
+            decls.append('#define sub_%s decomp%s' % (c, name))
+            continue
         cp = protos.get(ca)
         if not cp:
             return None, 'callee %s without prototype' % c
@@ -522,6 +532,15 @@ def main():
     from pe import PE
     pe = PE(a.exe)
     image[0] = pe
+    for fa in machine:
+        try:
+            b = pe.read(fa, 6)
+        except Exception:
+            continue
+        if b[:2] == b'\xff\x25':
+            slot = int.from_bytes(b[2:6], 'little')
+            if slot in pe.imports and pe.imports[slot][1] in FPU_ARGS:
+                fpu_thunks[fa] = (pe.imports[slot][1], FPU_ARGS[pe.imports[slot][1]])
     impnames = {}
     for addr, (dll, name) in pe.imports.items():
         impnames[addr] = ('__imp_' + name) if name.startswith('?') else ('__imp__' + name)

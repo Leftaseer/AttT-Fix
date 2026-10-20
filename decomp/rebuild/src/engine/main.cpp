@@ -53,19 +53,48 @@ static LONG CALLBACK CrashLog(EXCEPTION_POINTERS *e)
 {
     static int logged;
     DWORD code = e->ExceptionRecord->ExceptionCode;
-    if (code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION &&
+    bool cxx = code == 0xE06D7363;           /* a C++ throw: logged too, with the type thrown (it may be caught) */
+    if (!cxx && code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION &&
         code != EXCEPTION_PRIV_INSTRUCTION && code != EXCEPTION_INT_DIVIDE_BY_ZERO && code != EXCEPTION_STACK_OVERFLOW)
         return EXCEPTION_CONTINUE_SEARCH;
-    if (logged++ >= 3)
+    if (logged++ >= 6)
         return EXCEPTION_CONTINUE_SEARCH;
     CONTEXT *c = e->ContextRecord;
     char line[256];
+    if (cxx && e->ExceptionRecord->NumberParameters >= 3) {
+        /* ThrowInfo -> CatchableTypeArray -> first CatchableType -> TypeDescriptor (name at +8) */
+        const DWORD *ti = (const DWORD *)e->ExceptionRecord->ExceptionInformation[2];
+        const char *name = "?";
+        if (ti && !IsBadReadPtr(ti, 16)) {
+            const DWORD *cta = (const DWORD *)ti[3];
+            if (cta && !IsBadReadPtr(cta, 8) && cta[0]) {
+                const DWORD *ct = (const DWORD *)cta[1];
+                if (ct && !IsBadReadPtr(ct, 8) && !IsBadReadPtr((void *)(ct[1] + 8), 4))
+                    name = (const char *)(ct[1] + 8);
+            }
+        }
+        wsprintfA(line, "C++ exception %.120s", name);
+        DebugLog(line);
+    }
     wsprintfA(line, "crash %08X at %08X (address %08X)", code, (DWORD)e->ExceptionRecord->ExceptionAddress,
               e->ExceptionRecord->NumberParameters > 1 ? (DWORD)e->ExceptionRecord->ExceptionInformation[1] : 0);
     DebugLog(line);
     wsprintfA(line, "  eax %08X ebx %08X ecx %08X edx %08X esi %08X edi %08X ebp %08X esp %08X", c->Eax, c->Ebx,
               c->Ecx, c->Edx, c->Esi, c->Edi, c->Ebp, c->Esp);
     DebugLog(line);
+    {   /* the top of the stack as it is: after a call into nowhere the return address is the first */
+        DWORD *top = (DWORD *)c->Esp;
+        if (!IsBadReadPtr(top - 12, 48)) {
+            wsprintfA(line, "  below esp: %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X", top[-12],
+                      top[-11], top[-10], top[-9], top[-8], top[-7], top[-6], top[-5], top[-4], top[-3], top[-2], top[-1]);
+            DebugLog(line);
+        }
+        if (!IsBadReadPtr(top, 32)) {
+            wsprintfA(line, "  esp: %08X %08X %08X %08X %08X %08X %08X %08X", top[0], top[1], top[2], top[3], top[4],
+                      top[5], top[6], top[7]);
+            DebugLog(line);
+        }
+    }
     HMODULE exe = GetModuleHandleA(nullptr);
     IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)((char *)exe + ((IMAGE_DOS_HEADER *)exe)->e_lfanew);
     DWORD lo = (DWORD)exe + 0x1000, hi = (DWORD)exe + nt->OptionalHeader.SizeOfImage;

@@ -92,7 +92,8 @@ typedef void code;
 #define SQRT(x) __builtin_sqrt(x)
 static inline double gh_rint(double x) { double r; __asm__("frndint" : "=t"(r) : "0"(x)); return r; }
 #define ROUND(x) gh_rint(x)
-#define TRUNC(x) __builtin_trunc(x)
+/* float to integer, towards zero (the decompiler's TRUNC; also MSVC's fistp after its truncating fldcw) */
+#define TRUNC(x) ((long long)(x))
 #define FLOOR(x) __builtin_floor(x)
 #define CEIL(x) __builtin_ceil(x)
 #define POPCOUNT(x) __builtin_popcount(x)

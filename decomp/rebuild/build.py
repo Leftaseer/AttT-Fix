@@ -64,24 +64,32 @@ def load_map(name, how=None):
     return m
 
 
+WIDE_PARAM = re.compile(r'\b(double|long\s+long|longlong|ulonglong|undefined8|__int64|qword|float10)\b')
+
+
 def split_params(text):
-    """'(lua_State *L, int narg)' -> number of parameters"""
+    """'(lua_State *L, int narg)' -> number of 4-byte stack slots the parameters take: an 8-byte one (double,
+    long long, undefined8) takes two.  Counted as one, an adapter copied a dword too few of 0x48C2D0's arguments
+    (byte, short, undefined8, int, int: 24 bytes), its ret 24 then took an argument for the return address."""
     t = text.strip()
     if t.startswith('('):
         t = t[1:t.rfind(')')]
     t = t.strip()
     if t in ('', 'void'):
         return 0
-    depth = 0
-    n = 1
+    depth, cur, parts = 0, '', []
     for c in t:
         if c in '(<[':
             depth += 1
         elif c in ')>]':
             depth -= 1
-        elif c == ',' and depth == 0:
-            n += 1
-    return n
+        if c == ',' and depth == 0:
+            parts.append(cur)
+            cur = ''
+        else:
+            cur += c
+    parts.append(cur)
+    return sum(2 if WIDE_PARAM.search(p_) and '*' not in p_ and '(' not in p_ else 1 for p_ in parts)
 
 
 def scan_sources(files, cflags):
