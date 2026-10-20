@@ -43,7 +43,10 @@ public class ApplyRegParams extends GhidraScript {
                 try {
                     if (regs.equals(Set.of("ECX"))) {
                         if (!cc.equals("__thiscall") && !cc.equals("__fastcall")) { f.setCallingConvention("__thiscall"); thisc++; }
-                        else if (cc.equals("__fastcall") && f.getParameterCount() >= 2 && f.getParameter(1).isRegisterVariable()) {
+                        // a __fastcall without parameters has none in ECX either (its uses of ECX became in_ECX:
+                        // 73 such functions, 0x4A1930 among them), one with an EDX parameter reads no EDX
+                        else if (cc.equals("__fastcall") && (f.getParameterCount() == 0 ||
+                                 f.getParameterCount() >= 2 && f.getParameter(1).isRegisterVariable())) {
                             f.setCallingConvention("__thiscall"); thisc++;
                         }
                         continue;
