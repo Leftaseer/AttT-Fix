@@ -98,6 +98,7 @@ for g in attt valk; do
      -postScript ApplySymbols.java "$SYMS/$g.sym,$SYMS/${g}_ctors.sym" \
      -postScript ClassThiscall.java "$O/${g}_regparams.tsv" \
      -postScript FixStackParams.java "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv" \
+     -postScript SetReturns.java "$SYMS/${g}_retlive.tsv" \
      -postScript FillClassStructs.java "$O/${g}_sizes.json" "$O/${g}_rtti.json" \
      -postScript ExportDecomp.java "$WORK/decomp/$g.jsonl" > "$WORK/logs/annotate_$g.log" 2>&1
   py organize.py "$WORK/decomp/$g.jsonl" "$SYMS/$g.sym" "$O/${g}_binfeat.json" "$WORK/decomp/$g" --game $g
@@ -105,7 +106,10 @@ done
 
 # 5. compilable C of every function the decompiler handled cleanly (AttT), for rebuild/build.py --auto;
 #    indirect calls get call-site prototypes from the machine code first
-py icalls.py "$WORK/bin/attt.exe" "$SYMS/attt_functions.tsv" "$O/attt_icalls.tsv"
+#    (a first export gives the conventions of the imports that icalls.py follows the stack through)
+"$HL" "$WORK/proj" attt -process attt.exe -noanalysis -readOnly -scriptPath "$GH" \
+   -postScript AutoExport.java "$WORK/decomp/attt_auto0.jsonl" "$WORK/decomp/attt_auto0_types.h" > "$WORK/logs/auto0_attt.log" 2>&1
+py icalls.py "$WORK/bin/attt.exe" "$SYMS/attt_functions.tsv" "$O/attt_icalls.tsv" "$WORK/decomp/attt_auto0.jsonl.protos"
 "$HL" "$WORK/proj" attt -process attt.exe -noanalysis -scriptPath "$GH" \
    -postScript ICallOverride.java "$O/attt_icalls.tsv" "$O/attt_icall_overrides.tsv" > "$WORK/logs/icall_attt.log" 2>&1
 "$HL" "$WORK/proj" attt -process attt.exe -noanalysis -readOnly -scriptPath "$GH" \

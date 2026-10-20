@@ -5,8 +5,8 @@ ECX ('(**(code **)*p)(1)' for 'mov ecx, esi; call [eax+4]' with this = esi), and
 values on the stack are its arguments.
 
 For each 'call reg' / 'call [mem]' (not an import slot) inside a function:
-  ecx      1 if ECX holds a value set for the call: written after the last call before it (walking back in address
-           order), or the function's own ECX input when no call or write comes first; 0 if a call clobbered it
+  ecx      1 if ECX may hold a value set for the call: on some path to it (through the jumps), written after the last
+           call, or the function's own ECX input; 0 if every path has a call after the last write
   cleanup  N of an 'add esp, N' right after the call (a caller-pop callee), -1 if there is none
   pushes   pushes right before the call with only moves between them (its arguments when nothing is nested)
   pop      bytes the callee removes, from the balance of ESP: the depth before the call is followed from the entry,
@@ -161,6 +161,44 @@ def to_ret(code, start, known, limit=400):
     return totals or None
 
 
+def predecessors(ins, code):
+    """the instructions control comes from: the one before unless it is a jmp or ret, and every jump to it"""
+    preds = {}
+    for k, i in enumerate(ins):
+        m = i.mnemonic
+        if k + 1 < len(ins) and m != 'jmp' and not m.startswith('ret'):
+            preds.setdefault(ins[k + 1].address, []).append(i.address)
+        if (m.startswith('j') or m.startswith('loop')) and i.operands[0].type == x86.X86_OP_IMM and i.operands[0].imm in code:
+            preds.setdefault(i.operands[0].imm, []).append(i.address)
+    return preds
+
+
+def ecx_set(a, preds, code, start, ecx_in, limit=200):
+    """1 if on some path to the call ECX is written after the last call (or is the function's own ECX input):
+    a __thiscall callee needs it; for a __stdcall one a value in ECX does no harm"""
+    todo, seen = list(preds.get(a, [])), set()
+    while todo and len(seen) < limit:
+        p = todo.pop()
+        if p in seen:
+            continue
+        seen.add(p)
+        i = code[p]
+        if i.mnemonic == 'call':
+            continue
+        try:
+            w = i.regs_access()[1]
+        except Exception:
+            w = []
+        if any(r in ECXS for r in w):
+            return 1
+        if p == start:
+            if ecx_in:
+                return 1
+            continue
+        todo.extend(preds.get(p, []))
+    return 1 if (a == start or not preds.get(a)) and ecx_in else 0
+
+
 def callee_pops(code, start, calls, cleanup):
     """bytes popped by each callee-pop indirect call, from the ESP balance (resolved in rounds: one call's pop can
     be needed to follow the stack to the next one)"""
@@ -214,25 +252,12 @@ with open(sys.argv[3], 'w') as f:
         except Exception:
             continue
         code = {i.address: i for i in ins}
+        preds = predecessors(ins, code)
         rows, cleanup = [], {}
         for k, i in enumerate(ins):
             if not is_icall(i):
                 continue
-            ecx = None
-            for j in range(k - 1, -1, -1):
-                p = ins[j]
-                if p.mnemonic == 'call':
-                    ecx = 0
-                    break
-                try:
-                    w = p.regs_access()[1]
-                except Exception:
-                    w = []
-                if any(r in ECXS for r in w):
-                    ecx = 1
-                    break
-            if ecx is None:
-                ecx = 1 if ecx_in else 0
+            ecx = ecx_set(i.address, preds, code, start, ecx_in)
             nxt = ins[k + 1] if k + 1 < len(ins) else None
             cl = -1
             if nxt is not None and nxt.mnemonic == 'add' and nxt.operands[0].type == x86.X86_OP_REG and \
