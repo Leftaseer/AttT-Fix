@@ -4,7 +4,7 @@ rebuilt exe can be checked in the game itself on a machine without a GPU or a sc
 
     rungame.py EXE NAME 'wait 25; key Escape; wait 5; shot menu; click 640 480; wait 10; shot after'
 
-Actions (separated by ';'): wait SECONDS | key XDOTOOL_KEY | click X Y | move DX DY [TIMES] | press | focus | shot LABEL
+Actions (separated by ';'): wait SECONDS | key XDOTOOL_KEY | click X Y | move DX DY [TIMES] | press | focus | geom | shot LABEL
 (the game moves its own cursor by DirectInput, which sees relative motion: use move, then press)
 The game folder is made in $WORK/game/NAME from symlinks to the installed game ($GAME_DIR) plus a copy of EXE;
 the startup videos are skipped (-nologo) unless LOGOS=1; screenshots go to $WORK/shots/NAME_LABEL.png; Wine's output, including the engine's errors of a build made with
@@ -32,11 +32,14 @@ os.makedirs(SHOTS, exist_ok=True)
 for f in os.listdir(G):
     if f not in ('ATThrone.exe', 'Saves', 'Screenshots', 'graphic.cfg'):
         os.symlink(os.path.join(G, f), os.path.join(D, f))
-shutil.copy(os.path.join(G, 'graphic.cfg'), D)
+shutil.copy(os.environ.get('GRAPHIC_CFG') or os.path.join(G, 'graphic.cfg'), os.path.join(D, 'graphic.cfg'))  # a player's settings
 RES = os.environ.get('RES', '1280x960')    # the game's resolution (graphic.cfg starts with width, height) = X screen
 W, H = (int(x) for x in RES.split('x'))
 cfg = bytearray(open(os.path.join(D, 'graphic.cfg'), 'rb').read())
 cfg[0:8] = W.to_bytes(4, 'little') + H.to_bytes(4, 'little')
+WINDOWED = os.environ.get('WINDOWED')      # byte 0x10 of graphic.cfg: 1 = fullscreen, 0 = a window on a larger screen
+if WINDOWED:
+    cfg[0x10] = 0
 open(os.path.join(D, 'graphic.cfg'), 'wb').write(cfg)
 shutil.copy(exe, os.path.join(D, 'ATThrone.exe'))
 # DXVK (Direct3D 9 on Vulkan, here Mesa's lavapipe) is much faster than Wine's own Direct3D on software OpenGL:
@@ -59,13 +62,13 @@ if shutil.which('pulseaudio') and subprocess.run(['pulseaudio', '--check']).retu
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 disp = ':%d' % random.randint(100, 400)
-xv = subprocess.Popen(['Xvfb', disp, '-screen', '0', '%dx%dx24' % (W, H), '+extension', 'GLX'],
+xv = subprocess.Popen(['Xvfb', disp, '-screen', '0', '%dx%dx24' % ((W + 200, H + 150) if WINDOWED else (W, H)), '+extension', 'GLX'],
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 time.sleep(2)
 # a window manager keeps the game window active (without one it loses activation after the videos and the main
 # loop stops running the engine)
 wm = None
-if shutil.which('matchbox-window-manager'):
+if shutil.which('matchbox-window-manager') and not os.environ.get('NOWM'):   # NOWM=1: windows keep their geometry
     wm = subprocess.Popen(['matchbox-window-manager', '-use_titlebar', 'no'], env=dict(os.environ, DISPLAY=disp),
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(1)
@@ -106,6 +109,11 @@ for act in [s.strip() for s in script.split(';') if s.strip()]:
             print('window', w, repr(n), flush=True)
             if 'scension' in n or 'ATThrone' in n or 'Trone' in n:
                 xdo('windowfocus', '--sync', w)
+    elif q[0] == 'geom':                    # position and size of the game's windows (with NOWM=1 as the game set them)
+        r = subprocess.run(['xdotool', 'search', '--name', 'ATThrone'], env=env, capture_output=True, text=True)
+        for w in r.stdout.split():
+            g = subprocess.run(['xdotool', 'getwindowgeometry', w], env=env, capture_output=True, text=True).stdout
+            print('geom', w, ' '.join(g.split()[2:]), flush=True)
     elif q[0] == 'shot':
         subprocess.run(['import', '-window', 'root', os.path.join(SHOTS, '%s_%s.png' % (name, q[1]))], env=env,
                        stderr=subprocess.DEVNULL, timeout=30)

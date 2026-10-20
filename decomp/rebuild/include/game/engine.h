@@ -13,6 +13,14 @@ struct CUpdateObject {                       /* vtable of the updatable part of 
     virtual void Tick(float stepMs);         /* 5: fixed 33.3 ms steps */
 };
 
+/* A CUpdateObject embedded in a larger object (CInput +4, the GUI +4): its vtable is the one of the owner's class
+ * (CInput's Update reads DirectInput).  A member declared as CUpdateObject would tell the compiler its exact type,
+ * and it calls CUpdateObject::Update directly instead of through the vtable; this goes through the pointer. */
+struct CUpdatePart {
+    void *vftable;
+    CUpdateObject *operator->() { return (CUpdateObject *)this; }
+};
+
 struct CScene {                              /* CScene / GUIScene / CWorldLevel, primary vtable */
     virtual void Release(int flags);         /* 0 */
     virtual void Slot1();
@@ -49,7 +57,7 @@ struct CInputKey {                           /* pressed key of this frame */
 
 struct CInput {                              /* CSingleton<CInput> (0x7CC bytes), CUpdateObject at +4 */
     void *vftable;
-    CUpdateObject updater;                   /* +004 */
+    CUpdatePart updater;                     /* +004 */
     char pad008[0x048 - 0x008];
     unsigned char keyState[256];             /* +048 DirectInput keyboard state */
     char pad148[0x660 - 0x148];
@@ -106,7 +114,7 @@ struct CEngine {
     CGlobalTimer *timers;                    /* +7C */
     CInput *input;                           /* +80 */
     char pad84[0x8C - 0x84];
-    struct { void *vftable; CUpdateObject updater; } *gui;   /* +8C (+208: hover, +228) */
+    struct { void *vftable; CUpdatePart updater; } *gui;   /* +8C (+208: hover, +228) */
     CUpdateObject *overlay;                  /* +90 updated and drawn after the scene */
     char pad94[0xA0 - 0x94];
     D3DCOLOR clearColor;                     /* +A0 */

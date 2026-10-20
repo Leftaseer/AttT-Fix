@@ -64,11 +64,11 @@ bool CEngine::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     bool used = scene->HandleMessage(hwnd, msg, wp, lp);
     if (used) {
         if (msg != WM_MOUSEMOVE && IsMouseMessage(msg)) {
-            CInput::Instance()->updater.Update(0.0f);
+            CInput::Instance()->updater->Update(0.0f);
             CInput::Instance()->ResetMouse();
         }
         if (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_CHAR) {
-            CInput::Instance()->updater.Update(0.0f);
+            CInput::Instance()->updater->Update(0.0f);
             CInput::Instance()->ResetKeys();
         }
     }
@@ -160,7 +160,7 @@ void CEngine::Frame()
     float dt = timers->frame.dt;
     ++frameCount;
     g_updateRoot->Update(dt);
-    input->updater.Update(dt);
+    input->updater->Update(dt);
     for (unsigned i = 0; i < input->keyCount; i++) {
         const CInputKey &k = input->keys[i];
         if (!k.pressed || k.dik == 0x3D /* DIK_F3 */)
@@ -172,7 +172,7 @@ void CEngine::Frame()
     }
     overlay->Update(dt);
     scene->Update(dt);
-    gui->updater.Update(dt);
+    gui->updater->Update(dt);
 }
 
 /* State 2: draw the scene and the overlay.  A failed Present is retried through a device reset only for

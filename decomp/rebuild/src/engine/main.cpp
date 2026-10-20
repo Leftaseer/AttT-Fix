@@ -19,8 +19,14 @@ CGameException::CGameException(const std::string &msg, const char *file, int lin
         text += where;
     }
 #ifdef DECOMP_DEBUG_LOG
-    /* every engine error, also the ones caught and handled: WINEDEBUG=+debugstr or DebugView shows them */
+    /* every engine error, also the ones caught and handled: WINEDEBUG=+debugstr or DebugView shows them, and
+     * decomp_debug.log in the game folder keeps them */
     OutputDebugStringA(text.raw());
+    if (FILE *f = fopen("decomp_debug.log", "a")) {
+        fwrite(text.raw(), 1, strlen(text.raw()), f);
+        fwrite("\n", 1, 1, f);
+        fclose(f);
+    }
 #endif
 }
 
