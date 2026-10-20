@@ -6,8 +6,8 @@
 1. The original exe is converted into a relinkable object (tools/exe2obj.py); nothing of the game is stored in
    this repository, the user's own exe is the input.
 2. rebuild/src/**/*.c|cpp is compiled with clang for i686-pc-windows-msvc (the MSVC ABI of the original).
-3. Every function preceded by DECOMP(<AttT address>) replaces the original: a jmp is placed at the old entry
-   and every pointer to it (vtables, tables) is redirected.  An adapter is generated when the original used an
+3. Every function preceded by DECOMP(<AttT address>) replaces the original: a jmp is placed at the old entry;
+   pointers to it (vtables, tables, addresses in code) keep the old address, so it has one address everywhere.  An adapter is generated when the original used an
    /LTCG register convention or kept volatile registers its callers rely on.
 4. sub_XXXXXXXX / d_XXXXXXXX names used by the sources are defined at the original functions and globals
    (cdecl shims for register conventions).

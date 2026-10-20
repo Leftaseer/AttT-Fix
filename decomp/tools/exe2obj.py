@@ -9,8 +9,8 @@ references to __imp_ symbols of import libraries generated from the import table
 Usage: exe2obj.py EXE OUTDIR [--syms FILE] [--replace FILE]
   --syms     "ADDR NAME" lines: public symbols defined at those addresses (for new code to use)
   --replace  "ADDR NEWNAME" lines: the function at ADDR is replaced by external NEWNAME:
-             a jmp to NEWNAME is placed at ADDR and every pointer to ADDR is redirected
-             (--toggle: neither, the start-up code of the build writes the jmps it is told to).
+             a jmp to NEWNAME is placed at ADDR; pointers to ADDR stay (the function keeps one address)
+             (--toggle: a jmp through a slot that the start-up code of the build can point back at the old code).
 Outputs: orig.obj, imports/*.def, resources.res, link.rsp (lld-link options)
 """
 import sys, os, struct, argparse, pefile
@@ -30,8 +30,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('exe'); ap.add_argument('outdir')
     ap.add_argument('--syms'); ap.add_argument('--replace')
-    ap.add_argument('--toggle', action='store_true', help='no jmps and no redirected pointers: the replacements go '
-                    'into decomp_toggle_table (original address, new function) for rebuild/toggle.c to apply at start-up')
+    ap.add_argument('--toggle', action='store_true', help='jmps through slots that rebuild/toggle.c can switch off '
+                    'at start-up (decomp_toggle_table)')
     a = ap.parse_args()
     pe = pefile.PE(a.exe)
     base = pe.OPTIONAL_HEADER.ImageBase
@@ -98,9 +98,10 @@ def main():
         if tgt in iat:
             struct.pack_into('<I', s[3], off, 0)
             s[4].append((off, sym(iat[tgt]), IMAGE_REL_I386_DIR32)); stats['iat'] += 1; continue
-        if tgt in repl and not a.toggle:
-            struct.pack_into('<I', s[3], off, 0)
-            s[4].append((off, sym(cname(repl[tgt])), IMAGE_REL_I386_DIR32)); stats['repl'] += 1; continue
+        # pointers to replaced functions keep the old address (its entry jumps to the new code): a function has
+        # one address for every comparison.  Redirected, the original destructor of 0x584DB0's objects removed a
+        # mouse listener by the new address while the generated constructor had added it by the old one, and the
+        # listener outlived its object (army screen drag and drop).
         ti = find_sec(tgt)
         if ti is None:
             if base <= tgt < first_va:
