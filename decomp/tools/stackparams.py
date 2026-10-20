@@ -6,6 +6,7 @@ parameters a function only passes on to a call (Lua's lua_pushlstring takes (L, 
 luaS_newlstr untouched), and every caller is then decompiled without those arguments.
 
 usage: stackparams.py EXE symbols/GAME_functions.tsv OUT.tsv [AUTO.jsonl.protos (conventions of imports)]
+                      [ICALLS.tsv (tools/icalls.py: bytes indirect callees pop)]
 OUT: address, number of 4-byte stack slots used (0 if none), 'exact' or 'lost' (ESP could not be followed
 everywhere, e.g. after an indirect call with unknown cleanup: the count is a lower bound), and the slots (0 = the
 first parameter) read as whole dwords and never written: such a parameter is 4 bytes even where the decompiler
@@ -25,7 +26,7 @@ for l in open(sys.argv[2]):
     q = l.rstrip('\n').split('\t')
     funcs[int(q[0], 16)] = (int(q[1]), 0 if q[3] == '?' else int(q[3] or 0))
 imports = {}           # IAT slot -> bytes the imported function pops (from AutoExport's .protos, optional)
-if len(sys.argv) > 4:
+if len(sys.argv) > 4 and sys.argv[4] != '-':
     W8 = {'double', 'longlong', 'ulonglong', 'undefined8', 'qword'}
     for l in open(sys.argv[4], encoding='utf-8'):
         q = l.rstrip('\n').split('\t')
@@ -35,6 +36,12 @@ if len(sys.argv) > 4:
                 ps = ps[1:]
             n = sum(8 if t in W8 else 4 for t in ps)
             imports[int(q[0], 16)] = n if q[1] in ('__stdcall', '__thiscall') and q[5] != 'true' else 0
+icall_pop = {}         # indirect call -> bytes the callee pops (-1 unknown), from icalls.py
+if len(sys.argv) > 5:
+    for l in open(sys.argv[5]):
+        q = l.rstrip('\n').split('\t')
+        if l[0] != '#' and len(q) > 5:
+            icall_pop[int(q[0], 16)] = int(q[5])
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
 ESP, EBP = x86.X86_REG_ESP, x86.X86_REG_EBP
@@ -52,6 +59,7 @@ def analyse(start, size):
     lost = False
     todo = [(start, 0, None)]  # address, esp delta (0 = at the return address), ebp delta or None
     pushed = 0                 # bytes pushed since the last call: the arguments of the next one
+    run = 0                    # pushes right before, with only moves between them
     seen = {}
     steps = 0
     while todo:
@@ -120,13 +128,18 @@ def analyse(start, size):
                         d += imports[ops[0].mem.disp]
                 else:
                     # unknown callee (import, pointer, helper): cdecl if the caller cleans up right after,
-                    # otherwise the callee popped what was pushed for it
+                    # otherwise the callee popped what the ESP balance says (icalls.py), else the pushes right
+                    # before the call (not the prologue's pushes of saved registers: 0x42A720's 'push 1; call edx'
+                    # after 'push ecx; push esi' made a local look like a parameter)
                     nxt = code.get(i.address + i.size)
                     caller_cleans = nxt is not None and nxt.mnemonic == 'add' and nxt.operands[0].type == x86.X86_OP_REG \
                         and nxt.operands[0].reg == ESP
                     if d is not None and not caller_cleans:
-                        d += pushed
+                        d += icall_pop[i.address] if icall_pop.get(i.address, -1) >= 0 else 4 * run
                 pushed = 0
+            # pushes right before the next instruction, with only moves between them
+            run = run + 1 if m == 'push' else run if (m.startswith('mov') or m == 'lea' or m.startswith('fld') or
+                                                       m.startswith('fst')) else 0
             if d is None and bp is None:
                 lost = True
                 break

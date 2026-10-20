@@ -85,7 +85,8 @@ with open('%s/%s_functions.tsv' % (s, g), 'w') as f:
 EOF
     py tailpop.py "$WORK/bin/$g.exe" "$O/${g}_regparams.tsv" "$SYMS/${g}_functions.tsv"
     py retlive.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_retlive.tsv" "$SYMS/$g.sym"   # + virtual calls
-    py stackparams.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv"
+    py icalls.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$O/${g}_icalls0.tsv"   # pops of indirect callees
+    py stackparams.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv" - "$O/${g}_icalls0.tsv"
     py importargs.py "$WORK/bin/$g.exe" "$SYMS/${g}_importargs.tsv"
   done
 done

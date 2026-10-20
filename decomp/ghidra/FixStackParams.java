@@ -83,7 +83,7 @@ public class FixStackParams extends GhidraScript {
                     pops.put(Long.parseLong(p[0], 16), p[3].isEmpty() ? 0 : p[3].equals("?") ? -1 : Integer.parseInt(p[3]));
                 }
             }
-            int grown = 0, gfail = 0;
+            int grown = 0, gfail = 0, shrunk = 0;
             try (BufferedReader r = new BufferedReader(new FileReader(getScriptArgs()[1]))) {
                 String line;
                 while ((line = r.readLine()) != null) {
@@ -95,12 +95,32 @@ public class FixStackParams extends GhidraScript {
                     // a call nearby)
                     int slots = p[2].equals("exact") ? Integer.parseInt(p[1]) : 0;
                     if (p.length > 4 && !p[4].isEmpty()) slots = Math.max(slots, Integer.parseInt(p[4]));
-                    if (slots == 0 || pops.getOrDefault(a, 0) != 0) continue;
+                    if (pops.getOrDefault(a, 0) != 0 || (slots == 0 && !p[2].equals("exact"))) continue;
                     Function f = getFunctionAt(toAddr(a));
                     if (f == null || f.isThunk() || f.isExternal()) continue;
                     int have = 0;
                     for (Parameter q : f.getParameters())
                         if (q.isStackVariable()) have = Math.max(have, (q.getStackOffset() - 4 + q.getLength() + 3) / 4);
+                    if (have > slots && p[2].equals("exact")) {
+                        // more than the machine code reads and the callers push: parameters an earlier, wrong
+                        // count gave it (a local taken for a parameter); its callers' saved registers then
+                        // looked like arguments (unaff_ESI)
+                        try {
+                            boolean custom = f.hasCustomVariableStorage();
+                            List<Variable> keep = new ArrayList<>();
+                            for (Parameter q : f.getParameters()) {
+                                if (q.isAutoParameter()) continue;
+                                if (q.isStackVariable() && (q.getStackOffset() - 4) / 4 >= slots) continue;
+                                keep.add(custom ? new ParameterImpl(q.getName(), q.getDataType(), q.getVariableStorage(), currentProgram)
+                                                : new ParameterImpl(q.getName(), q.getDataType(), currentProgram));
+                            }
+                            f.updateFunction(f.getCallingConventionName(), f.getReturn(), keep,
+                                custom ? Function.FunctionUpdateType.CUSTOM_STORAGE : Function.FunctionUpdateType.DYNAMIC_STORAGE_FORMAL_PARAMS,
+                                true, SourceType.ANALYSIS);
+                            shrunk++;
+                        } catch (Exception e) { gfail++; }
+                        continue;
+                    }
                     if (have >= slots) continue;
                     try {
                         boolean custom = f.hasCustomVariableStorage();
@@ -123,7 +143,7 @@ public class FixStackParams extends GhidraScript {
                     } catch (Exception e) { gfail++; }
                 }
             }
-            println("caller-pop functions given the stack parameters they use: " + grown + ", failed " + gfail);
+            println("caller-pop functions given the stack parameters they use: " + grown + ", fewer: " + shrunk + ", failed " + gfail);
             // parameters typed narrower than 4 bytes whose slot the machine code reads as a whole dword (and never
             // writes): the callers would cut a pointer down to a byte
             int widened = 0, wfail = 0;
