@@ -145,9 +145,36 @@ def analyse(start, size):
     return slots, 'lost' if lost else 'exact', sorted(dword_read - written)
 
 
+# arguments the callers of a caller-pop function push: the 'add esp, N' right after each direct call.  A function
+# may ignore some (0x458940 checks an HRESULT and is given __FILE__ and __LINE__ it never reads); with fewer
+# parameters than pushed, the decompiler gives the extra pushes to a call nearby
+cleanups = {}
+for a, (size, pop) in funcs.items():
+    try:
+        ins = list(md.disasm(pe.read(a, size), a))
+    except Exception:
+        continue
+    for k, i in enumerate(ins[:-1]):
+        if i.mnemonic == 'call' and i.operands[0].type == x86.X86_OP_IMM and i.operands[0].imm in funcs and \
+                funcs[i.operands[0].imm][1] == 0:
+            n = ins[k + 1]
+            add = n.operands[1].imm if n.mnemonic == 'add' and n.operands[0].type == x86.X86_OP_REG and \
+                n.operands[0].reg == ESP and n.operands[1].type == x86.X86_OP_IMM else 0
+            cleanups.setdefault(i.operands[0].imm, []).append(add)
+
+
+def pushed_args(a):
+    """the add esp right after its calls, when at least two are there and all agree (the compiler often cleans up
+    later, and one add after two calls can clean up both)"""
+    nz = [n for n in cleanups.get(a, []) if n]
+    return nz[0] // 4 if len(nz) >= 2 and len(set(nz)) == 1 else 0
+
+
 with open(sys.argv[3], 'w') as f:
-    f.write('# address\tstack slots used\texact|lost\tslots read as dwords, never written (tools/stackparams.py)\n')
+    f.write('# address\tstack slots used\texact|lost\tslots read as dwords, never written'
+            '\targuments callers push (commonest add esp / 4 after direct calls of a caller-pop function)'
+            ' (tools/stackparams.py)\n')
     for a in sorted(funcs):
         n, how, dw = analyse(a, funcs[a][0])
-        f.write('%08X\t%d\t%s\t%s\n' % (a, n, how, ','.join(map(str, dw))))
+        f.write('%08X\t%d\t%s\t%s\t%d\n' % (a, n, how, ','.join(map(str, dw)), pushed_args(a)))
 print('done')

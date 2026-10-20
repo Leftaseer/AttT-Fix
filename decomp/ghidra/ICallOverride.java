@@ -1,8 +1,8 @@
 // Prototypes of indirect calls (virtual calls, function pointers) from the machine code (tools/icalls.py): the
 // decompiler gives such a call its default prototype, which has no register inputs, and the object passed in ECX
 // is lost ('(**(code **)*p)(1)' for 'mov ecx, esi; call [eax+4]').  For every call whose stack arguments the
-// decompiler found consistently with the machine code (the 'add esp' after a caller-pop call, or the pushes right
-// before a callee-pop one), writes a call-site override:
+// machine code tells (the 'add esp' after a caller-pop call, the ESP balance around a callee-pop one: icalls.py),
+// writes a call-site override:
 //   caller-pop                 __cdecl    (stack arguments)
 //   callee-pop, ECX set        __thiscall (ECX, stack arguments)   - harmless for a __stdcall callee: it ignores ECX
 //   callee-pop, ECX not set    __stdcall  (stack arguments)
@@ -21,7 +21,7 @@ import java.io.*;
 import java.util.*;
 
 public class ICallOverride extends GhidraScript {
-    static class Fact { int ecx, cleanup, pushes; }
+    static class Fact { int ecx, cleanup, pushes, pop; }
     static class Site { long call; int nstack; Set<String> regs = new TreeSet<>(); String out; }
 
     @Override
@@ -35,6 +35,7 @@ public class ICallOverride extends GhidraScript {
                 String[] q = l.split("\t");
                 Fact f = new Fact();
                 f.ecx = Integer.parseInt(q[2]); f.cleanup = Integer.parseInt(q[3]); f.pushes = Integer.parseInt(q[4]);
+                f.pop = q.length > 5 ? Integer.parseInt(q[5]) : -1;
                 long a = Long.parseLong(q[0], 16);
                 facts.put(a, f);
                 Function fn = getFunctionContaining(toAddr(a));
@@ -86,18 +87,17 @@ public class ICallOverride extends GhidraScript {
                 for (Site s : sites) {
                     Fact f = facts.get(s.call);
                     String why = null, cc;
+                    int nstack = 0;
                     if (f == null) why = "no machine-code facts";
-                    else if (!s.regs.isEmpty() && !(s.regs.equals(Collections.singleton("ECX")) && f.ecx == 1 && f.cleanup < 0))
-                        why = "register input " + s.regs;     // ECX alone with a callee-pop call is a __thiscall
                     else if (s.out.equals("other")) why = "float or wide result";
+                    // the stack arguments come from the machine code: the decompiler's count for a call it has no
+                    // prototype of is a guess (it takes the pushes of a later call's arguments as well)
+                    else if (f.cleanup >= 0) nstack = f.cleanup / 4;
+                    else if (f.pop >= 0) nstack = f.pop / 4;
+                    else why = "stack arguments unknown";
+                    cc = f == null || f.cleanup >= 0 ? "__cdecl" : f.ecx == 1 ? "__thiscall" : "__stdcall";
+                    s.nstack = nstack;
                     if (why == null) {
-                        if (f.cleanup >= 0) {
-                            cc = "__cdecl";
-                            if (f.cleanup != 4 * s.nstack) why = "add esp " + f.cleanup + ", decompiler " + s.nstack + " arguments";
-                        } else {
-                            cc = f.ecx == 1 ? "__thiscall" : "__stdcall";
-                            if (f.pushes != s.nstack) why = "pushes " + f.pushes + ", decompiler " + s.nstack + " arguments";
-                        }
                         if (why == null) {
                             Address ca = toAddr(s.call);
                             Function fn = getFunctionContaining(ca);

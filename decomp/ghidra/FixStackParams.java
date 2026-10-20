@@ -3,7 +3,8 @@
 // read) or more; then every caller is decompiled with arguments missing or invented.  Functions with ret N and
 // a caller-pop convention become __stdcall.  Custom storage (ApplyRegParams) is left alone.
 // Caller-pop functions (no ret N) get the stack parameters their machine code uses (stackparams.py), when the
-// decompiler found fewer: a parameter that is only passed on to a call is easily missed.
+// decompiler found fewer: a parameter that is only passed on to a call is easily missed; or as many as their
+// callers push, when that is more (an HRESULT check given __FILE__ and __LINE__ it ignores).
 // Byte and word parameters whose slot the machine code reads as a dword (stackparams.py) become undefined4.
 // Args: functions.tsv [stackparams.tsv]
 import ghidra.program.model.listing.VariableStorage;
@@ -89,8 +90,12 @@ public class FixStackParams extends GhidraScript {
                     if (line.startsWith("#")) continue;
                     String[] p = line.split("\t", -1);
                     long a = Long.parseLong(p[0], 16);
-                    int slots = Integer.parseInt(p[1]);
-                    if (!p[2].equals("exact") || pops.getOrDefault(a, 0) != 0) continue;
+                    // the slots the machine code uses (when ESP could be followed everywhere), or the arguments its
+                    // callers push if more (a function may ignore some: then the decompiler gives the extra pushes to
+                    // a call nearby)
+                    int slots = p[2].equals("exact") ? Integer.parseInt(p[1]) : 0;
+                    if (p.length > 4 && !p[4].isEmpty()) slots = Math.max(slots, Integer.parseInt(p[4]));
+                    if (slots == 0 || pops.getOrDefault(a, 0) != 0) continue;
                     Function f = getFunctionAt(toAddr(a));
                     if (f == null || f.isThunk() || f.isExternal()) continue;
                     int have = 0;
