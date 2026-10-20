@@ -7,6 +7,7 @@ conventions (a function that passes EAX on to a callee takes EAX too).
 usage: regparams.py EXE BINFEAT.json OUT.tsv [STACKPARAMS.tsv FUNCTIONS.tsv]   ->  ADDR <tab> regs (e.g. ECX,EAX) <tab> ret-pop-bytes"""
 import sys, json; sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(__file__))); from pe import PE
 import capstone
+from stackfx import switch_targets
 from capstone import x86_const as X
 p = PE(sys.argv[1]); bf = {int(k, 16): v for k, v in json.load(open(sys.argv[2])).items()}
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
@@ -133,6 +134,9 @@ def analyse(start):
                 if o.type == X.X86_OP_IMM:     # tail call: the target's register inputs
                     for n, b in BIT.items():
                         if callee_in.get(o.imm, 0) & b and not w & b: inputs |= b
+                # a switch: its cases (a lexer's rets are reached only through one)
+                for t in switch_targets(i, p.u32, start, end):
+                    work.append((t, w))
                 break  # tail call or switch: stop
             if m.startswith('j') or m.startswith('loop'):
                 o = i.operands[0]

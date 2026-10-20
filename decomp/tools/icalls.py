@@ -7,7 +7,8 @@ values on the stack are its arguments.
 For each 'call reg' / 'call [mem]' (not an import slot) inside a function:
   ecx      1 if ECX may hold a value set for the call: on some path to it (through the jumps), written after the last
            call, or the function's own ECX input; 0 if every path has a call after the last write
-  cleanup  N of an 'add esp, N' right after the call (a caller-pop callee), -1 if there is none
+  cleanup  N of an 'add esp, N' after the call (a caller-pop callee; a few instructions that leave ESP alone may
+           come between), -1 if there is none
   pushes   pushes right before the call with only moves between them (its arguments when nothing is nested)
   pop      bytes the callee removes, from the balance of ESP: the depth before the call is followed from the entry,
            the path after it to a ret through known pushes, pops and calls, and at the ret ESP must be back at the
@@ -21,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
 import capstone
 from capstone import x86
+from stackfx import cleanup_after
 
 pe = PE(sys.argv[1])
 funcs = []
@@ -258,11 +260,7 @@ with open(sys.argv[3], 'w') as f:
             if not is_icall(i):
                 continue
             ecx = ecx_set(i.address, preds, code, start, ecx_in)
-            nxt = ins[k + 1] if k + 1 < len(ins) else None
-            cl = -1
-            if nxt is not None and nxt.mnemonic == 'add' and nxt.operands[0].type == x86.X86_OP_REG and \
-                    nxt.operands[0].reg == ESP and nxt.operands[1].type == x86.X86_OP_IMM:
-                cl = nxt.operands[1].imm
+            cl = cleanup_after(code.get, i.address + i.size)
             pushes = 0
             for j in range(k - 1, -1, -1):
                 m = ins[j].mnemonic

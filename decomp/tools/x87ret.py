@@ -19,12 +19,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
 import capstone
 from capstone import x86
+from stackfx import switch_targets
 
 pe = PE(sys.argv[1])
-funcs = set()
+funcs, sizes = set(), {}
 for l in open(sys.argv[2]):
     if l[0] != '#':
-        funcs.add(int(l.split('\t')[0], 16))
+        q = l.split('\t')
+        funcs.add(int(q[0], 16))
+        sizes[int(q[0], 16)] = int(q[1])
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
 lo, hi = pe.text_range()
@@ -159,7 +162,9 @@ def analyze(f):
                     if import_at(a) or (op.type == x86.X86_OP_MEM and op.mem.base == 0 and op.mem.index == 0):
                         e, cw, t, known = call_effect(i)
                         rets.append((d + e, cw if e > 0 else w))
-                    break                   # switch table: its cases are not followed
+                    for t in switch_targets(i, pe.u32, f, f + sizes.get(f, 0)):
+                        work.append((t, d, w, pend))   # the cases of a switch
+                    break
                 t = op.imm
                 if t in funcs and t != f:
                     e, cw, _, known = call_effect(i)

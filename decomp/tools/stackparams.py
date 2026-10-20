@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
 import capstone
 from capstone import x86
+from stackfx import cleanup_after, switch_targets
 
 pe = PE(sys.argv[1])
 funcs = {}
@@ -198,9 +199,7 @@ def analyse(start, size):
                     # otherwise the callee popped what the ESP balance says (icalls.py), else the pushes right
                     # before the call (not the prologue's pushes of saved registers: 0x42A720's 'push 1; call edx'
                     # after 'push ecx; push esi' made a local look like a parameter)
-                    nxt = code.get(i.address + i.size)
-                    caller_cleans = nxt is not None and nxt.mnemonic == 'add' and nxt.operands[0].type == x86.X86_OP_REG \
-                        and nxt.operands[0].reg == ESP
+                    caller_cleans = cleanup_after(code.get, i.address + i.size) >= 0
                     if d is not None and not caller_cleans:
                         d += icall_pop[i.address] if icall_pop.get(i.address, -1) >= 0 else 4 * run
                 pushed = 0
@@ -216,7 +215,9 @@ def analyse(start, size):
                 if ops[0].type == x86.X86_OP_IMM and ops[0].imm in code:
                     p = ops[0].imm
                     continue
-                break                  # tail jump or table
+                for t in switch_targets(i, pe.u32, start, start + size):
+                    todo.append((t, d, bp, killed))      # the cases of a switch
+                break                  # tail jump, or the cases queued
             if m.startswith('j') or m.startswith('loop'):
                 if ops[0].type == x86.X86_OP_IMM:
                     todo.append((ops[0].imm, d, bp, killed))
