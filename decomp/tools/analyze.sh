@@ -103,6 +103,7 @@ for g in attt valk; do
      -postScript FixStackParams.java "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv" \
      -postScript SetReturns.java "$SYMS/${g}_retlive.tsv" \
      -postScript FpuIntrinsics.java \
+     -postScript DecoratedImports.java \
      -postScript FillClassStructs.java "$O/${g}_sizes.json" "$O/${g}_rtti.json" \
      -postScript ExportDecomp.java "$WORK/decomp/$g.jsonl" > "$WORK/logs/annotate_$g.log" 2>&1
   py organize.py "$WORK/decomp/$g.jsonl" "$SYMS/$g.sym" "$O/${g}_binfeat.json" "$WORK/decomp/$g" --game $g
