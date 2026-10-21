@@ -20,6 +20,7 @@ from pe import PE
 import capstone
 from capstone import x86
 from stackfx import switch_targets
+from crtfuncs import ftol_kind
 
 pe = PE(sys.argv[1])
 funcs, sizes = set(), {}
@@ -79,6 +80,7 @@ def width(i):
     return 10
 
 
+ftol = {a for a in funcs if ftol_kind(pe.read(a, 32))}
 result = {}       # function -> (depth at its rets 0/1, width)
 
 
@@ -94,6 +96,8 @@ def call_effect(i):
         return 0, 10, None, False
     if name in FPU_ARGS:
         return 1 - FPU_ARGS[name], 10, None, True
+    if t is not None and t in ftol:
+        return -1, 10, None, True      # _ftol2(_sse): takes ST0, returns an integer (0x463E20 ends in a jump to it)
     if name in DOUBLE_IMPORTS:
         return 1, 8, None, True
     if name is not None:
