@@ -108,7 +108,7 @@ public class DecoratedImports extends GhidraScript {
         int have = 0;
         for (int k = start; k < cur.length; k++) have += (cur[k].getLength() + 3) / 4 * 4;
         int purge = cc.equals("__cdecl") ? 0 : bytes;
-        if (!cls && f.getCallingConventionName().equals(cc) && have == bytes) {
+        if (!cls && f.getCallingConventionName().equals(cc) && have == bytes && !f.hasVarArgs()) {
             if (f.getStackPurgeSize() == purge) return false;
             f.setStackPurgeSize(purge);
             return true;
@@ -116,7 +116,7 @@ public class DecoratedImports extends GhidraScript {
         List<Variable> ps = new ArrayList<>();
         int n = 0;
         if (cls) {
-            ps.add(new ParameterImpl("result", new PointerDataType(VoidDataType.dataType), currentProgram));
+            ps.add(new ParameterImpl("hidden_result", new PointerDataType(VoidDataType.dataType), currentProgram));
             n = 4;
         }
         for (int k = start; k < cur.length && n < bytes; k++) {
@@ -132,6 +132,7 @@ public class DecoratedImports extends GhidraScript {
         DataType ret = cls ? new PointerDataType(VoidDataType.dataType) : f.getReturnType();
         f.updateFunction(cc, new ReturnParameterImpl(ret, currentProgram), ps,
             Function.FunctionUpdateType.DYNAMIC_STORAGE_FORMAL_PARAMS, true, SourceType.USER_DEFINED);
+        f.setVarArgs(false);              // ('...' of a C function of the same name: open(char *, int, ...))
         f.setStackPurgeSize(purge);
         return true;
     }
