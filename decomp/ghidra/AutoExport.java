@@ -416,10 +416,10 @@ public class AutoExport extends GhidraScript {
         if (after.containsKey(toks.size() - 1)) sb.append(after.get(toks.size() - 1));
         String out = sb.toString();
         for (Long a : addrs) {
-            String g = String.format("G_%08X", a);
+            String gname = String.format("G_%08X", a);
             boolean value = globals.containsKey(a) && !globals.get(a).equals("code|0");
             if (!globals.containsKey(a)) globals.put(a, "code|0");
-            out = out.replace("ADDR_" + g, value ? "((void *)&" + g + ")" : "((void *)" + g + ")");
+            out = out.replace("ADDR_" + gname, value ? "((void *)&" + gname + ")" : "((void *)" + gname + ")");
         }
         return out;
     }
