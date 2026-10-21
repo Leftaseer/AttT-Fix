@@ -173,6 +173,10 @@ def main():
                     help='x87 control word at each call (0x7F in the game: Direct3D 9 sets single precision, CreateDevice at 0x44F4EE passes no D3DCREATE_FPU_PRESERVE)')
     ap.add_argument('--steps', type=int, default=5_000_000, help='instructions per call before it counts as not returning')
     ap.add_argument('--watch', type=lambda x: int(x, 16), help='debugging: print the writes to this address (hex)')
+    ap.add_argument('--resume', action='store_true',
+                    help='append to OUT, skipping the functions it has; the one a killed run was in is written as crashed')
+    ap.add_argument('--fn-timeout', type=int, default=120,
+                    help='seconds per function: the process exits (code 3) so that a --resume run goes on after it')
     ap.add_argument('--shard', help='K/N: only every N-th function from the K-th (parallel runs)')
     a = ap.parse_args()
     h = FastHarness(a.orig, a.rebuilt, a.map)
@@ -234,10 +238,26 @@ def main():
     # everything mapped, restored before each function: a function under test can write anywhere (code, import
     # table, TEB, the CRT state), and later functions must not inherit that
     world = [(b, e - b + 1, bytes(h.uc.mem_read(b, e - b + 1))) for b, e, _ in h.uc.mem_regions()]
-    out = open(a.out, 'w')
+    done = set()
+    cur = a.out + '.cur'
+    if a.resume and os.path.exists(a.out):
+        done = {int(l.split('\t')[0], 16) for l in open(a.out) if l.strip()}
+    out = open(a.out, 'a' if a.resume else 'w')
+    if a.resume and os.path.exists(cur):
+        c = int(open(cur).read().strip() or '0', 16)
+        if c and c not in done:
+            out.write('%08X\tcrashed\t0.00\tthe run died or hung in this function\n')
+            done.add(c)
+    import signal
+    signal.signal(signal.SIGALRM, lambda *_: os._exit(3))
     stats = {}
     t0 = time.time()
     for k, va in enumerate(todo):
+        if va in done:
+            continue
+        with open(cur, 'w') as f:
+            f.write('%08X' % va)
+        signal.alarm(a.fn_timeout)
         rnd = random.Random(a.seed * 1000003 + va)
         for b, n, data in world:
             h.uc.mem_write(b, data)
@@ -311,10 +331,13 @@ def main():
                 detail = '%d ok, %d both faulted' % (n_ok, n_same_fault)
         stats[status] = stats.get(status, 0) + 1
         out.write('%08X\t%s\t%.2f\t%s\n' % (va, status, min(cov, 1.0), detail))
+        out.flush()
         if k % 200 == 0:
-            out.flush()
             print('%d/%d %s %.0fs' % (k, len(todo), stats, time.time() - t0), flush=True)
+    signal.alarm(0)
     out.close()
+    if os.path.exists(cur):
+        os.remove(cur)
     print('done:', stats)
 
 
