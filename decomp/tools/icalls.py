@@ -290,6 +290,30 @@ if len(sys.argv) > 6:
             measured[int(q[0], 16)] = int(q[1])
 
 
+def com_call(ins, k):
+    """a COM method call: the last push before the call is the object whose vftable the call reads ('mov ecx, [eax];
+    push eax; call [ecx+0x108]' of Direct3D): this goes on the stack, ECX only holds the vftable"""
+    last = None
+    for j in range(k - 1, max(-1, k - 8), -1):
+        m = ins[j].mnemonic
+        if m == 'push':
+            last = ins[j]
+            break
+        if not m.startswith(MOVES):
+            return False
+    if last is None or last.operands[0].type != x86.X86_OP_REG:
+        return False
+    r = last.operands[0].reg
+    for j in range(k - 1, max(-1, k - 10), -1):
+        i = ins[j]
+        if i.mnemonic == 'mov' and len(i.operands) == 2 and i.operands[1].type == x86.X86_OP_MEM and \
+                i.operands[1].mem.base == r and i.operands[1].mem.disp == 0 and i.operands[1].mem.index == 0:
+            return True
+        if i.mnemonic.startswith(('call', 'j', 'ret')):
+            return False
+    return False
+
+
 def vslot(ins, k):
     """vftable offset of the indirect call ins[k]: call [reg+off], or call reg after mov reg, [x+off]"""
     op = ins[k].operands[0]
@@ -344,7 +368,10 @@ with open(sys.argv[3], 'w') as f:
                 elif not m.startswith(MOVES):
                     break
             cleanup[i.address] = cl
-            rows.append((i.address, ecx, cl, pushes, vslot(ins, k)))
+            com = com_call(ins, k)
+            if com:
+                ecx = 0             # stdcall with this on the stack
+            rows.append((i.address, ecx, cl, pushes, None if com else vslot(ins, k)))
         for a, ecx, pop in tails:
             f.write('%08X\t%08X\t%d\t-1\t0\t%d\n' % (a, start, ecx, pop))
             n += 1
@@ -355,6 +382,11 @@ with open(sys.argv[3], 'w') as f:
         known = callee_pops(code, start, [r[0] for r in rows], cleanup)
         for a, ecx, cl, pushes, off in rows:
             pop = known.get(a, -1) if cl < 0 else 0
+            # the balance fixes only the sum of the pops between two known depths: a callee 'popping nothing' after
+            # pushes is as likely another call taking them (0x5B52A0: two COM calls in a row, the second given 0
+            # once the first was known; it pops its four arguments)
+            if cl < 0 and pop == 0 and pushes > 0:
+                pop = -1
             solved += pop >= 0 and cl < 0
             if pop < 0 and cl < 0 and ecx == 1 and off in vt_pops and vt_pops[off] // 4 <= pushes:
                 pop = vt_pops[off]
