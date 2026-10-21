@@ -66,7 +66,7 @@ public class RecoverSwitches extends GhidraScript {
                         if (getInstructionAt(d) == null) disassemble(d);
                     }
                     i.setFlowOverride(FlowOverride.NONE);
-                    CreateFunctionCmd.fixupFunctionBody(f, monitor);
+                    CreateFunctionCmd.fixupFunctionBody(currentProgram, f, monitor);
                     new JumpTable(i.getAddress(), dests, true).writeOverride(f);
                     tables++;
                     any = true;
