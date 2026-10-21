@@ -120,6 +120,7 @@ public class DecoratedImports extends GhidraScript {
             n = 4;
         }
         for (int k = start; k < cur.length && n < bytes; k++) {
+            if (cls && cur[k].getName().equals("hidden_result")) continue;     // fitted before (the thunk and its import)
             int len = (cur[k].getLength() + 3) / 4 * 4;
             if (n + len > bytes) break;
             ps.add(new ParameterImpl(cur[k].getName(), cur[k].getDataType(), currentProgram));
