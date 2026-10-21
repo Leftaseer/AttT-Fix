@@ -133,12 +133,25 @@ def depths(code, start, known, check=None):
                 if op.type == x86.X86_OP_IMM and op.imm in code:
                     p = op.imm
                     continue
+                # a tail call leaves like a ret: ESP back at the return address (0x47BF50 ends in 'jmp edx' after
+                # a call that pops two float arguments made room for with 'sub esp, 8')
+                if check is not None and tail_jump(i, code) and dep != 0:
+                    check.append(p)
                 break
             if i.mnemonic.startswith('j') or i.mnemonic.startswith('loop'):
                 if i.operands[0].type == x86.X86_OP_IMM:
                     todo.append((i.operands[0].imm, dep))
             p = i.address + i.size
     return d
+
+
+def tail_jump(i, code):
+    """a jmp that leaves the function as a call would: to another function, through a register, a pointer or an
+    import slot (not a switch table: those have an index register)"""
+    op = i.operands[0]
+    if op.type == x86.X86_OP_IMM:
+        return op.imm not in code
+    return op.type == x86.X86_OP_REG or (op.type == x86.X86_OP_MEM and op.mem.index == 0)
 
 
 def to_ret(code, start, known, limit=400):
@@ -167,7 +180,10 @@ def to_ret(code, start, known, limit=400):
                 if op.type == x86.X86_OP_IMM and op.imm in code:
                     p = op.imm
                     continue
-                return None                      # tail jump or table: the stack after it is not followed
+                if tail_jump(i, code):           # a tail call: ESP must be where a ret would leave it
+                    totals.add(dep)
+                    break
+                return None                      # a switch table: the stack after it is not followed
             if i.mnemonic.startswith('j') or i.mnemonic.startswith('loop'):
                 if i.operands[0].type == x86.X86_OP_IMM:
                     todo.append((i.operands[0].imm, dep))
