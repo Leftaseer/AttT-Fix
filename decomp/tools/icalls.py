@@ -304,6 +304,14 @@ def com_call(ins, k):
     if last is None or last.operands[0].type != x86.X86_OP_REG:
         return False
     r = last.operands[0].reg
+    # 'push ecx' may only make room for an argument written next ('push ecx; fstp dword [esp]' of 0x4CCAF0, where
+    # ECX is this): not the object on the stack
+    if r in ECXS:
+        return False
+    for j in range(ins.index(last) + 1, k):
+        for op in ins[j].operands:
+            if op.type == x86.X86_OP_MEM and op.mem.base == ESP and op.mem.disp == 0 and op.access & capstone.CS_AC_WRITE:
+                return False
     ecx_written = False
     for j in range(k - 1, max(-1, k - 10), -1):
         i = ins[j]
