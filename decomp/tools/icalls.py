@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
 import capstone
 from capstone import x86
-from stackfx import cleanup_after, prologue_end
+from stackfx import table_import_pops, cleanup_after, prologue_end
 
 pe = PE(sys.argv[1])
 funcs = []
@@ -46,6 +46,7 @@ if len(sys.argv) > 4:
                 ps = ps[1:]
             imports[int(q[0], 16)] = sum(8 if t in W8 else 4 for t in ps) \
                 if q[1] in ('__stdcall', '__thiscall') and q[5] != 'true' else 0
+imports.update(table_import_pops(pe))
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
 slots = set(pe.imports)

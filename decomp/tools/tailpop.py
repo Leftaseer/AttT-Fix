@@ -8,6 +8,7 @@ usage: tailpop.py EXE REGPARAMS.tsv symbols/GAME_functions.tsv [AUTO.jsonl.proto
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
+from stackfx import table_import_pops
 import capstone
 from capstone import x86
 
@@ -38,14 +39,7 @@ if len(sys.argv) > 4:
                 ps = ps[1:]
             n = sum(8 if t in W8 else 4 for t in ps)
             imp_pop[int(q[0], 16)] = n if q[1] in ('__stdcall', '__thiscall') and q[5] != 'true' else 0
-# imports no type library describes (D3DX9): symbols/import_protos.tsv, all __stdcall
-for l in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'symbols', 'import_protos.tsv')):
-    q = l.rstrip('\n').split('\t')
-    if l[0] != '#' and len(q) > 2:
-        n = 4 * len([x for x in q[2].split(',') if x.strip()])
-        for slot, (dll, name) in pe.imports.items():
-            if name == q[0]:
-                imp_pop[slot] = n
+imp_pop.update(table_import_pops(pe))     # symbols/import_protos.tsv: D3DX9, MSVCP80 with hidden parameters
 for a, size in sizes.items():
     if a in known:
         continue

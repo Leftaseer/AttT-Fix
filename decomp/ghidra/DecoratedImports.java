@@ -3,8 +3,10 @@
 // Without one the decompiler takes the call for one that leaves its arguments on the stack, and everything the
 // caller addresses through ESP after it is off by N (0x4C1760 stored its saved ESI where it meant a local after
 // _AIL_set_sample_volume_pan@12).  Imports that already have parameters are left alone.
-// Undecorated __stdcall imports no type library covers (D3DX9) take their prototypes from a table instead, which
-// replaces whatever the import had.
+// Undecorated __stdcall imports no type library covers (D3DX9), and MSVCP80 functions whose prototypes miss a hidden
+// parameter (the result's address of those returning a class, the most-derived flag of constructors of classes
+// with a virtual base), take their prototypes from a table instead (by name or decorated name), which replaces
+// whatever the import had.
 // Args: [symbols/import_protos.tsv: name, result, parameter types].
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;
@@ -33,13 +35,16 @@ public class DecoratedImports extends GhidraScript {
         for (Function f : todo) {
             Function target = f.isThunk() ? f.getThunkedFunction(true) : f;
             String[] row = table.get(target.getName());
+            if (row == null && target.getExternalLocation() != null && target.getExternalLocation().getOriginalImportedName() != null)
+                row = table.get(target.getExternalLocation().getOriginalImportedName());
             if (row != null) {
                 List<Variable> ps = new ArrayList<>();
                 int k = 0;
                 for (String t : row[2].split(","))
                     ps.add(new ParameterImpl("param_" + (++k), type(t.trim()), currentProgram));
                 try {
-                    f.updateFunction("__stdcall", new ReturnParameterImpl(type(row[1].trim()), currentProgram), ps,
+                    String cc = row.length > 3 ? row[3].trim() : "__stdcall";
+                    f.updateFunction(cc, new ReturnParameterImpl(type(row[1].trim()), currentProgram), ps,
                         Function.FunctionUpdateType.DYNAMIC_STORAGE_FORMAL_PARAMS, true, SourceType.USER_DEFINED);
                     tabled++;
                 } catch (Exception e) {

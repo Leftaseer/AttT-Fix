@@ -1,5 +1,6 @@
-# Prototypes of imports that no Ghidra type library describes (all __stdcall: D3DX9 is WINAPI).
-# name	result	parameters (C types; 'void *' for every pointer, FLOAT as float)
+# Prototypes of imports that no Ghidra type library describes (D3DX9: WINAPI), or that it describes wrongly.
+# name (decorated for C++)	result	parameters (C types; 'void *' for every pointer, FLOAT as float)	[convention, __stdcall
+# if none; __thiscall lists this first]
 D3DXCreateCubeTextureFromFileExA	int	void *, char *, uint, uint, uint, uint, uint, uint, uint, uint, void *, void *, void *
 D3DXCreateCubeTextureFromResourceExA	int	void *, void *, char *, uint, uint, uint, uint, uint, uint, uint, uint, void *, void *, void *
 D3DXCreateEffect	int	void *, void *, uint, void *, void *, uint, void *, void *, void *
@@ -50,3 +51,23 @@ D3DXVec3TransformCoordArray	void *	void *, uint, void *, uint, void *, uint
 D3DXVec3TransformNormal	void *	void *, void *, void *
 D3DXVec3TransformNormalArray	void *	void *, uint, void *, uint, void *, uint
 D3DXVec3Unproject	void *	void *, void *, void *, void *, void *, void *
+# MSVCP80 functions returning a class by value take the address of the result first (the decompiler's prototypes
+# leave it out and its calls lose an argument): std::operator+ of strings, substr, begin/end (iterators), tellg/tellp
+??$?HDU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@ABV10@0@Z	void *	void *, void *, void *	__cdecl
+??$?HDU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@PBDABV10@@Z	void *	void *, char *, void *	__cdecl
+??$?HDU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@ABV10@PBD@Z	void *	void *, void *, char *	__cdecl
+??$?HDU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@ABV10@D@Z	void *	void *, void *, int	__cdecl
+?substr@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBE?AV12@II@Z	void *	void *, void *, uint, uint	__thiscall
+?end@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBE?AV?$_String_const_iterator@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ	void *	void *, void *	__thiscall
+?begin@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBE?AV?$_String_const_iterator@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ	void *	void *, void *	__thiscall
+?end@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE?AV?$_String_iterator@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ	void *	void *, void *	__thiscall
+?begin@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE?AV?$_String_iterator@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ	void *	void *, void *	__thiscall
+?tellg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAE?AV?$fpos@H@2@XZ	void *	void *, void *	__thiscall
+?tellp@?$basic_ostream@DU?$char_traits@D@std@@@std@@QAE?AV?$fpos@H@2@XZ	void *	void *, void *	__thiscall
+# constructors of stream classes with a virtual base take a last int: 1 when constructing the most derived object
+??0?$basic_iostream@DU?$char_traits@D@std@@@std@@QAE@PAV?$basic_streambuf@DU?$char_traits@D@std@@@1@@Z	void *	void *, void *, int	__thiscall
+??0?$basic_ofstream@DU?$char_traits@D@std@@@std@@QAE@XZ	void *	void *, int	__thiscall
+??0?$basic_ifstream@DU?$char_traits@D@std@@@std@@QAE@XZ	void *	void *, int	__thiscall
+??0?$basic_ostream@DU?$char_traits@D@std@@@std@@QAE@PAV?$basic_streambuf@DU?$char_traits@D@std@@@1@_N@Z	void *	void *, void *, int, int	__thiscall
+??0?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z	void *	void *, void *, int, int	__thiscall
+??0?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z	void *	void *, void *, int, int	__thiscall

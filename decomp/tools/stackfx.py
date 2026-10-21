@@ -76,3 +76,22 @@ def prologue_end(insn, start, limit=24):
             break
         a += i.size
     return a
+
+
+def table_import_pops(pe):
+    """IAT slot -> bytes popped, for the imports of symbols/import_protos.tsv (they override the decompiler's
+    prototypes: D3DX9, MSVCP80 functions with a hidden parameter)"""
+    import os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'symbols', 'import_protos.tsv')
+    pops = {}
+    for l in open(path):
+        q = l.rstrip('\n').split('\t')
+        if l[0] == '#' or len(q) < 3:
+            continue
+        n = 4 * len([x for x in q[2].split(',') if x.strip()])
+        cc = q[3].strip() if len(q) > 3 else '__stdcall'
+        n = 0 if cc == '__cdecl' else n - 4 if cc == '__thiscall' else n
+        for slot, (dll, name) in pe.imports.items():
+            if name == q[0]:
+                pops[slot] = n
+    return pops

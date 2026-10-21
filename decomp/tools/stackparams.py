@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
 import capstone
 from capstone import x86
-from stackfx import cleanup_after, switch_targets, prologue_end
+from stackfx import table_import_pops, cleanup_after, switch_targets, prologue_end
 
 pe = PE(sys.argv[1])
 funcs = {}
@@ -45,6 +45,7 @@ if len(sys.argv) > 5:
         q = l.rstrip('\n').split('\t')
         if l[0] != '#' and len(q) > 5:
             icall_pop[int(q[0], 16)] = int(q[5])
+imports.update(table_import_pops(pe))
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
 ESP, EBP = x86.X86_REG_ESP, x86.X86_REG_EBP
