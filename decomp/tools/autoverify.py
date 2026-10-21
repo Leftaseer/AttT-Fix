@@ -246,7 +246,7 @@ def main():
     if a.resume and os.path.exists(cur):
         c = int(open(cur).read().strip() or '0', 16)
         if c and c not in done:
-            out.write('%08X\tcrashed\t0.00\tthe run died or hung in this function\n')
+            out.write('%08X\tcrashed\t0.00\tthe run died or hung in this function\n' % c)
             done.add(c)
     import signal
     signal.signal(signal.SIGALRM, lambda *_: os._exit(3))
