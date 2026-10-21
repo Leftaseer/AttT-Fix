@@ -3,7 +3,8 @@
  * nothing).  decomp_trace_sites.txt next to the exe lists 'ADDRESS LENGTH' of such call instructions
  * (tools/icalls.py's unsolved ones); each gets an int3.  At the call: ESP is noted, the call instruction put back
  * for one step (the trap flag re-arms it), and its return address gets an int3; there ESP minus the noted ESP is
- * the bytes the callee popped.  A site seen three times alike is written to decomp_trace_out.txt and left alone.
+ * the bytes the callee popped, written to decomp_trace_out.txt (again if a later call differs); after three calls
+ * the site is left alone.
  * Only for test machines: the code is patched at run time. */
 #include "game/common.h"
 
@@ -80,16 +81,19 @@ LONG CALLBACK Trace(EXCEPTION_POINTERS *e)
         g_npending = k;                      /* this one and any left by an exception thrown through */
         Poke(at, x.ret_orig);
         c->Eip = at;
-        if (x.seen == 0 || x.pop == pop) x.seen++; else x.seen = -1000;   /* disagreeing: never written */
-        x.pop = pop;
-        if (x.seen >= 3 && !x.done) {
-            x.done = true;
-            Poke(x.addr, x.orig);
+        /* written at the first sight and whenever it differs (tools merge them: a site with two values is
+         * dropped); watched for three calls */
+        if (x.seen == 0 || x.pop != pop)
             if (FILE *f = fopen(g_out, "a")) {
                 char line[32];
                 fwrite(line, 1, sprintf(line, "%08X\t%d\n", (unsigned)x.addr, pop), f);
                 fclose(f);
             }
+        x.seen++;
+        x.pop = pop;
+        if (x.seen >= 3 && !x.done) {
+            x.done = true;
+            Poke(x.addr, x.orig);
         } else if (!x.done) {
             c->EFlags |= 0x100;              /* keep the return address armed for the next call */
             g_rearm = at;
