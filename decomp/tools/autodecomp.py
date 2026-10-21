@@ -212,6 +212,20 @@ def wide_ret(ret):
     return 'undefined4' if ret in ('undefined', 'undefined1', 'undefined2', 'undefined3') else ret
 
 
+def def_ret(ret):
+    """The result type of a generated definition: one narrower than a register is returned as the whole register,
+    extended by value.  The original code set all of EAX ('mov eax, 5') and its callers may test all of it, while a
+    C function returning char sets only AL: 0x480020 (where a point lies against a segment, typed char) left
+    garbage in the upper bytes, its callers' 'test eax, eax' went wrong and houses lost their collision.  Callers
+    that read only AL see the same value.  (Declarations for callers keep the narrow type: an original function may
+    leave the upper bytes undefined.)"""
+    if ret in ('char', 'short', 'sbyte'):
+        return 'int'
+    if ret in ('bool', 'byte', 'uchar', 'ushort', 'word', 'undefined1', 'undefined2', 'undefined3'):
+        return 'unsigned int'
+    return wide_ret(ret)
+
+
 def proto_text(name, pr):
     cc, custom, ret, plist, va = pr[:5]
     ret = wide_ret(ret)
@@ -342,7 +356,7 @@ def convert(f, protos, skip, imports, impnames):
     if ret == 'void' and a in eax_used:
         return None, 'callers use EAX, the decompiler found no result'
     rets[a] = ret
-    head = '%s %s f_%08X(%s)' % (wide_ret(ret), cc_word(cc, custom), a, ', '.join(params) if params else 'void')
+    head = '%s %s f_%08X(%s)' % (def_ret(ret), cc_word(cc, custom), a, ', '.join(params) if params else 'void')
     # namespace prefixes the decompiler printed before calls (templates included)
     body = re.sub(r'(?:\b[A-Za-z_]\w*(?:<[^;{}()]*?>)?\s*::\s*)+(?=sub_[0-9A-F]{8})', '', body)
     # the SEH frame of C++ functions (fs:[0], printed as a global at FFDFF000): our frame layout differs, so the
