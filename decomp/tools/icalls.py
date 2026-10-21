@@ -54,6 +54,16 @@ ESP = x86.X86_REG_ESP
 STOP = object()
 
 
+def is_ijmp(i):
+    """a tail call through a pointer: 'jmp reg' or 'jmp [reg+off]' (not a switch table, not an import slot)"""
+    if i.mnemonic != 'jmp' or not i.operands:
+        return False
+    op = i.operands[0]
+    if op.type == x86.X86_OP_REG:
+        return True
+    return op.type == x86.X86_OP_MEM and op.mem.base != 0 and op.mem.index == 0
+
+
 def is_icall(i):
     if i.mnemonic != 'call':
         return False
@@ -292,7 +302,8 @@ def vslot(ins, k):
 with open(sys.argv[3], 'w') as f:
     f.write('# call address\tfunction\tecx set (1/0)\tadd esp after (-1: none)\tpushes right before'
             '\tbytes the callee pops (ESP balance, -1: unknown)\n')
-    n = solved = byvt = 0
+    n = solved = byvt = ntail = 0
+    tails = []
     for start, size, ecx_in in funcs:
         try:
             ins = list(md.disasm(pe.read(start, size), start))
@@ -302,6 +313,16 @@ with open(sys.argv[3], 'w') as f:
         preds = predecessors(ins, code)
         rows, cleanup = [], {}
         for k, i in enumerate(ins):
+            if is_ijmp(i):
+                # a tail call (ghidra/TailCalls.java makes the decompiler see one): ESP is back at the return
+                # address, the callee pops what this function's own ret would; unknown, a vftable slot may tell
+                ecx = ecx_set(i.address, preds, code, start, ecx_in)
+                pop = pops.get(start)
+                off = vslot(ins, k)
+                if pop is None and ecx == 1 and off in vt_pops:
+                    pop = vt_pops[off]
+                tails.append((i.address, ecx, -1 if pop is None else pop))
+                continue
             if not is_icall(i):
                 continue
             ecx = ecx_set(i.address, preds, code, start, ecx_in)
@@ -315,6 +336,11 @@ with open(sys.argv[3], 'w') as f:
                     break
             cleanup[i.address] = cl
             rows.append((i.address, ecx, cl, pushes, vslot(ins, k)))
+        for a, ecx, pop in tails:
+            f.write('%08X\t%08X\t%d\t-1\t0\t%d\n' % (a, start, ecx, pop))
+            n += 1
+            ntail += 1
+        tails.clear()
         if not rows:
             continue
         known = callee_pops(code, start, [r[0] for r in rows], cleanup)
@@ -326,5 +352,5 @@ with open(sys.argv[3], 'w') as f:
                 byvt += 1
             f.write('%08X\t%08X\t%d\t%d\t%d\t%d\n' % (a, start, ecx, cl, pushes, pop))
             n += 1
-print('%d indirect calls, the pop of %d callee-pop ones from the ESP balance, %d from the vftables (%d offsets agree)'
-      % (n, solved, byvt, len(vt_pops)))
+print('%d indirect calls (%d of them tail jumps), the pop of %d callee-pop ones from the ESP balance, %d from the '
+      'vftables (%d offsets agree)' % (n, ntail, solved, byvt, len(vt_pops)))
