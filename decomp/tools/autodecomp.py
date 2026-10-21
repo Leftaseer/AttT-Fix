@@ -48,6 +48,7 @@ def load_protos(path):
 REG_ORDER = ['ECX', 'EAX', 'EDX', 'EBX', 'ESI', 'EDI']
 WIDE = {'double', 'longlong', 'ulonglong', 'undefined8', 'qword', 'float10'}
 machine = {}       # addr -> (register inputs, bytes popped by ret) from symbols/<game>_functions.tsv
+ebp_in = {}        # functions that read EBP before setting it (funclets using their caller's frame)
 convs = {}         # addr -> (registers in parameter order, ret pop) of the prototypes as written out
 
 
@@ -61,6 +62,8 @@ def load_machine(path):
             continue
         q = l.rstrip('\n').split('\t')
         machine[int(q[0], 16)] = (set(x for x in q[2].split(',') if x and x != 'EBP'), None if q[3] == '?' else int(q[3] or 0))
+        if 'EBP' in q[2].split(','):
+            ebp_in[int(q[0], 16)] = {'EBP'}
     ia = path.replace('_functions.tsv', '_importargs.tsv')
     if os.path.exists(ia):
         for l in open(ia):
@@ -322,14 +325,19 @@ def convert(f, protos, skip, imports, impnames):
     if a in skip:
         return None, 'hand-decompiled'
     code = f['code']
-    # comments before the definition (the demangled name of an exported function, its own signature with '(void)'
-    # that the parameter parsing would take for the definition's)
-    code = re.sub(r'^(?:\s*/\*.*?\*/)+', '', code, flags=re.S)
     if f.get('floatmix'):
         return None, 'float and integer bits mixed (%s)' % f['floatmix'].split(' at ')[0]
     for pat, why in BLOCK:
         if re.search(pat, code):
             return None, why
+    # comments before the definition (the demangled name of an exported function, its own signature with '(void)'
+    # that the parameter parsing would take for the definition's), once the warnings among them have been seen
+    code = re.sub(r'^(?:\s*/\*.*?\*/)+', '', code, flags=re.S)
+    # a callee that reads EBP as the frame of its caller (a funclet: 0x5E4197, the CRT's eh vector constructor
+    # iterator, calls 0x5E41E4, which tests [ebp-20h]): no C function keeps the original frame in EBP
+    for c in f['callees']:
+        if 'EBP' in ebp_in.get(int(c, 16), ()):
+            return None, 'callee %s reads the caller\'s EBP' % c
     code, why = rewrite_icalls(code)
     if code is None:
         return None, why
@@ -572,6 +580,23 @@ def main():
     from crtfuncs import ftol_kind
     pe = PE(a.exe)
     image[0] = pe
+    # funclets: functions that address memory through EBP before setting it
+    import capstone
+    from capstone import x86 as cx
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.detail = True
+    for fa in list(ebp_in):
+        ebp_in.pop(fa)
+        try:
+            for i in md.disasm(pe.read(fa, 32), fa):
+                if any(o.type == cx.X86_OP_MEM and o.mem.base == cx.X86_REG_EBP for o in i.operands):
+                    ebp_in[fa] = {'EBP'}
+                    break
+                if cx.X86_REG_EBP in i.regs_access()[1] or i.mnemonic in ('push', 'call', 'ret', 'jmp') or \
+                        i.mnemonic.startswith('j'):
+                    break
+        except Exception:
+            pass
     for fa in machine:
         try:
             b = pe.read(fa, 6)
