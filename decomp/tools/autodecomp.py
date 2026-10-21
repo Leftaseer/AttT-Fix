@@ -257,7 +257,7 @@ def stack_frame(body):
     top = max(int(m.group(5), 16) for _, m in decl)
     if top > 0x100000:
         return None, 'stack frame too large'
-    out = []
+    out, extra_names = [], []
     for _, m in decl:
         t, ptr, name, off, dim = m.group(2).strip(), m.group(3), m.group(4), int(m.group(5), 16), m.group(6)
         at = '(gh_frame + %d)' % (top - off)
@@ -265,10 +265,15 @@ def stack_frame(body):
             out.append('#define %s (*(%s %s(*)%s)%s)' % (name, t, ptr, dim, at))
         else:
             out.append('#define %s (*(%s %s*)%s)' % (name, t, ptr, at))
+        # '_local_4': the decompiler's name for the dword at the variable, written over it and the bytes after
+        # (0x4740C0 '_local_4 = CONCAT31(uStack_3, 2)')
+        if re.search(r'\b_%s\b' % name, body):
+            out.append('#define _%s (*(unsigned int *)%s)' % (name, at))
+            extra_names.append('_' + name)
     drop = set(i for i, _ in decl)
     rest = [l for k, l in enumerate(lines) if k not in drop]
     rest.insert(1, '  unsigned char gh_frame[%d] __attribute__((aligned(16)));' % top)
-    return '\n'.join([rest[0]] + out + rest[1:]), [m.group(4) for _, m in decl]
+    return '\n'.join([rest[0]] + out + rest[1:]), [m.group(4) for _, m in decl] + extra_names
 
 
 def body_of(code):
@@ -364,20 +369,24 @@ def convert(f, protos, skip, imports, impnames):
     # the address of a symbol is printed as &Class::name: our ((void *)G_X) already is that address
     # (((void *)&G_X) when the same global is also used as a value: AutoExport.java)
     body = re.sub(r'&?\s*(?:\b[A-Za-z_]\w*(?:<[^;{}()]*?>)?\s*::\s*)*(\(\(void \*\)&?G_[0-9A-F]{8}\))', r'\1', body)
-    # (or as unaff_FS_OFFSET, a pointer variable, where the decompiler did not see the segment)
-    if 'G_FFDFF000' in body or re.search(r'\bunaff_FS_OFFSET\b', body):
+    # (or as unaff_FS_OFFSET, a pointer variable, where the decompiler did not see the segment, or as the TEB's
+    # ExceptionList)
+    if 'G_FFDFF000' in body or re.search(r'\b(?:unaff_FS_OFFSET|ExceptionList)\b', body):
         hs = re.findall(r'\b(?:pu|pc|p)\w*Stack_\w+\s*=\s*&?\s*(?:&?(?:LAB|FUN)_|\(\(void \*\)G_)([0-9a-fA-F]{8})\b', body)
         if len(hs) != 1:
             return None, 'exception frame without a known handler'
         if catches(int(hs[0], 16)):
             return None, 'catches exceptions'
-    body = re.sub(r'\n[^\n;]*\b(?:G_FFDFF000|unaff_FS_OFFSET)\b[^\n;]*;', '\n', body)
+    body = re.sub(r'\n[^\n;]*\b(?:G_FFDFF000|unaff_FS_OFFSET|ExceptionList)\b[^\n;]*;', '\n', body)
 
     # vftable of the function's own class
     own = symname.get(a, '')
     if '::' in own:
         cls = own.rsplit('::', 1)[0]
-        body = re.sub(r'(?<![\w:.>])(vftable(?:_\w+)?)\b', cls + r'::\1', body)
+        # (not a field 'x.vftable' or 'p->vftable', which the decompiler may break across lines)
+        body = re.sub(r'(?<![\w:.>])(vftable(?:_\w+)?)\b',
+                      lambda m: m.group(1) if re.search(r'(?:\.|->)\s*$', body[max(0, m.start() - 40):m.start()])
+                      else cls + '::' + m.group(1), body)
     # stack variables at their original offsets: the decompiler splits buffers and structures into scalars that the
     # original kept side by side (and walks across them with pointers), so all named stack variables become views
     # of one frame array laid out as the original stack frame (local_1c is at -0x1c from the return address)
@@ -494,6 +503,11 @@ def convert(f, protos, skip, imports, impnames):
             decls.append('#define G_%s ((%s *)d_%s)' % (g, parts[1], g))
         else:
             decls.append('#define G_%s (*(%s *)d_%s)' % (g, parts[0], g))
+            if parts[0] in ('undefined4', 'uint', 'int', 'dword', 'ulong', 'long'):
+                # a pointer the decompiler typed as a dword, dereferenced ('*G_006C8C10 + 0xe4', the vftable of
+                # a COM object): the load of a dword through it
+                # (unary: the decompiler writes a product as 'a * b', a dereference without a space)
+                body = re.sub(r'(?<![\w\]])\*G_%s\b' % g, r'(*(undefined4 *)G_%s)' % g, body)
     for key, t in f.get('sized', {}).items():
         decls.append('DECOMP_C char d_%s[];' % key[:8])
         decls.append('#define GV_%s (*(%s *)d_%s)' % (key, t, key[:8]))
@@ -615,7 +629,8 @@ def main():
         src = os.path.join(tmp, 'f_%08X.c' % addr)
         open(src, 'w', encoding='utf-8').write('#include "auto_pre.h"\n' + '\n'.join(decls) + '\n' + text)
         r = subprocess.run(['clang'] + cflags + ['-include-pch', pch, '-fsyntax-only', src], capture_output=True, text=True)
-        os.remove(src)
+        if r.returncode == 0:
+            os.remove(src)          # the ones that fail stay in tmp/ to be looked at
         if r.returncode:
             err = next((l for l in r.stderr.splitlines() if 'error' in l), 'error')
             return addr, err.split('error:')[-1].strip()[:120]
