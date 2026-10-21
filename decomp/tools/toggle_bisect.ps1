@@ -29,7 +29,7 @@ while ($hi - $lo -gt 1) {
     Write-Host ""
     Write-Host "Включено $mid из $($list.Count) замен. Осталось шагов: около $left."
     Write-Host "Запустите ATThrone_auto.exe, повторите сценарий, закройте игру (или дождитесь вылета)."
-    do { $a = Read-Host "Игра упала? (y - да, n - нет, q - прервать)" } until ('y', 'n', 'q' -contains $a)
+    do { $a = Read-Host "Ошибка проявилась (вылет, проход сквозь стену и т.п.)? (y - да, n - нет, q - прервать)" } until ('y', 'n', 'q' -contains $a)
     if ($a -eq 'q') { "$lo $hi" | Set-Content $state; Write-Host "Сохранено, можно продолжить позже."; exit }
     if ($a -eq 'y') { $hi = $mid } else { $lo = $mid }
     "$lo $hi" | Set-Content $state
