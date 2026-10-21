@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
 import capstone
 from capstone import x86
-from stackfx import cleanup_after, switch_targets
+from stackfx import cleanup_after, switch_targets, prologue_end
 
 pe = PE(sys.argv[1])
 funcs = {}
@@ -108,6 +108,8 @@ def analyse(start, size):
                                             # parameter slots written on the way
     pushed = 0                 # bytes pushed since the last call: the arguments of the next one
     run = 0                    # pushes right before, with only moves between them
+    # the prologue's pushes are saves (or the SEH frame), never arguments (0x479870)
+    entry_end = prologue_end(code.get, start)
     seen = {}
     steps = 0
     while todo:
@@ -204,7 +206,7 @@ def analyse(start, size):
                         d += icall_pop[i.address] if icall_pop.get(i.address, -1) >= 0 else 4 * run
                 pushed = 0
             # pushes right before the next instruction, with only moves between them
-            run = run + 1 if m == 'push' else run if (m.startswith('mov') or m == 'lea' or m.startswith('fld') or
+            run = run + (i.address >= entry_end) if m == 'push' else run if (m.startswith('mov') or m == 'lea' or m.startswith('fld') or
                                                        m.startswith('fst')) else 0
             if d is None and bp is None:
                 lost = True

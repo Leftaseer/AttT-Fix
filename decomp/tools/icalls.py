@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
 import capstone
 from capstone import x86
-from stackfx import cleanup_after
+from stackfx import cleanup_after, prologue_end
 
 pe = PE(sys.argv[1])
 funcs = []
@@ -229,10 +229,37 @@ def ecx_set(a, preds, code, start, ecx_in, limit=200):
     return 1 if (a == start or not preds.get(a)) and ecx_in else 0
 
 
-def callee_pops(code, start, calls, cleanup):
+def reg_import(ins, k):
+    """the IAT slot a 'call reg' calls through: the register's last write before it is 'mov reg, [slot]' (MSVC
+    keeps an import used several times in a register: 0x4323E0 calls std::operator+ twice as 'call esi' and
+    removes both argument lists with one 'add esp, 0x18' after the second)"""
+    op = ins[k].operands[0]
+    if op.type != x86.X86_OP_REG:
+        return None
+    for j in range(k - 1, -1, -1):
+        i = ins[j]
+        try:
+            written = i.regs_access()[1]
+        except Exception:
+            return None
+        if op.reg in written:
+            m = i.operands[1] if i.mnemonic == 'mov' and len(i.operands) == 2 else None
+            if m is not None and m.type == x86.X86_OP_MEM and m.mem.base == 0 and m.mem.index == 0 and \
+                    m.mem.disp in imports:
+                return m.mem.disp
+            return None
+    return None
+
+
+exact = set()       # the calls callee_pops solved from a single path to a ret (not the frame-depth guess)
+
+
+def callee_pops(code, start, calls, cleanup, fixed=None):
     """bytes popped by each callee-pop indirect call, from the ESP balance (resolved in rounds: one call's pop can
-    be needed to follow the stack to the next one)"""
+    be needed to follow the stack to the next one); fixed: pops already known (imports called through a register)"""
     known = {a: 0 for a in calls if cleanup[a] >= 0}
+    known.update(fixed or {})
+    exact.clear()
     for _ in range(4):
         d = depths(code, start, known)
         new = False
@@ -246,6 +273,7 @@ def callee_pops(code, start, calls, cleanup):
             p = -(d[a] + t.pop())
             if 0 <= p <= -d[a] and p % 4 == 0 and p <= 64:
                 known[a] = p
+                exact.add(a)
                 new = True
         if not new:
             break
@@ -368,7 +396,7 @@ def vslot(ins, k):
 with open(sys.argv[3], 'w') as f:
     f.write('# call address\tfunction\tecx set (1/0)\tadd esp after (-1: none)\tpushes right before'
             '\tbytes the callee pops (ESP balance, -1: unknown)\n')
-    n = solved = byvt = ntail = bym = 0
+    n = solved = byvt = ntail = bym = byimp = 0
     tails = []
     for start, size, ecx_in in funcs:
         try:
@@ -377,7 +405,11 @@ with open(sys.argv[3], 'w') as f:
             continue
         code = {i.address: i for i in ins}
         preds = predecessors(ins, code)
-        rows, cleanup = [], {}
+        rows, cleanup, fixed = [], {}, {}
+        # the prologue's pushes save registers (or reserve locals, or are the SEH frame): not arguments of a call
+        # with only moves between (0x479885's 'call edx' after 'push ecx; push esi' takes none)
+        pe_end = prologue_end(code.get, start)
+        entry = next((j for j, x in enumerate(ins) if x.address >= pe_end), len(ins))
         for k, i in enumerate(ins):
             if is_ijmp(i):
                 # a tail call (ghidra/TailCalls.java makes the decompiler see one): ESP is back at the return
@@ -394,7 +426,7 @@ with open(sys.argv[3], 'w') as f:
             ecx = ecx_set(i.address, preds, code, start, ecx_in)
             cl = cleanup_after(code.get, i.address + i.size)
             pushes = 0
-            for j in range(k - 1, -1, -1):
+            for j in range(k - 1, entry - 1, -1):
                 m = ins[j].mnemonic
                 if m == 'push':
                     pushes += 1
@@ -405,6 +437,9 @@ with open(sys.argv[3], 'w') as f:
             if com:
                 ecx = 0             # stdcall with this on the stack
             rows.append((i.address, ecx, cl, pushes, None if com else vslot(ins, k)))
+            slot = reg_import(ins, k)
+            if slot is not None:
+                fixed[i.address] = imports[slot]
         for a, ecx, pop in tails:
             f.write('%08X\t%08X\t%d\t-1\t0\t%d\n' % (a, start, ecx, pop))
             n += 1
@@ -412,13 +447,19 @@ with open(sys.argv[3], 'w') as f:
         tails.clear()
         if not rows:
             continue
-        known = callee_pops(code, start, [r[0] for r in rows], cleanup)
+        known = callee_pops(code, start, [r[0] for r in rows], cleanup, fixed)
         for a, ecx, cl, pushes, off in rows:
+            if a in fixed:
+                f.write('%08X\t%08X\t%d\t%d\t%d\t%d\n' % (a, start, ecx, cl, pushes, fixed[a] if cl < 0 else 0))
+                n += 1
+                byimp += 1
+                continue
             pop = known.get(a, -1) if cl < 0 else 0
             # the balance fixes only the sum of the pops between two known depths: a callee 'popping nothing' after
             # pushes is as likely another call taking them (0x5B52A0: two COM calls in a row, the second given 0
             # once the first was known; it pops its four arguments)
-            if cl < 0 and pop == 0 and pushes > 0:
+            # (a pop the path to a ret fixes alone is exact, 0 included: 0x45B8C2's getter after a saving 'push edi')
+            if cl < 0 and pop == 0 and pushes > 0 and a not in exact:
                 pop = -1
             solved += pop >= 0 and cl < 0
             if pop < 0 and cl < 0 and ecx == 1 and off in vt_pops and vt_pops[off] // 4 <= pushes:
@@ -432,4 +473,5 @@ with open(sys.argv[3], 'w') as f:
             f.write('%08X\t%08X\t%d\t%d\t%d\t%d\n' % (a, start, ecx, cl, pushes, pop))
             n += 1
 print('%d indirect calls (%d of them tail jumps), the pop of %d callee-pop ones from the ESP balance, %d from the '
-      'vftables (%d offsets agree), %d measured' % (n, ntail, solved, byvt, len(vt_pops), bym))
+      'vftables (%d offsets agree), %d measured, %d imports called through a register'
+      % (n, ntail, solved, byvt, len(vt_pops), bym, byimp))
