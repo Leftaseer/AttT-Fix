@@ -103,6 +103,16 @@ public class AutoExport extends GhidraScript {
             int c = op.getOpcode();
             Varnode out = op.getOutput();
             if (c == PcodeOp.CAST && bits.contains(op.getSeqnum())) continue;     // printed as BITCAST
+            // part of a value (or two put together) of the other kind: 0x525070 stored the low half of the int64 of
+            // a fistp in a float variable and passed it on as '(float)x', a conversion in C (a particle count read as
+            // a float's bits: bad_alloc)
+            if (c == PcodeOp.SUBPIECE || c == PcodeOp.PIECE) {
+                DataType ot = htype(out);
+                for (int k = 0; k < (c == PcodeOp.PIECE ? 2 : 1); k++) {
+                    DataType it = htype(op.getInput(k));
+                    if (ot != null && it != null && isFloat(ot) != isFloat(it)) return "piece at " + op.getSeqnum().getTarget();
+                }
+            }
             if (c == PcodeOp.COPY || c == PcodeOp.CAST || c == PcodeOp.MULTIEQUAL || c == PcodeOp.INDIRECT) {
                 if (mix(htype(out), htype(op.getInput(0)))) return "copy at " + op.getSeqnum().getTarget();
             } else if (c == PcodeOp.STORE) {
