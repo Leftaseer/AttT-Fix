@@ -39,11 +39,12 @@ public class DecoratedImports extends GhidraScript {
                 row = table.get(target.getExternalLocation().getOriginalImportedName());
             if (row != null) {
                 List<Variable> ps = new ArrayList<>();
-                int k = 0;
-                for (String t : row[2].split(","))
-                    ps.add(new ParameterImpl("param_" + (++k), type(t.trim()), currentProgram));
+                String cc = row.length > 3 ? row[3].trim() : "__stdcall";
+                String[] ts = row[2].split(",");
+                // the table lists this first; the decompiler adds it to a __thiscall prototype itself
+                for (int k = cc.equals("__thiscall") ? 1 : 0; k < ts.length; k++)
+                    ps.add(new ParameterImpl("param_" + (k + 1), type(ts[k].trim()), currentProgram));
                 try {
-                    String cc = row.length > 3 ? row[3].trim() : "__stdcall";
                     f.updateFunction(cc, new ReturnParameterImpl(type(row[1].trim()), currentProgram), ps,
                         Function.FunctionUpdateType.DYNAMIC_STORAGE_FORMAL_PARAMS, true, SourceType.USER_DEFINED);
                     tabled++;

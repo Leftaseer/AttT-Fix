@@ -65,6 +65,10 @@ D3DXVec3Unproject	void *	void *, void *, void *, void *, void *, void *
 ?tellg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAE?AV?$fpos@H@2@XZ	void *	void *, void *	__thiscall
 ?tellp@?$basic_ostream@DU?$char_traits@D@std@@@std@@QAE?AV?$fpos@H@2@XZ	void *	void *, void *	__thiscall
 # constructors of stream classes with a virtual base take a last int: 1 when constructing the most derived object
+??0?$basic_fstream@DU?$char_traits@D@std@@@std@@QAE@PBDHH@Z	void *	void *, char *, int, int, int	__thiscall
+??0?$basic_ofstream@DU?$char_traits@D@std@@@std@@QAE@PBDHH@Z	void *	void *, char *, int, int, int	__thiscall
+??0?$basic_ifstream@DU?$char_traits@D@std@@@std@@QAE@PBDHH@Z	void *	void *, char *, int, int, int	__thiscall
+??0?$basic_fstream@DU?$char_traits@D@std@@@std@@QAE@XZ	void *	void *, int	__thiscall
 ??0?$basic_iostream@DU?$char_traits@D@std@@@std@@QAE@PAV?$basic_streambuf@DU?$char_traits@D@std@@@1@@Z	void *	void *, void *, int	__thiscall
 ??0?$basic_ofstream@DU?$char_traits@D@std@@@std@@QAE@XZ	void *	void *, int	__thiscall
 ??0?$basic_ifstream@DU?$char_traits@D@std@@@std@@QAE@XZ	void *	void *, int	__thiscall
