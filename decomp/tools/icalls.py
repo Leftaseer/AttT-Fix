@@ -17,7 +17,8 @@ For each 'call reg' / 'call [mem]' (not an import slot) inside a function:
            has five pushes but the callee takes three: the other two are the check's.
 
 usage: icalls.py EXE symbols/GAME_functions.tsv OUT.tsv [AUTO.jsonl.protos (conventions of imports)]
-                 [symbols/GAME.sym (vftables: the pop of a virtual call the balance leaves open)]"""
+                 [symbols/GAME.sym (vftables: the pop of a virtual call the balance leaves open)]
+                 [symbols/GAME_icall_pops.tsv (pops measured in the running game, rebuild/src/engine/icalltrace.cpp)]"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
@@ -281,6 +282,14 @@ if len(sys.argv) > 5:
             vt_pops[off] = seen.pop()
 
 
+measured = {}       # call address -> bytes popped, measured (icalltrace.cpp) where the code alone does not tell
+if len(sys.argv) > 6:
+    for l in open(sys.argv[6]):
+        q = l.split()
+        if l[0] != '#' and len(q) >= 2:
+            measured[int(q[0], 16)] = int(q[1])
+
+
 def vslot(ins, k):
     """vftable offset of the indirect call ins[k]: call [reg+off], or call reg after mov reg, [x+off]"""
     op = ins[k].operands[0]
@@ -302,7 +311,7 @@ def vslot(ins, k):
 with open(sys.argv[3], 'w') as f:
     f.write('# call address\tfunction\tecx set (1/0)\tadd esp after (-1: none)\tpushes right before'
             '\tbytes the callee pops (ESP balance, -1: unknown)\n')
-    n = solved = byvt = ntail = 0
+    n = solved = byvt = ntail = bym = 0
     tails = []
     for start, size, ecx_in in funcs:
         try:
@@ -350,7 +359,12 @@ with open(sys.argv[3], 'w') as f:
             if pop < 0 and cl < 0 and ecx == 1 and off in vt_pops and vt_pops[off] // 4 <= pushes:
                 pop = vt_pops[off]
                 byvt += 1
+            # a measured 0 may be a caller-pop callee whose arguments are cleaned up later, after another call: only
+            # without pushes before the call
+            if pop < 0 and cl < 0 and a in measured and (measured[a] > 0 or pushes == 0):
+                pop = measured[a]
+                bym += 1
             f.write('%08X\t%08X\t%d\t%d\t%d\t%d\n' % (a, start, ecx, cl, pushes, pop))
             n += 1
 print('%d indirect calls (%d of them tail jumps), the pop of %d callee-pop ones from the ESP balance, %d from the '
-      'vftables (%d offsets agree)' % (n, ntail, solved, byvt, len(vt_pops)))
+      'vftables (%d offsets agree), %d measured' % (n, ntail, solved, byvt, len(vt_pops), bym))

@@ -83,8 +83,9 @@ void DebugLog(const char *text);             /* main.cpp: a line in decomp_debug
 #endif
 #ifdef DECOMP_TEST_INPUT
 void TestInput(CInput *input);
-void TestLua();                              /* engine.cpp: Lua of the test input, at the end of a frame */               /* engine.cpp: scripted input of automatic tests */
+void TestLua();                              /* engine.cpp: Lua of the test input, at the end of a frame */
 #endif
+void StartICallTrace();                      /* icalltrace.cpp (DECOMP_TRACE_ICALLS): indirect callee pops */
 
 struct CCursor {                             /* CSingleton<CCursor> (0x284 bytes) */
     void **vftable;

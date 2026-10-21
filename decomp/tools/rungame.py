@@ -50,6 +50,8 @@ for dll in filter(None, os.environ.get('DLLS', '').split(':')):   # e.g. DXVK's 
     shutil.copy(dll, D)
 if os.environ.get('TOGGLE'):               # replacements switched off in a build made with build.py --toggle
     shutil.copy(os.environ['TOGGLE'], os.path.join(D, 'decomp_toggle.txt'))
+if os.environ.get('TRACE_SITES'):          # indirect calls to measure, for a build made with -D DECOMP_TRACE_ICALLS
+    shutil.copy(os.environ['TRACE_SITES'], os.path.join(D, 'decomp_trace_sites.txt'))
 if os.environ.get('TESTINPUT'):            # scripted input for a build made with -D DECOMP_TEST_INPUT
     shutil.copy(os.environ['TESTINPUT'], os.path.join(D, 'testinput.txt'))
 saves = os.environ.get('SAVES')            # a folder of save games to start with

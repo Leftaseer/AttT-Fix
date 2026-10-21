@@ -302,6 +302,9 @@ void GameMain(const char *cmdLine)
 {
     if (!IsOnlyInstance())
         return;
+#ifdef DECOMP_TRACE_ICALLS
+    StartICallTrace();      /* icalltrace.cpp: what indirect callees pop, measured */
+#endif
 #ifdef DECOMP_DEBUG_LOG
     AddVectoredExceptionHandler(1, CrashLog);
     {   /* when, and which build (its compile time; the exe keeps the original's time stamp): the logs of several
