@@ -99,7 +99,7 @@ static void TestMove(float dx, float dy)
 
 /* Lua of the test input runs at the end of a frame, where the GUI's own event handlers run: a scene switch
  * between frames leaves the engine without a scene for the next one */
-static char g_testLua[256];
+static char g_testLua[2048];
 static int g_testLuaWait;       /* main loop turns it has waited: the menus do not run CEngine::Frame */
 
 void TestLua()
@@ -126,7 +126,7 @@ void TestInput(CInput *input)
     static FILE *f;
     static bool opened, pending, upNext;
     static DWORD start, due;
-    static char line[128];
+    static char line[2048];
     struct { void *vftable; } info = { d_0060AC14 };
     if (!opened) {
         opened = true;
