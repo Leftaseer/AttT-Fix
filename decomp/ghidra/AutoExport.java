@@ -109,8 +109,8 @@ public class AutoExport extends GhidraScript {
             if (c == PcodeOp.SUBPIECE || c == PcodeOp.PIECE) {
                 DataType ot = htype(out);
                 for (int k = 0; k < (c == PcodeOp.PIECE ? 2 : 1); k++) {
-                    DataType it = htype(op.getInput(k));
-                    if (ot != null && it != null && isFloat(ot) != isFloat(it)) return "piece at " + op.getSeqnum().getTarget();
+                    DataType pt = htype(op.getInput(k));
+                    if (ot != null && pt != null && isFloat(ot) != isFloat(pt)) return "piece at " + op.getSeqnum().getTarget();
                 }
             }
             if (c == PcodeOp.COPY || c == PcodeOp.CAST || c == PcodeOp.MULTIEQUAL || c == PcodeOp.INDIRECT) {
