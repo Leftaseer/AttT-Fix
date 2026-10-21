@@ -1,0 +1,142 @@
+# decorated name	convention	bytes of stack arguments (without this)	class returned by value (tools/cxximports.py)
+?_Lock@?$basic_streambuf@DU?$char_traits@D@std@@@std@@QAEXXZ	__thiscall	0	
+?rdbuf@?$basic_ios@DU?$char_traits@D@std@@@std@@QBEPAV?$basic_streambuf@DU?$char_traits@D@std@@@2@XZ	__thiscall	0	
+?_Unlock@?$basic_streambuf@DU?$char_traits@D@std@@@std@@QAEXXZ	__thiscall	0	
+?flush@?$basic_ostream@DU?$char_traits@D@std@@@std@@QAEAAV12@XZ	__thiscall	0	
+?tie@?$basic_ios@DU?$char_traits@D@std@@@std@@QBEPAV?$basic_ostream@DU?$char_traits@D@std@@@2@XZ	__thiscall	0	
+?good@ios_base@std@@QBE_NXZ	__thiscall	0	
+?_Osfx@?$basic_ostream@DU?$char_traits@D@std@@@std@@QAEXXZ	__thiscall	0	
+?uncaught_exception@std@@YA_NXZ	__cdecl	0	
+?setstate@?$basic_ios@DU?$char_traits@D@std@@@std@@QAEXH_N@Z	__thiscall	8	
+?width@ios_base@std@@QAEHH@Z	__thiscall	4	
+?sputn@?$basic_streambuf@DU?$char_traits@D@std@@@std@@QAEHPBDH@Z	__thiscall	8	
+?sputc@?$basic_streambuf@DU?$char_traits@D@std@@@std@@QAEHD@Z	__thiscall	4	
+?flags@ios_base@std@@QBEHXZ	__thiscall	0	
+?width@ios_base@std@@QBEHXZ	__thiscall	0	
+?length@?$char_traits@D@std@@SAIPBD@Z	__cdecl	4	
+??6?$basic_ostream@DU?$char_traits@D@std@@@std@@QAEAAV01@P6AAAV01@AAV01@@Z@Z	__thiscall	4	
+??$?6DU?$char_traits@D@std@@V?$allocator@D@1@@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@0@AAV10@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@@Z	__cdecl	8	
+?endl@std@@YAAAV?$basic_ostream@DU?$char_traits@D@std@@@1@AAV21@@Z	__cdecl	4	
+?clear@?$basic_ios@DU?$char_traits@D@std@@@std@@QAEXH_N@Z	__thiscall	8	
+??Bios_base@std@@QBEPAXXZ	__thiscall	0	
+?size@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEIXZ	__thiscall	0	
+?tellg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAE?AV?$fpos@H@2@XZ	__thiscall	4	class
+?seekg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV12@JH@Z	__thiscall	8	
+??0?$basic_ifstream@DU?$char_traits@D@std@@@std@@QAE@PBDHH@Z	__thiscall	16	
+?find@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEIDI@Z	__thiscall	8	
+?getline@?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV12@PADH@Z	__thiscall	8	
+??_D?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXXZ	__thiscall	0	
+??5?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV01@AAM@Z	__thiscall	4	
+??5?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV01@AAI@Z	__thiscall	4	
+??0?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z	__thiscall	12	
+?tellp@?$basic_ostream@DU?$char_traits@D@std@@@std@@QAE?AV?$fpos@H@2@XZ	__thiscall	4	class
+??0?$basic_fstream@DU?$char_traits@D@std@@@std@@QAE@XZ	__thiscall	4	
+?close@?$basic_fstream@DU?$char_traits@D@std@@@std@@QAEXXZ	__thiscall	0	
+?open@?$basic_fstream@DU?$char_traits@D@std@@@std@@QAEXPBDHH@Z	__thiscall	12	
+??6?$basic_ostream@DU?$char_traits@D@std@@@std@@QAEAAV01@H@Z	__thiscall	4	
+??6?$basic_ostream@DU?$char_traits@D@std@@@std@@QAEAAV01@M@Z	__thiscall	4	
+??6?$basic_ostream@DU?$char_traits@D@std@@@std@@QAEAAV01@_J@Z	__thiscall	8	
+?end@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE?AV?$_String_iterator@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ	__thiscall	4	class
+?begin@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE?AV?$_String_iterator@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ	__thiscall	4	class
+?append@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV12@PBDI@Z	__thiscall	8	
+?clear@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXXZ	__thiscall	0	
+??0?$allocator@D@std@@QAE@ABV01@@Z	__thiscall	4	
+?max_size@?$allocator@D@std@@QBEIXZ	__thiscall	0	
+?allocate@?$allocator@D@std@@QAEPADI@Z	__thiscall	4	
+??0?$allocator@D@std@@QAE@XZ	__thiscall	0	
+?deallocate@?$allocator@D@std@@QAEXPADI@Z	__thiscall	8	
+??_D?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXXZ	__thiscall	0	
+??0?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z	__thiscall	12	
+??$?9DU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@0@Z	__cdecl	8	
+??6?$basic_ostream@DU?$char_traits@D@std@@@std@@QAEAAV01@I@Z	__thiscall	4	
+??6?$basic_ostream@DU?$char_traits@D@std@@@std@@QAEAAV01@K@Z	__thiscall	4	
+??0?$basic_string@_WU?$char_traits@_W@std@@V?$allocator@_W@2@@std@@QAE@PB_W@Z	__thiscall	4	
+??0?$basic_ostream@DU?$char_traits@D@std@@@std@@QAE@PAV?$basic_streambuf@DU?$char_traits@D@std@@@1@_N@Z	__thiscall	12	
+?setf@ios_base@std@@QAEHH@Z	__thiscall	4	
+??1?$basic_ostream@DU?$char_traits@D@std@@@std@@UAE@XZ	__thiscall	0	
+?eof@?$char_traits@D@std@@SAHXZ	__cdecl	0	
+?eq_int_type@?$char_traits@D@std@@SA_NABH0@Z	__cdecl	8	
+?not_eof@?$char_traits@D@std@@SAHABH@Z	__cdecl	4	
+?epptr@?$basic_streambuf@DU?$char_traits@D@std@@@std@@IBEPADXZ	__thiscall	0	
+?to_char_type@?$char_traits@D@std@@SADABH@Z	__cdecl	4	
+?pbump@?$basic_streambuf@DU?$char_traits@D@std@@@std@@IAEXH@Z	__thiscall	4	
+?imbue@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEXABVlocale@2@@Z	__thiscall	4	
+?setbuf@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEPAV12@PADH@Z	__thiscall	8	
+?seekoff@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAE?AV?$fpos@H@2@JHH@Z	__thiscall	16	class
+?xsputn@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHPBDH@Z	__thiscall	8	
+?_Xsgetn_s@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHPADIH@Z	__thiscall	12	
+?xsgetn@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHPADH@Z	__thiscall	8	
+?uflow@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHXZ	__thiscall	0	
+?underflow@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHXZ	__thiscall	0	
+?showmanyc@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHXZ	__thiscall	0	
+?pbackfail@?$basic_streambuf@DU?$char_traits@D@std@@@std@@MAEHH@Z	__thiscall	4	
+??0?$basic_streambuf@DU?$char_traits@D@std@@@std@@IAE@XZ	__thiscall	0	
+??1?$basic_streambuf@DU?$char_traits@D@std@@@std@@UAE@XZ	__thiscall	0	
+?pptr@?$basic_streambuf@DU?$char_traits@D@std@@@std@@IBEPADXZ	__thiscall	0	
+?pbase@?$basic_streambuf@DU?$char_traits@D@std@@@std@@IBEPADXZ	__thiscall	0	
+?setp@?$basic_streambuf@DU?$char_traits@D@std@@@std@@IAEXPAD00@Z	__thiscall	12	
+??$?9DU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@PBD@Z	__cdecl	8	
+??$?8DU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@0@Z	__cdecl	8	
+??$?HDU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@ABV10@D@Z	__cdecl	12	class
+??Y?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV01@D@Z	__thiscall	4	
+??Y?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV01@ABV01@@Z	__thiscall	4	
+??0?$basic_ifstream@DU?$char_traits@D@std@@@std@@QAE@XZ	__thiscall	4	
+?open@?$basic_ifstream@DU?$char_traits@D@std@@@std@@QAEXPBDHH@Z	__thiscall	12	
+??7ios_base@std@@QBE_NXZ	__thiscall	0	
+?close@?$basic_ifstream@DU?$char_traits@D@std@@@std@@QAEXXZ	__thiscall	0	
+??0?$basic_ofstream@DU?$char_traits@D@std@@@std@@QAE@PBDHH@Z	__thiscall	16	
+??_D?$basic_ifstream@DU?$char_traits@D@std@@@std@@QAEXXZ	__thiscall	0	
+?str@strstreambuf@std@@QAEPADXZ	__thiscall	0	
+??1strstreambuf@std@@UAE@XZ	__thiscall	0	
+??0?$basic_ios@DU?$char_traits@D@std@@@std@@IAE@XZ	__thiscall	0	
+??0?$basic_iostream@DU?$char_traits@D@std@@@std@@QAE@PAV?$basic_streambuf@DU?$char_traits@D@std@@@1@@Z	__thiscall	8	
+??0strstreambuf@std@@QAE@H@Z	__thiscall	4	
+??1?$basic_ios@DU?$char_traits@D@std@@@std@@UAE@XZ	__thiscall	0	
+??1?$basic_iostream@DU?$char_traits@D@std@@@std@@UAE@XZ	__thiscall	0	
+?swap@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXAAV12@@Z	__thiscall	4	
+??0?$basic_fstream@DU?$char_traits@D@std@@@std@@QAE@PBDHH@Z	__thiscall	16	
+?fail@ios_base@std@@QBE_NXZ	__thiscall	0	
+??_D?$basic_fstream@DU?$char_traits@D@std@@@std@@QAEXXZ	__thiscall	0	
+?read@?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV12@PADH@Z	__thiscall	8	
+?rfind@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEIPBDI@Z	__thiscall	8	
+??0?$basic_ofstream@DU?$char_traits@D@std@@@std@@QAE@XZ	__thiscall	4	
+?open@?$basic_ofstream@DU?$char_traits@D@std@@@std@@QAEXPBDHH@Z	__thiscall	12	
+?write@?$basic_ostream@DU?$char_traits@D@std@@@std@@QAEAAV12@PBDH@Z	__thiscall	8	
+?close@?$basic_ofstream@DU?$char_traits@D@std@@@std@@QAEXXZ	__thiscall	0	
+??_D?$basic_ofstream@DU?$char_traits@D@std@@@std@@QAEXXZ	__thiscall	0	
+??5?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV01@AAH@Z	__thiscall	4	
+??5?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV01@AAG@Z	__thiscall	4	
+?find_last_of@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEIPBDI@Z	__thiscall	8	
+?get@?$basic_istream@DU?$char_traits@D@std@@@std@@QAEHXZ	__thiscall	0	
+?data@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEPBDXZ	__thiscall	0	
+?at@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAADI@Z	__thiscall	4	
+?append@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV12@PBD@Z	__thiscall	4	
+?erase@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV12@II@Z	__thiscall	8	
+??0?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV01@@Z	__thiscall	4	
+??1?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@XZ	__thiscall	0	
+?c_str@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEPBDXZ	__thiscall	0	
+??$?MDU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@0@Z	__cdecl	8	
+??0?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@PBD@Z	__thiscall	4	
+??Y?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV01@PBD@Z	__thiscall	4	
+??4?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV01@ABV01@@Z	__thiscall	4	
+?begin@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBE?AV?$_String_const_iterator@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ	__thiscall	4	class
+?end@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBE?AV?$_String_const_iterator@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ	__thiscall	4	class
+??$?8DU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@PBD@Z	__cdecl	8	
+??0?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@XZ	__thiscall	0	
+??$?HDU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@ABV10@PBD@Z	__cdecl	12	class
+??$?HDU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@PBDABV10@@Z	__cdecl	12	class
+?substr@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBE?AV12@II@Z	__thiscall	12	class
+?rfind@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEIDI@Z	__thiscall	8	
+??4?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV01@PBD@Z	__thiscall	4	
+??$?HDU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA?AV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@ABV10@0@Z	__cdecl	12	class
+?find@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QBEIPBDI@Z	__thiscall	8	
+?terminate@@YAXXZ	__cdecl	0	
+?_type_info_dtor_internal_method@type_info@@QAEXXZ	__thiscall	0	
+??0exception@std@@QAE@ABQBD@Z	__thiscall	4	
+?what@exception@std@@UBEPBDXZ	__thiscall	0	
+??1exception@std@@UAE@XZ	__thiscall	0	
+??3@YAXPAX@Z	__cdecl	4	
+??0exception@std@@QAE@XZ	__thiscall	0	
+??2@YAPAXI@Z	__cdecl	4	
+??_V@YAXPAX@Z	__cdecl	4	
+??0exception@std@@QAE@ABV01@@Z	__thiscall	4	

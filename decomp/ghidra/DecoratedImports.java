@@ -7,7 +7,11 @@
 // parameter (the result's address of those returning a class, the most-derived flag of constructors of classes
 // with a virtual base), take their prototypes from a table instead (by name or decorated name), which replaces
 // whatever the import had.
-// Args: [symbols/import_protos.tsv: name, result, parameter types].
+// C++ imports (decorated names) get the convention and the argument bytes their names spell (tools/cxximports.py:
+// Ghidra typed std::basic_ifstream::close as the C library's 'int close(int)'), parameters added or dropped to fit,
+// and every changed import its stack purge set (the decompiler kept the old one: 0x576A90's ifstream constructor
+// popped 12 instead of 16).
+// Args: [symbols/import_protos.tsv: name, result, parameter types] [symbols/GAME_cxximports.tsv].
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.data.*;
@@ -27,7 +31,13 @@ public class DecoratedImports extends GhidraScript {
                 String[] q = l.split("\t");
                 if (!l.startsWith("#") && q.length > 2) table.put(q[0], q);
             }
-        int set = 0, kept = 0, fail = 0, tabled = 0;
+        Map<String, String[]> cxx = new HashMap<>();
+        if (args.length > 1)
+            for (String l : Files.readAllLines(Paths.get(args[1]))) {
+                String[] q = l.split("\t");
+                if (!l.startsWith("#") && q.length > 2) cxx.put(q[0], q);
+            }
+        int set = 0, kept = 0, fail = 0, tabled = 0, cxxFixed = 0;
         List<Function> todo = new ArrayList<>();
         for (Function f : currentProgram.getFunctionManager().getExternalFunctions()) todo.add(f);
         for (Function f : currentProgram.getFunctionManager().getFunctions(true))
@@ -47,9 +57,21 @@ public class DecoratedImports extends GhidraScript {
                 try {
                     f.updateFunction(cc, new ReturnParameterImpl(type(row[1].trim()), currentProgram), ps,
                         Function.FunctionUpdateType.DYNAMIC_STORAGE_FORMAL_PARAMS, true, SourceType.USER_DEFINED);
+                    f.setStackPurgeSize(cc.equals("__cdecl") ? 0 : 4 * ps.size());
                     tabled++;
                 } catch (Exception e) {
                     println("failed " + target.getName() + ": " + e.getMessage());
+                    fail++;
+                }
+                continue;
+            }
+            String orig = target.getExternalLocation() != null ? target.getExternalLocation().getOriginalImportedName() : null;
+            String[] cx = orig != null ? cxx.get(orig) : null;
+            if (cx != null) {
+                try {
+                    if (fixCxx(f, cx)) cxxFixed++;
+                } catch (Exception e) {
+                    println("failed " + orig + ": " + e.getMessage());
                     fail++;
                 }
                 continue;
@@ -71,8 +93,47 @@ public class DecoratedImports extends GhidraScript {
                 fail++;
             }
         }
-        println("decorated imports given __stdcall prototypes: " + set + ", from the table " + tabled + ", already typed " +
-                kept + ", failed " + fail);
+        println("decorated imports given __stdcall prototypes: " + set + ", from the table " + tabled + ", C++ imports fitted to " +
+                "their names " + cxxFixed + ", already typed " + kept + ", failed " + fail);
+    }
+
+    // the prototype of a C++ import made to agree with its decorated name: convention, argument bytes (the address
+    // of a class returned by value first), stack purge; the parameters it has keep their types where they fit
+    boolean fixCxx(Function f, String[] cx) throws Exception {
+        String cc = cx[1];
+        int bytes = Integer.parseInt(cx[2]);
+        boolean cls = cx.length > 3 && cx[3].equals("class");
+        Parameter[] cur = f.getParameters();
+        int start = cur.length > 0 && cur[0].getName().equals("this") && cc.equals("__thiscall") ? 1 : 0;
+        int have = 0;
+        for (int k = start; k < cur.length; k++) have += (cur[k].getLength() + 3) / 4 * 4;
+        int purge = cc.equals("__cdecl") ? 0 : bytes;
+        if (!cls && f.getCallingConventionName().equals(cc) && have == bytes) {
+            if (f.getStackPurgeSize() == purge) return false;
+            f.setStackPurgeSize(purge);
+            return true;
+        }
+        List<Variable> ps = new ArrayList<>();
+        int n = 0;
+        if (cls) {
+            ps.add(new ParameterImpl("result", new PointerDataType(VoidDataType.dataType), currentProgram));
+            n = 4;
+        }
+        for (int k = start; k < cur.length && n < bytes; k++) {
+            int len = (cur[k].getLength() + 3) / 4 * 4;
+            if (n + len > bytes) break;
+            ps.add(new ParameterImpl(cur[k].getName(), cur[k].getDataType(), currentProgram));
+            n += len;
+        }
+        while (n < bytes) {
+            ps.add(new ParameterImpl("param_" + (ps.size() + 1), Undefined4DataType.dataType, currentProgram));
+            n += 4;
+        }
+        DataType ret = cls ? new PointerDataType(VoidDataType.dataType) : f.getReturnType();
+        f.updateFunction(cc, new ReturnParameterImpl(ret, currentProgram), ps,
+            Function.FunctionUpdateType.DYNAMIC_STORAGE_FORMAL_PARAMS, true, SourceType.USER_DEFINED);
+        f.setStackPurgeSize(purge);
+        return true;
     }
 
     DataType type(String t) {

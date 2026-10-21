@@ -94,4 +94,13 @@ def table_import_pops(pe):
         for slot, (dll, name) in pe.imports.items():
             if name == q[0]:
                 pops[slot] = n
+    # C++ imports: what their decorated names spell (tools/cxximports.py), where the table above has nothing
+    names = {name: slot for slot, (dll, name) in pe.imports.items()}
+    for g in ('attt', 'valk'):
+        cp = os.path.join(os.path.dirname(path), '%s_cxximports.tsv' % g)
+        if os.path.exists(cp):
+            for l in open(cp):
+                q = l.rstrip('\n').split('\t')
+                if l[0] != '#' and len(q) > 2 and q[0] in names and names[q[0]] not in pops:
+                    pops[names[q[0]]] = 0 if q[1] == '__cdecl' else int(q[2])
     return pops
