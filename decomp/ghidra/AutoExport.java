@@ -258,6 +258,10 @@ public class AutoExport extends GhidraScript {
         g.flatten(toks);
         StringBuilder sb = new StringBuilder();
         Map<Integer, PcodeOp> bc = bitCasts(toks);
+        // symbols printed by name stand for their address; the same global may also be read or written as a value
+        // (0x4C4DE0 tests G_006CA4AC and passes its address on): then the address is &G, otherwise G itself is
+        // declared as the address
+        Set<Long> addrs = new HashSet<>();
         Map<Integer, String> before = new HashMap<>(), after = new HashMap<>();
         for (Map.Entry<Integer, PcodeOp> e : bc.entrySet()) {
             int i = e.getKey(), c = castEnd(toks, i), end = unaryEnd(toks, c + 1);
@@ -380,16 +384,16 @@ public class AutoExport extends GhidraScript {
                             if (sy.getName().equals(bare)) found = in.getOffset();
                     }
                     if (found != null) {
-                        globals.put(found, "code|0");
-                        sb.append(String.format("((void *)G_%08X)", found));
+                        addrs.add(found);
+                        sb.append(String.format("ADDR_G_%08X", found));
                         continue;
                     }
                 }
                 // addresses printed with a symbol name (vftable, LAB_, FUN_, PTR_...)
                 if (vn != null && vn.isConstant() && text.matches("&?[A-Za-z_][\\w:<>,`' ]*") && !text.matches("(true|false|NULL)")) {
                     long a = vn.getOffset();
-                    globals.put(a, "code|0");
-                    sb.append(String.format("((void *)G_%08X)", a));
+                    addrs.add(a);
+                    sb.append(String.format("ADDR_G_%08X", a));
                     continue;
                 }
             }
@@ -410,7 +414,14 @@ public class AutoExport extends GhidraScript {
             sb.append(text);
         }
         if (after.containsKey(toks.size() - 1)) sb.append(after.get(toks.size() - 1));
-        return sb.toString();
+        String out = sb.toString();
+        for (Long a : addrs) {
+            String g = String.format("G_%08X", a);
+            boolean value = globals.containsKey(a) && !globals.get(a).equals("code|0");
+            if (!globals.containsKey(a)) globals.put(a, "code|0");
+            out = out.replace("ADDR_" + g, value ? "((void *)&" + g + ")" : "((void *)" + g + ")");
+        }
+        return out;
     }
 
     @Override
