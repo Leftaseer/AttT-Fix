@@ -64,6 +64,8 @@ class FastHarness(Harness):
             if h is not None:
                 self.uc.mem_write(entry, h)
             self.cov_on = h is not None
+            if getattr(self, 'watching', False):
+                print(' run', 'orig' if h is not None else 'new')
             r = self.call(entry, args, regs)
             self.cov_on = False
             if h is not None:
@@ -167,11 +169,20 @@ def main():
     ap.add_argument('--n', type=int, default=16)
     ap.add_argument('--only')
     ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--fpcw', type=lambda x: int(x, 0), default=0x27F,
+                    help='x87 control word at each call (Direct3D 9 leaves 0x7F, single precision, in the game)')
     ap.add_argument('--steps', type=int, default=5_000_000, help='instructions per call before it counts as not returning')
+    ap.add_argument('--watch', type=lambda x: int(x, 16), help='debugging: print the writes to this address (hex)')
     ap.add_argument('--shard', help='K/N: only every N-th function from the K-th (parallel runs)')
     a = ap.parse_args()
     h = FastHarness(a.orig, a.rebuilt, a.map)
     h.steps = a.steps
+    if a.watch:
+        h.watching = True
+        from unicorn import UC_HOOK_MEM_WRITE
+        h.uc.hook_add(UC_HOOK_MEM_WRITE, lambda uc, acc, addr, size, val, u: print(
+            '  write %08X <- %0*X at %08X' % (addr, 2 * size, val & ((1 << 8 * size) - 1), uc.reg_read(UC_X86_REG_EIP))),
+            begin=a.watch - 7, end=a.watch + 7)
     h.setup_regions()
     sizes = parse_sizes(os.path.join(a.auto, 'auto_pre.h'))
     jsonl = [f for f in os.listdir(os.path.dirname(os.path.abspath(a.auto))) if False]
@@ -230,7 +241,7 @@ def main():
         rnd = random.Random(a.seed * 1000003 + va)
         for b, n, data in world:
             h.uc.mem_write(b, data)
-        h.uc.reg_write(UC_X86_REG_FPCW, 0x27F)      # x87 state a faulting function may have left behind
+        h.uc.reg_write(UC_X86_REG_FPCW, a.fpcw)      # x87 state a faulting function may have left behind
         h.uc.reg_write(UC_X86_REG_FPSW, 0)
         h.uc.reg_write(UC_X86_REG_FPTAG, 0xFFFF)
         h.uc.reg_write(UC_X86_REG_EFLAGS, 0x202)
@@ -278,7 +289,7 @@ def main():
                 for kx in keys:
                     if r1[kx] != r2[kx]:
                         diff.append(kx)
-                if rk == 'eax' and r1['eax'] != r2['eax']: diff.append('eax')
+                if rk == 'eax' and r1['eax'] != r2['eax']: diff.append('eax %08X %08X' % (r1['eax'], r2['eax']))
                 if rk == 'eax:edx' and (r1['eax'], r1['edx']) != (r2['eax'], r2['edx']): diff.append('eax:edx')
                 if rk == 'al' and (r1['eax'] & 0xFF) != (r2['eax'] & 0xFF): diff.append('al')
                 if rk == 'ax' and (r1['eax'] & 0xFFFF) != (r2['eax'] & 0xFFFF): diff.append('ax')

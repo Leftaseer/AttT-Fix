@@ -73,6 +73,14 @@ class Harness:
                 self.uc.mem_write(i.address, struct.pack('<I', fake))
                 self.uc.mem_write(fake, b'\xc3')
                 self.imp_by_addr[fake] = (e.dll.decode().lower(), (i.name or b'ord').decode())
+        # the original bodies run from the original file's bytes, calling through the original import table (its
+        # copy in the rebuilt image holds the unbound name RVAs): the same fake addresses there
+        by_name = {v: a for a, v in self.imp_by_addr.items()}
+        for e in self.orig.pe.DIRECTORY_ENTRY_IMPORT:
+            for i in e.imports:
+                fake = by_name.get((e.dll.decode().lower(), (i.name or b'ord').decode()))
+                if fake is not None:
+                    self.uc.mem_write(self.to_rebuilt(i.address), struct.pack('<I', fake))
         self.uc.hook_add(UC_HOOK_CODE, self._on_import, begin=IMPBASE, end=IMPBASE + 0x10000)
         self.heap_ptr = HEAP + 0x10
 
