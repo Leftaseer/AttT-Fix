@@ -19,7 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REBUILD = os.path.join(HERE, '..', 'rebuild')
 
 BLOCK = [
-    (r'\bunaff_\w+', 'unaffected register'), (r'\bextraout_\w+', 'extra output register'),
+    (r'\bunaff_(?!FS_OFFSET\b)\w+', 'unaffected register'), (r'\bextraout_\w+', 'extra output register'),
     (r'\bin_stack_\w+', 'stack outside the frame'), (r'\bin_[A-Z]{2,4}\b', 'register input'),
     (r'\bin_ST\d\b', 'x87 register input (a value left on the FPU stack the decompiler lost track of)'),
     (r'WARNING: (?!Globals starting|Removing unreachable|Load size|Type propagation|Subroutine does not return)', 'decompiler warning'),
@@ -364,13 +364,14 @@ def convert(f, protos, skip, imports, impnames):
     # the address of a symbol is printed as &Class::name: our ((void *)G_X) already is that address
     # (((void *)&G_X) when the same global is also used as a value: AutoExport.java)
     body = re.sub(r'&?\s*(?:\b[A-Za-z_]\w*(?:<[^;{}()]*?>)?\s*::\s*)*(\(\(void \*\)&?G_[0-9A-F]{8}\))', r'\1', body)
-    if 'G_FFDFF000' in body:
-        hs = re.findall(r'\b(?:pu|pc|p)\w*Stack_\w+\s*=\s*(?:&?(?:LAB|FUN)_|\(\(void \*\)G_)([0-9a-fA-F]{8})\b', body)
+    # (or as unaff_FS_OFFSET, a pointer variable, where the decompiler did not see the segment)
+    if 'G_FFDFF000' in body or re.search(r'\bunaff_FS_OFFSET\b', body):
+        hs = re.findall(r'\b(?:pu|pc|p)\w*Stack_\w+\s*=\s*&?\s*(?:&?(?:LAB|FUN)_|\(\(void \*\)G_)([0-9a-fA-F]{8})\b', body)
         if len(hs) != 1:
             return None, 'exception frame without a known handler'
         if catches(int(hs[0], 16)):
             return None, 'catches exceptions'
-    body = re.sub(r'\n[^\n;]*\bG_FFDFF000\b[^\n;]*;', '\n', body)
+    body = re.sub(r'\n[^\n;]*\b(?:G_FFDFF000|unaff_FS_OFFSET)\b[^\n;]*;', '\n', body)
 
     # vftable of the function's own class
     own = symname.get(a, '')

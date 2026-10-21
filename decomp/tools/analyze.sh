@@ -104,7 +104,7 @@ for g in attt valk; do
      -postScript FixStackParams.java "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv" \
      -postScript SetReturns.java "$SYMS/${g}_retlive.tsv" \
      -postScript FpuIntrinsics.java \
-     -postScript DecoratedImports.java \
+     -postScript DecoratedImports.java "$SYMS/import_protos.tsv" \
      -postScript ThrowNoReturn.java \
      -postScript TailCalls.java \
      -postScript FillClassStructs.java "$O/${g}_sizes.json" "$O/${g}_rtti.json" \

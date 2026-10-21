@@ -1,0 +1,52 @@
+# Prototypes of imports that no Ghidra type library describes (all __stdcall: D3DX9 is WINAPI).
+# name	result	parameters (C types; 'void *' for every pointer, FLOAT as float)
+D3DXCreateCubeTextureFromFileExA	int	void *, char *, uint, uint, uint, uint, uint, uint, uint, uint, void *, void *, void *
+D3DXCreateCubeTextureFromResourceExA	int	void *, void *, char *, uint, uint, uint, uint, uint, uint, uint, uint, void *, void *, void *
+D3DXCreateEffect	int	void *, void *, uint, void *, void *, uint, void *, void *, void *
+D3DXCreateEffectFromFileA	int	void *, char *, void *, void *, uint, void *, void *, void *
+D3DXCreateEffectFromResourceA	int	void *, void *, char *, void *, void *, uint, void *, void *, void *
+D3DXCreateFontA	int	void *, int, uint, uint, uint, int, uint, uint, uint, uint, char *, void *
+D3DXCreateFontIndirectA	int	void *, void *, void *
+D3DXCreateLine	int	void *, void *
+D3DXCreateMatrixStack	int	uint, void *
+D3DXCreateRenderToSurface	int	void *, uint, uint, uint, int, uint, void *
+D3DXCreateSprite	int	void *, void *
+D3DXCreateTexture	int	void *, uint, uint, uint, uint, uint, uint, void *
+D3DXCreateTextureFromFileExA	int	void *, char *, uint, uint, uint, uint, uint, uint, uint, uint, uint, void *, void *, void *
+D3DXCreateTextureFromFileInMemoryEx	int	void *, void *, uint, uint, uint, uint, uint, uint, uint, uint, uint, uint, void *, void *, void *
+D3DXCreateTextureFromResourceExA	int	void *, void *, char *, uint, uint, uint, uint, uint, uint, uint, uint, uint, void *, void *, void *
+D3DXCreateVolumeTextureFromFileExA	int	void *, char *, uint, uint, uint, uint, uint, uint, uint, uint, uint, uint, void *, void *, void *
+D3DXCreateVolumeTextureFromResourceExA	int	void *, void *, char *, uint, uint, uint, uint, uint, uint, uint, uint, uint, uint, void *, void *, void *
+D3DXGetDeclVertexSize	uint	void *, uint
+D3DXGetImageInfoFromFileInMemory	int	void *, uint, void *
+D3DXIntersectTri	int	void *, void *, void *, void *, void *, void *, void *, void *
+D3DXLoadSurfaceFromFileInMemory	int	void *, void *, void *, void *, uint, void *, uint, uint, void *
+D3DXLoadSurfaceFromSurface	int	void *, void *, void *, void *, void *, void *, uint, uint
+D3DXMatrixInverse	void *	void *, void *, void *
+D3DXMatrixLookAtLH	void *	void *, void *, void *, void *
+D3DXMatrixMultiply	void *	void *, void *, void *
+D3DXMatrixOrthoLH	void *	void *, float, float, float, float
+D3DXMatrixOrthoOffCenterLH	void *	void *, float, float, float, float, float, float
+D3DXMatrixPerspectiveFovLH	void *	void *, float, float, float, float
+D3DXMatrixRotationAxis	void *	void *, void *, float
+D3DXMatrixRotationX	void *	void *, float
+D3DXMatrixRotationY	void *	void *, float
+D3DXMatrixRotationYawPitchRoll	void *	void *, float, float, float
+D3DXMatrixRotationZ	void *	void *, float
+D3DXMatrixScaling	void *	void *, float, float, float
+D3DXMatrixShadow	void *	void *, void *, void *
+D3DXMatrixTranslation	void *	void *, float, float, float
+D3DXMatrixTranspose	void *	void *, void *
+D3DXPlaneFromPoints	void *	void *, void *, void *, void *
+D3DXSaveSurfaceToFileA	int	char *, uint, void *, void *, void *
+D3DXSaveTextureToFileInMemory	int	void *, uint, void *, void *
+D3DXVec2Normalize	void *	void *, void *
+D3DXVec2Transform	void *	void *, void *, void *
+D3DXVec2TransformCoord	void *	void *, void *, void *
+D3DXVec3Normalize	void *	void *, void *
+D3DXVec3Project	void *	void *, void *, void *, void *, void *, void *
+D3DXVec3TransformCoord	void *	void *, void *, void *
+D3DXVec3TransformCoordArray	void *	void *, uint, void *, uint, void *, uint
+D3DXVec3TransformNormal	void *	void *, void *, void *
+D3DXVec3TransformNormalArray	void *	void *, uint, void *, uint, void *, uint
+D3DXVec3Unproject	void *	void *, void *, void *, void *, void *, void *

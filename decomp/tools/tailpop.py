@@ -27,6 +27,7 @@ md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
 # import thunks (jmp [IAT]): the import's own convention, from AutoExport's .protos when given
 imp_pop = {}
+forced = set()      # thunks whose pop comes from the import table (the row may hold regparams' 0 for a jmp)
 if len(sys.argv) > 4:
     W8 = {'double', 'longlong', 'ulonglong', 'undefined8', 'qword'}
     for l in open(sys.argv[4], encoding='utf-8'):
@@ -37,6 +38,14 @@ if len(sys.argv) > 4:
                 ps = ps[1:]
             n = sum(8 if t in W8 else 4 for t in ps)
             imp_pop[int(q[0], 16)] = n if q[1] in ('__stdcall', '__thiscall') and q[5] != 'true' else 0
+# imports no type library describes (D3DX9): symbols/import_protos.tsv, all __stdcall
+for l in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'symbols', 'import_protos.tsv')):
+    q = l.rstrip('\n').split('\t')
+    if l[0] != '#' and len(q) > 2:
+        n = 4 * len([x for x in q[2].split(',') if x.strip()])
+        for slot, (dll, name) in pe.imports.items():
+            if name == q[0]:
+                imp_pop[slot] = n
 for a, size in sizes.items():
     if a in known:
         continue
@@ -47,6 +56,7 @@ for a, size in sizes.items():
     if i.mnemonic == 'jmp' and i.operands[0].type == x86.X86_OP_MEM and i.operands[0].mem.base == 0 and \
             i.operands[0].mem.disp in imp_pop:
         known[a] = imp_pop[i.operands[0].mem.disp]
+        forced.add(a)
 tails = {}          # function without a ret -> set of functions it tail-jumps to
 for a, size in sizes.items():
     if a in known:
@@ -79,7 +89,7 @@ with open(sys.argv[3], 'w') as f:
         if l[0] != '#':
             q = l.rstrip('\n').split('\t')
             a = int(q[0], 16)
-            if a in known and q[3] == '?':
+            if a in known and (q[3] == '?' or a in forced and q[3] != str(known[a])):
                 q[3] = str(known[a]); fixed += 1
                 l = '\t'.join(q) + '\n'
             elif a not in known and a in tails:

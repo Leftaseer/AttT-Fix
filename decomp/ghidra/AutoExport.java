@@ -223,16 +223,29 @@ public class AutoExport extends GhidraScript {
             int n = 0;
             // the CAST: an op of the operand's tokens (a lone variable carries the op reading it), or the op that
             // reads the result of one of them
+            // (a field read 'p->f' shows the PTRSUB in its tokens, not the LOAD: the load of an address computed
+            // in the operand belongs to it too)
+            Set<PcodeOp> loads = new HashSet<>();
+            for (PcodeOp op : span) {
+                Varnode o = op.getOutput();
+                if (o == null) continue;
+                for (Iterator<PcodeOp> d = o.getDescendants(); d.hasNext(); ) {
+                    PcodeOp u = d.next();
+                    if (u.getOpcode() == PcodeOp.LOAD && u.getInput(1) == o) loads.add(u);
+                }
+            }
             Set<PcodeOp> cand = new LinkedHashSet<>(span);
             for (PcodeOp op : span) {
                 Varnode o = op.getOutput();
                 if (o == null) continue;
                 for (Iterator<PcodeOp> d = o.getDescendants(); d.hasNext(); ) cand.add(d.next());
             }
+            for (PcodeOp op : loads)
+                for (Iterator<PcodeOp> d = op.getOutput().getDescendants(); d.hasNext(); ) cand.add(d.next());
             for (PcodeOp op : cand) {
                 if (op.getOpcode() != PcodeOp.CAST) continue;
                 Varnode in = op.getInput(0), out = op.getOutput();
-                boolean inside = span.contains(op) || (in.getDef() != null && span.contains(in.getDef()));
+                boolean inside = span.contains(op) || (in.getDef() != null && (span.contains(in.getDef()) || loads.contains(in.getDef())));
                 if (!inside || out == null) continue;
                 // the root of the operand: nothing else in it reads the cast's result (an outer '(int *)' of
                 // '(int)f + 0x10' is not the CAST of f)
