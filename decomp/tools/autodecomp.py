@@ -322,6 +322,9 @@ def convert(f, protos, skip, imports, impnames):
     if a in skip:
         return None, 'hand-decompiled'
     code = f['code']
+    # comments before the definition (the demangled name of an exported function, its own signature with '(void)'
+    # that the parameter parsing would take for the definition's)
+    code = re.sub(r'^(?:\s*/\*.*?\*/)+', '', code, flags=re.S)
     if f.get('floatmix'):
         return None, 'float and integer bits mixed (%s)' % f['floatmix'].split(' at ')[0]
     for pat, why in BLOCK:

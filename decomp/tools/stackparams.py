@@ -217,6 +217,8 @@ def analyse(start, size):
                 if ops[0].type == x86.X86_OP_IMM and ops[0].imm in code:
                     p = ops[0].imm
                     continue
+                if ops[0].type == x86.X86_OP_IMM and ops[0].imm in funcs and d == 0:
+                    tails.setdefault(start, set()).add(ops[0].imm)
                 for t in switch_targets(i, pe.u32, start, start + size):
                     todo.append((t, d, bp, killed))      # the cases of a switch
                 break                  # tail jump, or the cases queued
@@ -236,6 +238,8 @@ def analyse(start, size):
     return slots, 'lost' if lost else 'exact', sorted(dword_read - written), fl
 
 
+tails = {}             # function -> functions it tail-jumps to with ESP at its return address (its parameters
+                       # are theirs: 0x42FD40 'sub ecx, 28h; jmp 432EA0' passes on the two its callers push)
 helpers = {}
 for a, (size, pop) in funcs.items():
     h = frame_helper(a, size)
@@ -273,7 +277,24 @@ with open(sys.argv[3], 'w') as f:
             '\targuments callers push (commonest add esp / 4 after direct calls of a caller-pop function)'
             '\tslots only floats are read from or written to (k:f float, k:d double in k and k+1)'
             ' (tools/stackparams.py)\n')
+    res = {a: list(analyse(a, funcs[a][0])) + [pushed_args(a)] for a in sorted(funcs)}
+    # a tail jump passes the stack on: the target's parameters (and their kinds) are this function's too
+    for _ in range(8):
+        changed = False
+        for a, ts in tails.items():
+            for t in ts:
+                n, how, dw, fl, pa = res[a]
+                tn, thow, tdw, tfl, tpa = res[t]
+                if tn > n or (tn == n and not fl and tfl) or (not pa and tpa) or set(tdw) - set(dw):
+                    pop = funcs[a][1]
+                    m = max(n, tn) if not pop else max(n, min(tn, pop // 4))   # a callee-pop one has no more
+                    res[a] = [m, how if thow == 'exact' else thow, sorted(x for x in set(dw) | set(tdw) if x < max(m, 1)),
+                              fl or [x for x in tfl if int(x.split(':')[0]) < m], pa or tpa]
+                    if res[a] != [n, how, dw, fl, pa]:
+                        changed = True
+        if not changed:
+            break
     for a in sorted(funcs):
-        n, how, dw, fl = analyse(a, funcs[a][0])
-        f.write('%08X\t%d\t%s\t%s\t%d\t%s\n' % (a, n, how, ','.join(map(str, dw)), pushed_args(a), ','.join(fl)))
+        n, how, dw, fl, pa = res[a]
+        f.write('%08X\t%d\t%s\t%s\t%d\t%s\n' % (a, n, how, ','.join(map(str, dw)), pa, ','.join(fl)))
 print('done')
