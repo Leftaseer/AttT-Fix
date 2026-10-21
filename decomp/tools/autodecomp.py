@@ -441,13 +441,13 @@ def convert(f, protos, skip, imports, impnames):
         return None, 'unknown symbol %s' % e
     for g in re.findall(r'\bG_([0-9A-F]{8})\b', body):
         ad = int(g, 16)
-        if not (0x400000 <= ad < 0x1000000):
+        if not (0x401000 <= ad < 0x1000000):        # (the headers at 400000 are no section)
             return None, 'segment or out-of-image global'
     for x in re.findall(r'\(\(void \*\)d_([0-9A-F]{8})\)', body):
         extra.add(x)
     if '::' in body:
         return None, 'C++ name left'
-    if any(not (0x400000 <= int(x, 16) < 0x1000000) for x in extra):
+    if any(not (0x401000 <= int(x, 16) < 0x1000000) for x in extra):
         return None, 'address outside the image'
 
     decls = []
