@@ -167,8 +167,11 @@ def main():
     ap.add_argument('--n', type=int, default=16)
     ap.add_argument('--only')
     ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--steps', type=int, default=5_000_000, help='instructions per call before it counts as not returning')
+    ap.add_argument('--shard', help='K/N: only every N-th function from the K-th (parallel runs)')
     a = ap.parse_args()
     h = FastHarness(a.orig, a.rebuilt, a.map)
+    h.steps = a.steps
     h.setup_regions()
     sizes = parse_sizes(os.path.join(a.auto, 'auto_pre.h'))
     jsonl = [f for f in os.listdir(os.path.dirname(os.path.abspath(a.auto))) if False]
@@ -199,6 +202,9 @@ def main():
     todo = [x for x in replaced if x in autos]
     if a.only:
         todo = [int(x, 16) for x in a.only.split(',')]
+    if a.shard:
+        k, n = map(int, a.shard.split('/'))
+        todo = sorted(todo)[k::n]
     funcs = {}
     game = 'valk' if h.orig.pe.FILE_HEADER.TimeDateStamp == 0x4883FB4F else 'attt'
     for l in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'symbols', game + '_functions.tsv')):

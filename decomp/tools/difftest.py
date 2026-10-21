@@ -402,7 +402,7 @@ class Harness:
         uc.reg_write(UC_X86_REG_ESP, sp)
         uc.mem_write(self.RAND_STATE, struct.pack('<I', 1))      # srand(1): the same rand() sequence for both runs
         try:
-            uc.emu_start(entry, STOP, count=5_000_000)
+            uc.emu_start(entry, STOP, count=getattr(self, 'steps', 5_000_000))
         except UcError as e:
             self.fault = 'fault %s at %08X' % (e, uc.reg_read(UC_X86_REG_EIP))
         eip = uc.reg_read(UC_X86_REG_EIP)
