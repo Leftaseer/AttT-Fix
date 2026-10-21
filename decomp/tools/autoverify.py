@@ -170,7 +170,7 @@ def main():
     ap.add_argument('--only')
     ap.add_argument('--seed', type=int, default=1)
     ap.add_argument('--fpcw', type=lambda x: int(x, 0), default=0x27F,
-                    help='x87 control word at each call (Direct3D 9 leaves 0x7F, single precision, in the game)')
+                    help='x87 control word at each call (0x7F in the game: Direct3D 9 sets single precision, CreateDevice at 0x44F4EE passes no D3DCREATE_FPU_PRESERVE)')
     ap.add_argument('--steps', type=int, default=5_000_000, help='instructions per call before it counts as not returning')
     ap.add_argument('--watch', type=lambda x: int(x, 16), help='debugging: print the writes to this address (hex)')
     ap.add_argument('--shard', help='K/N: only every N-th function from the K-th (parallel runs)')
