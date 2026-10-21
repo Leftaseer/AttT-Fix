@@ -304,13 +304,22 @@ def com_call(ins, k):
     if last is None or last.operands[0].type != x86.X86_OP_REG:
         return False
     r = last.operands[0].reg
+    ecx_written = False
     for j in range(k - 1, max(-1, k - 10), -1):
         i = ins[j]
         if i.mnemonic == 'mov' and len(i.operands) == 2 and i.operands[1].type == x86.X86_OP_MEM and \
                 i.operands[1].mem.base == r and i.operands[1].mem.disp == 0 and i.operands[1].mem.index == 0:
-            return True
+            # the vftable load: COM if it went into ECX, or nothing else set ECX on the way (a method of the game
+            # may also be given its object as an argument: 'mov ecx, esi; push esi; call [eax+4]' is thiscall)
+            dst = i.operands[0].reg if i.operands[0].type == x86.X86_OP_REG else None
+            return dst in ECXS or not ecx_written
         if i.mnemonic.startswith(('call', 'j', 'ret')):
             return False
+        try:
+            if any(x in ECXS for x in i.regs_access()[1]):
+                ecx_written = True
+        except Exception:
+            ecx_written = True
     return False
 
 
