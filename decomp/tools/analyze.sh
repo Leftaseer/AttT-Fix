@@ -96,6 +96,7 @@ done
 for g in attt valk; do
   "$HL" "$WORK/proj" $g -process $g.exe -noanalysis -scriptPath "$GH" \
      -postScript FixNoReturn.java \
+     -postScript RecoverSwitches.java "$SYMS/${g}_functions.tsv" \
      -postScript ApplyRegParams.java "$O/${g}_regparams.tsv" \
      -postScript ApplySymbols.java "$SYMS/$g.sym,$SYMS/${g}_ctors.sym" \
      -postScript ClassThiscall.java "$O/${g}_regparams.tsv" \
