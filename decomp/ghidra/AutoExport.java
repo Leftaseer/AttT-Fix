@@ -264,6 +264,16 @@ public class AutoExport extends GhidraScript {
         return res;
     }
 
+    // the element type of the pointer an address is used as, where elements of more than a byte are counted
+    // (0x55EE20 '&DAT_0089fd00 + i * 4' is 16 bytes a step: written on a void * it was 4); conflicting uses: none
+    void elemType(Map<Long, String> elem, long a, DataType pt, Set<DataType> used) {
+        pt = base(pt);
+        if (!(pt instanceof Pointer)) return;
+        DataType el = base(((Pointer) pt).getDataType());
+        if (el != null && el.getLength() > 1 && !(el instanceof VoidDataType) && !(el instanceof FunctionDefinition))
+            elem.merge(a, ctype(((Pointer) pt).getDataType(), used), (x, y) -> x.equals(y) ? x : "");
+    }
+
     String render(DecompileResults r, Function f, Map<Long, String> globals, Map<Long, String> callees,
                   Set<DataType> used, Map<Long, String> strings, Map<String, String> sized, Set<SequenceNumber> bits) {
         ClangTokenGroup g = r.getCCodeMarkup();
@@ -275,6 +285,7 @@ public class AutoExport extends GhidraScript {
         // (0x4C4DE0 tests G_006CA4AC and passes its address on): then the address is &G, otherwise G itself is
         // declared as the address
         Set<Long> addrs = new HashSet<>();
+        Map<Long, String> elem = new HashMap<>();     // address -> its pointee type, where elements are counted
         Map<Integer, String> before = new HashMap<>(), after = new HashMap<>();
         for (Map.Entry<Integer, PcodeOp> e : bc.entrySet()) {
             int i = e.getKey(), c = castEnd(toks, i), end = unaryEnd(toks, c + 1);
@@ -398,6 +409,9 @@ public class AutoExport extends GhidraScript {
                     }
                     if (found != null) {
                         addrs.add(found);
+                        PcodeOp po = t.getPcodeOp();
+                        if (po.getOpcode() == PcodeOp.PTRSUB && po.getOutput() != null)
+                            elemType(elem, found, htype(po.getOutput()), used);
                         sb.append(String.format("ADDR_G_%08X", found));
                         continue;
                     }
@@ -406,6 +420,13 @@ public class AutoExport extends GhidraScript {
                 if (vn != null && vn.isConstant() && text.matches("&?[A-Za-z_][\\w:<>,`' ]*") && !text.matches("(true|false|NULL)")) {
                     long a = vn.getOffset();
                     addrs.add(a);
+                    // the type the decompiler gives the address: '&G + i * 4' counts elements of its pointee
+                    // (0x55EE20 '&DAT_0089fd00 + i * 4', 16 bytes a step, was written as 4 bytes a step on a void *)
+                    DataType pt = htype(vn);
+                    PcodeOp po = t.getPcodeOp();       // a global's address is PTRSUB(0, address): its result's type
+                    if (!(base(pt) instanceof Pointer) && po != null && po.getOpcode() == PcodeOp.PTRSUB && po.getOutput() != null)
+                        pt = htype(po.getOutput());
+                    elemType(elem, a, pt, used);
                     sb.append(String.format("ADDR_G_%08X", a));
                     continue;
                 }
@@ -432,7 +453,9 @@ public class AutoExport extends GhidraScript {
             String gname = String.format("G_%08X", a);
             boolean value = globals.containsKey(a) && !globals.get(a).equals("code|0");
             if (!globals.containsKey(a)) globals.put(a, "code|0");
-            out = out.replace("ADDR_" + gname, value ? "((void *)&" + gname + ")" : "((void *)" + gname + ")");
+            String t = elem.getOrDefault(a, "");
+            t = t.isEmpty() ? "void *" : t + " *";
+            out = out.replace("ADDR_" + gname, value ? "((" + t + ")&" + gname + ")" : "((" + t + ")" + gname + ")");
         }
         return out;
     }

@@ -377,13 +377,14 @@ def convert(f, protos, skip, imports, impnames):
     body = re.sub(r'(?:\b[A-Za-z_]\w*(?:<[^;{}()]*?>)?\s*::\s*)+(?=sub_[0-9A-F]{8})', '', body)
     # the SEH frame of C++ functions (fs:[0], printed as a global at FFDFF000): our frame layout differs, so the
     # registration is dropped; an exception then passes through without running this function's destructors
-    # the address of a symbol is printed as &Class::name: our ((void *)G_X) already is that address
-    # (((void *)&G_X) when the same global is also used as a value: AutoExport.java)
-    body = re.sub(r'&?\s*(?:\b[A-Za-z_]\w*(?:<[^;{}()]*?>)?\s*::\s*)*(\(\(void \*\)&?G_[0-9A-F]{8}\))', r'\1', body)
+    # the address of a symbol is printed as &Class::name: our ((T *)G_X) already is that address
+    # (((T *)&G_X) when the same global is also used as a value; T the element type where the decompiler counts
+    # elements from it, void otherwise: AutoExport.java)
+    body = re.sub(r'&?\s*(?:\b[A-Za-z_]\w*(?:<[^;{}()]*?>)?\s*::\s*)*(\(\([\w ]+(?:\s*\*)+\)&?G_[0-9A-F]{8}\))', r'\1', body)
     # (or as unaff_FS_OFFSET, a pointer variable, where the decompiler did not see the segment, or as the TEB's
     # ExceptionList)
     if 'G_FFDFF000' in body or re.search(r'\b(?:unaff_FS_OFFSET|ExceptionList)\b', body):
-        hs = re.findall(r'\b(?:pu|pc|p)\w*Stack_\w+\s*=\s*&?\s*(?:&?(?:LAB|FUN)_|\(\(void \*\)G_)([0-9a-fA-F]{8})\b', body)
+        hs = re.findall(r'\b(?:pu|pc|p)\w*Stack_\w+\s*=\s*&?\s*(?:&?(?:LAB|FUN)_|\(\([\w ]+(?:\s*\*)+\)G_)([0-9a-fA-F]{8})\b', body)
         if len(hs) != 1:
             return None, 'exception frame without a known handler'
         if catches(int(hs[0], 16)):
