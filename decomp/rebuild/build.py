@@ -273,8 +273,11 @@ def main():
                             if l.split('\t')[1] == 'compiled')
             allow -= set(int(l.split()[0], 16) for l in open(a.auto_exclude) if l.strip() and not l.startswith('#'))
         # x87 arithmetic like the original (its float code is x87; SSE rounds every step to float)
+        # (the machine code's semantics, not C's: integers wrap, memory is accessed through any type, and pointers
+        # are plain addresses: 0x470150 counts bytes down in a pointer to NULL, a loop clang made endless otherwise)
         aflags = ['--target=i686-pc-windows-msvc', '-O1', '-march=pentium-mmx', '-mfpmath=387', '-fms-extensions', '-ffreestanding',
-                  '-fno-builtin', '-fno-stack-protector', '-x', 'c', '-std=gnu11', '-w',
+                  '-fno-builtin', '-fno-stack-protector', '-fwrapv', '-fno-strict-aliasing', '-fno-delete-null-pointer-checks',
+                  '-x', 'c', '-std=gnu11', '-w',
                   '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types',
                   '-Wno-error=incompatible-function-pointer-types', '-Wno-error=int-to-pointer-cast', '-Wno-error=return-type',
                   '-I', os.path.join(HERE, 'include'), '-I', os.path.abspath(a.auto)]
