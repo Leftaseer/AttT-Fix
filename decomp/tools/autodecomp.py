@@ -370,6 +370,12 @@ def convert(f, protos, skip, imports, impnames):
     for pat, why in BLOCK:
         if re.search(pat, code):
             return None, why
+    # a register a callee takes, declared as a local of this function (it is no parameter here): the decompiler
+    # lets the callee have this function's own EAX, an uninitialized variable in C (0x547F10 passes 'in_eax' on
+    # to 0x4AC7F0, 0x491F50 to 0x491CF0, which then faulted)
+    decl = code[code.find('{') + 1:].strip('\n').split('\n\n')[0]
+    if re.search(r'(?m)^\s+(?!return\b)[A-Za-z_][\w ]*?\**\s*\bin_(?:eax|ecx|edx|ebx|esi|edi)\s*;', decl):
+        return None, 'register input passed on, not a parameter'
     # a call's return address as a value: the decompiler lost the stack depth and took the pushes of the calls for
     # arguments of a later one (0x475440 'uVar5 = 0x47552f' passed on to 0x475330 with a vector by value)
     rets_here = call_returns(a)
