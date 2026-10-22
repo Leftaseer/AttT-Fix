@@ -13,7 +13,7 @@ public class ApplyRegParams extends GhidraScript {
     static final String[] ORDER = {"ECX", "EAX", "EDX", "EBX", "ESI", "EDI"};
     @Override
     public void run() throws Exception {
-        int thisc = 0, fast = 0, custom = 0, fail = 0, reset = 0;
+        int thisc = 0, fast = 0, custom = 0, fail = 0, reset = 0, noreg = 0;
         // start from the conventions' own storage: earlier runs may have used other register lists
         for (Function f : currentProgram.getFunctionManager().getFunctions(true)) {
             if (!f.hasCustomVariableStorage()) continue;
@@ -38,8 +38,24 @@ public class ApplyRegParams extends GhidraScript {
                 if (n.startsWith("Unwind@") || n.startsWith("Catch@")) continue;
                 Set<String> regs = new HashSet<>();
                 for (String x : p[1].split(",")) if (!x.isEmpty() && !x.equals("EBP")) regs.add(x);
-                if (regs.isEmpty()) continue;
                 String cc = f.getCallingConventionName();
+                if (regs.isEmpty()) {
+                    // no register read: a __thiscall or __fastcall the analysis guessed (0x403120 'push ecx' makes
+                    // room for a local; vector members never read 'this', 0x422EF0) has none; the callers' ECX then
+                    // turned up as extraout_ECX.  The stack parameters stay, the ret pop picks the convention
+                    if ((cc.equals("__thiscall") || cc.equals("__fastcall")) && p.length > 2 && p[2].matches("\\d+")) {
+                        try {
+                            List<Variable> keep = new ArrayList<>();
+                            for (Parameter q : f.getParameters())
+                                if (q.isStackVariable() && !q.isAutoParameter())
+                                    keep.add(new ParameterImpl(q.getName(), q.getDataType(), currentProgram));
+                            f.updateFunction(p[2].equals("0") ? "__cdecl" : "__stdcall", f.getReturn(), keep,
+                                Function.FunctionUpdateType.DYNAMIC_STORAGE_FORMAL_PARAMS, true, SourceType.ANALYSIS);
+                            noreg++;
+                        } catch (Exception e) { fail++; }
+                    }
+                    continue;
+                }
                 try {
                     if (regs.equals(Set.of("ECX"))) {
                         if (!cc.equals("__thiscall") && !cc.equals("__fastcall")) { f.setCallingConvention("__thiscall"); thisc++; }
@@ -72,6 +88,6 @@ public class ApplyRegParams extends GhidraScript {
                 } catch (Exception e) { fail++; }
             }
         }
-        println("thiscall " + thisc + ", fastcall " + fast + ", custom " + custom + ", failed " + fail);
+        println("thiscall " + thisc + ", fastcall " + fast + ", custom " + custom + ", without register parameters " + noreg + ", failed " + fail);
     }
 }
