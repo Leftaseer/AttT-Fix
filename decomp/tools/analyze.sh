@@ -91,6 +91,8 @@ EOF
     py importargs.py "$WORK/bin/$g.exe" "$SYMS/${g}_importargs.tsv"
     py cxximports.py "$WORK/bin/$g.exe" "$SYMS/${g}_cxximports.tsv"
   done
+  # functions that hand on their caller's EAX (found by earlier exports: tools/eaxin.py update)
+  [ -f "$SYMS/${g}_eaxin.tsv" ] && py eaxin.py apply "$SYMS/${g}_eaxin.tsv" "$O/${g}_regparams.tsv" "$SYMS/${g}_functions.tsv"
 done
 
 # 4. back into Ghidra: register conventions, names, thiscall methods, class structures; export
