@@ -302,6 +302,18 @@ def reg_import(ins, k):
     return None
 
 
+def padding(i):
+    """alignment filler the code jumps over: int3, nop, 'lea r, [r+0]', 'mov r, r' (0x4212D8 'lea esp, [esp]')"""
+    if i.mnemonic in ('int3', 'nop'):
+        return True
+    ops = i.operands
+    if i.mnemonic == 'lea' and ops[0].type == x86.X86_OP_REG and ops[1].mem.base == ops[0].reg and \
+            ops[1].mem.index == 0 and ops[1].mem.disp == 0:
+        return True
+    return i.mnemonic == 'mov' and len(ops) == 2 and ops[0].type == x86.X86_OP_REG and \
+        ops[1].type == x86.X86_OP_REG and ops[0].reg == ops[1].reg
+
+
 exact = set()       # the calls callee_pops solved from a single path to a ret (not the frame-depth guess)
 
 
@@ -346,7 +358,7 @@ def callee_pops(code, start, calls, cleanup, fixed=None):
             bad = []
             d = depths(code, start, guess, bad)
             if not bad and all(a in guess and guess[a] >= 0 and guess[a] % 4 == 0 for a in rest) and \
-                    len(d) == len(code) - sum(1 for i in code.values() if i.mnemonic in ('int3', 'nop')):
+                    all(a_ in d or padding(i) for a_, i in code.items()):
                 known = guess
     return known
 

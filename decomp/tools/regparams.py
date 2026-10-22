@@ -81,8 +81,10 @@ def analyse(start):
                 # otherwise it is a save or reserves stack space
                 o = i.operands[0]
                 pr = FULL.get(i.reg_name(o.reg)) if o.type == X.X86_OP_REG else None
-                # pushes that open the function are saves
-                pending.append(pr if pr and not w & BIT[pr] and not entry_run and pr not in clobbers else None)
+                # pushes that open the function are saves, or 'push ecx' making room; EAX and EDX are never saved
+                # (0x46FD90 yy_fatal_error pushes the message it gets in EAX for fprintf)
+                pending.append(pr if pr and not w & BIT[pr] and (not entry_run or pr in ('EAX', 'EDX')) and
+                               pr not in clobbers else None)
                 r = set() if o.type == X.X86_OP_REG else r
             elif m == 'pop':
                 if pending: pending.pop()
