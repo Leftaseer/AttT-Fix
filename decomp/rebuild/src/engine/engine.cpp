@@ -102,11 +102,85 @@ static void TestMove(float dx, float dy)
 static char g_testLua[2048];
 static int g_testLuaWait;       /* main loop turns it has waited: the menus do not run CEngine::Frame */
 
+/* Lua functions for the test input: DecompLog(...) writes its string and number arguments as a line in
+ * decomp_debug.log (the game's Lua has no io library, and print goes nowhere); DecompAutoload(n) tells the
+ * "loadsave" line how far it got.  The arguments are read off the Lua 5.1 stack itself: L->top at +8, L->base at
+ * +12, a TValue is 8 bytes (the game's lua_Number is a float: value, then the type at +4), a string's characters
+ * follow its 16-byte TString. */
+ORIG_FN(004031F0, void, (void *L, int (__cdecl *fn)(void *), int n));    /* lua_pushcclosure */
+ORIG_FN(004034F0, void, (void *L, int index, const char *name));        /* lua_setfield */
+
+static void LuaArgs(void *L, char *line, int size)
+{
+    int n = 0;
+    line[0] = 0;
+    for (char *v = *(char **)((char *)L + 12); v < *(char **)((char *)L + 8) && n < size - 120; v += 8) {
+        int tt = *(int *)(v + 4);
+        if (tt == 4)           /* LUA_TSTRING */
+            n += sprintf(line + n, "%.100s ", *(char **)v + 16);
+        else if (tt == 3)      /* LUA_TNUMBER */
+            n += sprintf(line + n, "%g ", *(float *)v);
+        else
+            n += sprintf(line + n, "<type %d> ", tt);
+    }
+}
+
+static int __cdecl DecompLogLua(void *L)
+{
+    char line[1024];
+    LuaArgs(L, line, sizeof(line));
+#ifdef DECOMP_DEBUG_LOG
+    DebugLog(line);
+#else
+    OutputDebugStringA(line);
+#endif
+    return 0;
+}
+
+/* "MS loadsave NAME" (the bisection script's game0): from the main menu, open the load menu, choose the saved game
+ * NAME (Saves/NAME.sav) and load it, tried every second until it is done or the save is not there */
+static char g_autoload[64];
+static int g_autoloadState;     /* 0 none, 1 trying, 2 loading, 3 not found */
+static DWORD g_autoloadNext;
+
+static int __cdecl DecompAutoloadLua(void *L)
+{
+    char *v = *(char **)((char *)L + 12);
+    if (v < *(char **)((char *)L + 8) && *(int *)(v + 4) == 3)
+        g_autoloadState = (int)*(float *)v;
+    return 0;
+}
+
+static void AutoloadStep()
+{
+    if (g_autoloadState != 1 || g_testLua[0] || (int)(GetTickCount() - g_autoloadNext) < 0)
+        return;
+    g_autoloadNext = GetTickCount() + 1000;
+    sprintf(g_testLua,
+            "pcall(function() local L = GUIScene and GUIScene.Load "
+            "if L and L.scene and L._SlotNames then "
+            "for i, n in pairs(L._SlotNames) do if n == '%s' then L._CurrentSlotNum = i DecompAutoload(2) "
+            "DecompLog('autoload: %s') L:StrongLoad() return end end "
+            "DecompAutoload(3) DecompLog('autoload: no saved game %s') return end "
+            "for k, v in pairs(GUIScene or {}) do if type(v) == 'table' and rawget(v, '_ChooseHero') and v.scene then "
+            "v:_Load() return end end end)", g_autoload, g_autoload, g_autoload);
+    g_testLuaWait = 0;
+}
+
 void TestLua()
 {
     if (!g_testLua[0])
         return;
     void *vm = *(void **)d_006C88D4;
+    static void *registered;       /* the lua_State they were given to (a new one comes with some scenes) */
+    if (vm && *(void **)((char *)vm + 4) != registered) {
+        void *L = *(void **)((char *)vm + 4);         /* CLua: the lua_State */
+        ORIG_CALL(004031F0)(L, DecompLogLua, 0);
+        ORIG_CALL(004034F0)(L, -10002 /* LUA_GLOBALSINDEX */, "DecompLog");
+        ORIG_CALL(004031F0)(L, DecompAutoloadLua, 0);
+        ORIG_CALL(004034F0)(L, -10002, "DecompAutoload");
+        registered = L;
+    }
     if (vm)
         ORIG_CALL(0057D220)(vm, g_testLua, (int)strlen(g_testLua), "=testinput");
     g_testLua[0] = 0;
@@ -141,6 +215,7 @@ void TestInput(CInput *input)
     }
     if (g_testLua[0] && ++g_testLuaWait > 30)
         TestLua();
+    AutoloadStep();
     {   /* every move of the game's cursor, to see where scripted mouse input lands */
         static int lx = -1, ly = -1;
         const float *p = CCursor::Instance()->ScreenPos();
@@ -181,6 +256,10 @@ void TestInput(CInput *input)
             return;
         } else if (strstr(line, " pos")) {
             TestPos("cursor at", ms);
+        } else if (const char *name = strstr(line, " loadsave ")) {
+            sscanf(name + 10, "%63s", g_autoload);
+            g_autoloadState = 1;
+            g_autoloadNext = GetTickCount();
         } else if (const char *lua = strstr(line, " lua ")) {
             OutputDebugStringA(line);
             lstrcpynA(g_testLua, lua + 5, sizeof(g_testLua));   /* run inside the next frame (TestLua) */

@@ -24,3 +24,4 @@ WriteFile@20 KERNEL32.dll
 CloseHandle@4 KERNEL32.dll
 lstrcmpiA@8 KERNEL32.dll
 lstrcmpA@8 KERNEL32.dll
+CreateThread@24 KERNEL32.dll

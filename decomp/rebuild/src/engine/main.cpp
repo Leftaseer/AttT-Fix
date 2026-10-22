@@ -57,14 +57,10 @@ static LONG CALLBACK CrashLog(EXCEPTION_POINTERS *e)
     if (!cxx && code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION &&
         code != EXCEPTION_PRIV_INSTRUCTION && code != EXCEPTION_INT_DIVIDE_BY_ZERO && code != EXCEPTION_STACK_OVERFLOW)
         return EXCEPTION_CONTINUE_SEARCH;
-    if (logged++ >= 6)
-        return EXCEPTION_CONTINUE_SEARCH;
-    CONTEXT *c = e->ContextRecord;
-    char line[256];
+    const char *name = "?";
     if (cxx && e->ExceptionRecord->NumberParameters >= 3) {
         /* ThrowInfo -> CatchableTypeArray -> first CatchableType -> TypeDescriptor (name at +8) */
         const DWORD *ti = (const DWORD *)e->ExceptionRecord->ExceptionInformation[2];
-        const char *name = "?";
         if (ti && !IsBadReadPtr(ti, 16)) {
             const DWORD *cta = (const DWORD *)ti[3];
             if (cta && !IsBadReadPtr(cta, 8) && cta[0]) {
@@ -73,6 +69,16 @@ static LONG CALLBACK CrashLog(EXCEPTION_POINTERS *e)
                     name = (const char *)(ct[1] + 8);
             }
         }
+        /* Lua's own errors (lua_error is a C++ throw of lua_longjmp, caught by the script's pcall: loading a saved
+         * game raises several) are no crash, and they used up the six entries before a real one */
+        if (strstr(name, "lua_longjmp"))
+            return EXCEPTION_CONTINUE_SEARCH;
+    }
+    if (logged++ >= 6)
+        return EXCEPTION_CONTINUE_SEARCH;
+    CONTEXT *c = e->ContextRecord;
+    char line[256];
+    if (cxx) {
         wsprintfA(line, "C++ exception %.120s", name);
         DebugLog(line);
     }
@@ -299,20 +305,41 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
 #ifdef DECOMP_TEST_INPUT
 /* "skipintro" in testinput.txt (the bisection script writes it): the start-up videos (1CLogo.bik, logo.bik,
- * intro.bik) end at once.  The game's own player stops a video on Escape (0x4F7780 waits for Escape, Enter or
- * Space among the window messages), so _BinkOpen@8, reached through the import table, posts one when it opens
- * one of them.  The engine's own "-nologo" is no use here: it is a developer switch that also starts in a world
- * level without the menus, where loading a saved game ends the game. */
+ * intro.bik) end at once.  The game's own player (0x4F7640) stops a video on the key-up of Escape, Enter or
+ * Space among the window messages once 20 frames are shown, so while a video opened during CEngine::Init is open
+ * (_BinkOpen@8 to _BinkClose@4, both reached through the import table; the videos come from memory, the packed
+ * resources, not by file name) a thread posts that key-up every 100 ms.  The engine's
+ * own "-nologo" is no use here: it is a developer switch that also starts in a world level without the menus,
+ * where loading a saved game ends the game. */
 static void *(__stdcall *g_binkOpen)(const char *, unsigned);
+static void (__stdcall *g_binkClose)(void *);
+static void *volatile g_skipping;           /* the start-up video being skipped */
+static bool g_starting;                     /* in CEngine::Init: the videos opened now are the start-up ones */
+
+static DWORD WINAPI SkipIntroKeys(void *bink)
+{
+    for (int k = 0; k < 600 && g_skipping == bink; k++) {
+        PostMessageA(g_hWnd, WM_KEYUP, VK_ESCAPE, 0xC0010001);
+        Sleep(100);
+    }
+    return 0;
+}
 
 static void *__stdcall SkipIntroBinkOpen(const char *name, unsigned flags)
 {
     void *bink = g_binkOpen(name, flags);
-    const char *base = name ? strrchr(name, '\\') : nullptr;
-    base = base ? base + 1 : name;
-    if (bink && base && (!lstrcmpiA(base, "1CLogo.bik") || !lstrcmpiA(base, "logo.bik") || !lstrcmpiA(base, "intro.bik")))
-        PostMessageA(g_hWnd, WM_KEYDOWN, VK_ESCAPE, 1);
+    if (bink && g_starting) {
+        g_skipping = bink;
+        CloseHandle(CreateThread(nullptr, 0, SkipIntroKeys, bink, 0, nullptr));
+    }
     return bink;
+}
+
+static void __stdcall SkipIntroBinkClose(void *bink)
+{
+    if (bink == g_skipping)
+        g_skipping = nullptr;
+    g_binkClose(bink);
 }
 
 /* the import table slot of DLL!NAME in this exe, or null */
@@ -334,6 +361,16 @@ static void **ImportSlot(const char *dll, const char *name)
     return nullptr;
 }
 
+static void *Hook(void **slot, void *fn)
+{
+    DWORD old;
+    VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &old);
+    void *was = *slot;
+    *slot = fn;
+    VirtualProtect(slot, sizeof(void *), old, &old);
+    return was;
+}
+
 static void SkipIntroIfAsked()
 {
     FILE *f = fopen("testinput.txt", "r");
@@ -345,14 +382,13 @@ static void SkipIntroIfAsked()
         if (strstr(line, "skipintro"))
             skip = true;
     fclose(f);
-    void **slot = skip ? ImportSlot("binkw32.dll", "_BinkOpen@8") : nullptr;
-    if (!slot)
+    void **open = skip ? ImportSlot("binkw32.dll", "_BinkOpen@8") : nullptr;
+    void **close = skip ? ImportSlot("binkw32.dll", "_BinkClose@4") : nullptr;
+    if (!open || !close)
         return;
-    DWORD old;
-    VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &old);
-    g_binkOpen = (void *(__stdcall *)(const char *, unsigned))*slot;
-    *slot = (void *)SkipIntroBinkOpen;
-    VirtualProtect(slot, sizeof(void *), old, &old);
+    g_starting = true;
+    g_binkClose = (void (__stdcall *)(void *))Hook(close, (void *)SkipIntroBinkClose);
+    g_binkOpen = (void *(__stdcall *)(const char *, unsigned))Hook(open, (void *)SkipIntroBinkOpen);
 }
 #endif
 
@@ -397,6 +433,9 @@ void GameMain(const char *cmdLine)
     SkipIntroIfAsked();
 #endif
     g_engine->Init(std::string(cmdLine));
+#ifdef DECOMP_TEST_INPUT
+    g_starting = false;
+#endif
     g_engine->SetActive(g_appActive);
 
     HACCEL accel = LoadAcceleratorsA(GetModuleHandleA(nullptr), MAKEINTRESOURCEA(101));
