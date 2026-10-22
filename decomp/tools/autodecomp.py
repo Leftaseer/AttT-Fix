@@ -346,6 +346,18 @@ def convert(f, protos, skip, imports, impnames):
     code = f['code']
     if f.get('floatmix'):
         return None, 'float and integer bits mixed (%s)' % f['floatmix'].split(' at ')[0]
+    # a tail jump to an import ('jmp [slot]' ending 0x4206B0): the decompiler warns that it is no switch it can
+    # recover and calls the import with its prototype instead, which is what the jump does
+    def import_jump(m):
+        try:
+            b = image[0].read(int(m.group(1), 16), 6)
+        except Exception:
+            return m.group(0)
+        if b[:2] == b'\xff\x25' and int.from_bytes(b[2:6], 'little') in image[0].imports:
+            return ''
+        return m.group(0)
+    code = re.sub(r'/\* WARNING: Could not recover jumptable at 0x([0-9a-f]+)\. Too many branches \*/\s*'
+                  r'/\* WARNING: Treating indirect jump as call \*/', import_jump, code)
     for pat, why in BLOCK:
         if re.search(pat, code):
             return None, why
