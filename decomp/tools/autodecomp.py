@@ -402,13 +402,26 @@ def convert(f, protos, skip, imports, impnames):
         body = re.sub(r'(?<![\w:.>])(vftable(?:_\w+)?)\b',
                       lambda m: m.group(1) if re.search(r'(?:\.|->)\s*$', body[max(0, m.start() - 40):m.start()])
                       else cls + '::' + m.group(1), body)
-    # stack variables at their original offsets: the decompiler splits buffers and structures into scalars that the
-    # original kept side by side (and walks across them with pointers), so all named stack variables become views
-    # of one frame array laid out as the original stack frame (local_1c is at -0x1c from the return address)
+    # the decompiler's NAN(x) tests x (math.h has NAN as the constant)
+    body = re.sub(r'\bNAN\(', 'NAN_CHECK(', body)
+    # addresses of stack slots below the frame: an object the decompiler declared nothing for ('&stack0xffffffdc' a
+    # TableGet at -0x24, 0x43A970) or a by-value argument built in the outgoing arguments (0x42AF50 copies a string
+    # to &stack0xffffff98 and passes in_stack_ffffff98.. on): frame variables at those offsets like local_24
+    if re.search(r'\bstack0xff[0-9a-f]{6}\b', body):
+        def at(m):
+            return 'local_%x' % (0x100000000 - int(m.group(1), 16))
+        body = re.sub(r'\bin_stack_(ff[0-9a-f]{6})\b', at, body)
+        undeclared = sorted({at(m) for m in re.finditer(r'\bstack0x(ff[0-9a-f]{6})\b', body)} -
+                            set(re.findall(r'\blocal_[0-9a-f]+\b', body)))
+        body = re.sub(r'\bstack0x(ff[0-9a-f]{6})\b', at, body)
+        body = body.replace('{\n', '{\n' + ''.join('  undefined1 %s;\n' % n for n in undeclared), 1)
     # below-frame stack inputs (garbage of the original): zero, not an uninitialized C variable the optimizer may
     # take liberties with
     body = re.sub(r'^(\s*(?:undefined\d|u?int|uint|float|char|byte|short|ushort|[\w ]+\*+)\s*in_stack_ff\w+);',
                   r'\1 = 0;', body, flags=re.M)
+    # stack variables at their original offsets: the decompiler splits buffers and structures into scalars that the
+    # original kept side by side (and walks across them with pointers), so all named stack variables become views
+    # of one frame array laid out as the original stack frame (local_1c is at -0x1c from the return address)
     body, frame_names = stack_frame(body)
     if body is None:
         return None, frame_names
