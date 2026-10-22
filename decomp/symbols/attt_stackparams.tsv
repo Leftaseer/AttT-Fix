@@ -3260,7 +3260,7 @@
 0047BF50	0	exact		0	
 0047BFB0	0	exact		0	
 0047C050	1	exact		0	
-0047C070	2	exact	1	0	
+0047C070	2	exact	0,1	0	
 0047C100	3	exact	0,1,2	0	
 0047C130	0	exact		0	
 0047C1B0	4	exact	0,1,2,3	0	
