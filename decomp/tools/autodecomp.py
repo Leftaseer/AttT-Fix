@@ -176,9 +176,10 @@ def split_args(text):
     return out
 
 
-def rewrite_icalls(code):
+def rewrite_icalls(code, floats=None):
     """'(ICALL_A*E)(args)' from AutoExport -> a call of E through a function pointer of the prototype written
-    for the call at A (its convention passes the object in ECX for __thiscall); innermost calls first"""
+    for the call at A (its convention passes the object in ECX for __thiscall); innermost calls first.  floats:
+    call address -> indices of the arguments that are floats (AutoExport.java icallfloat), typed float"""
     for m in reversed(list(re.finditer(r'\(ICALL_([0-9A-F]{8})\*', code))):
         a = int(m.group(1), 16)
         if a not in icalls:
@@ -195,6 +196,11 @@ def rewrite_icalls(code):
         params = (['void *'] if cc == '__thiscall' else []) + ['undefined4'] * nstack
         if len(args) != len(params):
             return None, 'indirect call with %d arguments, %d in its prototype' % (len(args), len(params))
+        for x in (floats or {}).get('%08X' % a, '').split(','):
+            if x:
+                if int(x) >= len(params) or params[int(x)] != 'undefined4':
+                    return None, 'float argument of an indirect call not on the stack'
+                params[int(x)] = 'float'
         callee = code[m.end():close]
         code = code[:m.start()] + '((%s (%s *)(%s))(%s))(%s)' % (
             ret, cc, ', '.join(params) or 'void', callee, ', '.join(args)) + code[end + 1:]
@@ -374,7 +380,7 @@ def convert(f, protos, skip, imports, impnames):
     for c in f['callees']:
         if 'EBP' in ebp_in.get(int(c, 16), ()):
             return None, 'callee %s reads the caller\'s EBP' % c
-    code, why = rewrite_icalls(code)
+    code, why = rewrite_icalls(code, f.get('icallfloat'))
     if code is None:
         return None, why
     if has_indirect_call(code):

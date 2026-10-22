@@ -96,7 +96,7 @@ public class AutoExport extends GhidraScript {
         }
         return isFloat(a) != isFloat(b) && base(a).getLength() == base(b).getLength() && !(base(a) instanceof Pointer && false);
     }
-    String floatMix(HighFunction hf, Function f, Set<SequenceNumber> bits) {
+    String floatMix(HighFunction hf, Function f, Set<SequenceNumber> bits, Map<String, String> icallFloats) {
         Iterator<PcodeOpAST> it = hf.getPcodeOps();
         while (it.hasNext()) {
             PcodeOpAST op = it.next();
@@ -130,9 +130,16 @@ public class AutoExport extends GhidraScript {
                 for (int k = 1; k < op.getNumInputs() && k - 1 < ps.length; k++)
                     if (mix(ps[k - 1].getDataType(), htype(op.getInput(k)))) return "argument at " + op.getSeqnum().getTarget();
             } else if (c == PcodeOp.CALLIND) {
-                // the call-site prototypes of ICallOverride.java take undefined4: a float argument would be converted
-                for (int k = 1; k < op.getNumInputs(); k++)
-                    if (isFloat(htype(op.getInput(k)))) return "indirect argument at " + op.getSeqnum().getTarget();
+                // the call-site prototypes of ICallOverride.java take undefined4: a float argument would be converted.
+                // A 4-byte one is listed (icallfloat: call address -> argument indices) and tools/autodecomp.py types
+                // that parameter float (0x4266F5 passes a float to a virtual function); a wider one is left out
+                for (int k = 1; k < op.getNumInputs(); k++) {
+                    DataType t = htype(op.getInput(k));
+                    if (!isFloat(t)) continue;
+                    if (base(t).getLength() != 4) return "indirect argument at " + op.getSeqnum().getTarget();
+                    icallFloats.merge(String.format("%08X", op.getSeqnum().getTarget().getOffset()), String.valueOf(k - 1),
+                        (x, y) -> x + "," + y);
+                }
             } else if (c == PcodeOp.RETURN && op.getNumInputs() > 1) {
                 if (mix(f.getReturnType(), htype(op.getInput(1)))) return "result at " + op.getSeqnum().getTarget();
             }
@@ -498,8 +505,18 @@ public class AutoExport extends GhidraScript {
                 sb.append(",\"cc\":").append(js(f.getCallingConventionName()));
                 sb.append(",\"custom\":").append(f.hasCustomVariableStorage());
                 String fm = null;
-                try { fm = floatMix(r.getHighFunction(), f, bits); } catch (Exception e) { fm = "check failed"; }
+                Map<String, String> icallFloats = new TreeMap<>();
+                try { fm = floatMix(r.getHighFunction(), f, bits, icallFloats); } catch (Exception e) { fm = "check failed"; }
                 if (fm != null) sb.append(",\"floatmix\":").append(js(fm));
+                if (!icallFloats.isEmpty()) {
+                    sb.append(",\"icallfloat\":{");
+                    boolean first1 = true;
+                    for (Map.Entry<String, String> e : icallFloats.entrySet()) {
+                        if (!first1) sb.append(','); first1 = false;
+                        sb.append(js(e.getKey())).append(':').append(js(e.getValue()));
+                    }
+                    sb.append('}');
+                }
                 sb.append(",\"code\":").append(js(code));
                 sb.append(",\"globals\":{");
                 boolean first = true;
