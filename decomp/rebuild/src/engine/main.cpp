@@ -297,6 +297,65 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
 #include "game/config.h"
 
+#ifdef DECOMP_TEST_INPUT
+/* "skipintro" in testinput.txt (the bisection script writes it): the start-up videos (1CLogo.bik, logo.bik,
+ * intro.bik) end at once.  The game's own player stops a video on Escape (0x4F7780 waits for Escape, Enter or
+ * Space among the window messages), so _BinkOpen@8, reached through the import table, posts one when it opens
+ * one of them.  The engine's own "-nologo" is no use here: it is a developer switch that also starts in a world
+ * level without the menus, where loading a saved game ends the game. */
+static void *(__stdcall *g_binkOpen)(const char *, unsigned);
+
+static void *__stdcall SkipIntroBinkOpen(const char *name, unsigned flags)
+{
+    void *bink = g_binkOpen(name, flags);
+    const char *base = name ? strrchr(name, '\\') : nullptr;
+    base = base ? base + 1 : name;
+    if (bink && base && (!lstrcmpiA(base, "1CLogo.bik") || !lstrcmpiA(base, "logo.bik") || !lstrcmpiA(base, "intro.bik")))
+        PostMessageA(g_hWnd, WM_KEYDOWN, VK_ESCAPE, 1);
+    return bink;
+}
+
+/* the import table slot of DLL!NAME in this exe, or null */
+static void **ImportSlot(const char *dll, const char *name)
+{
+    char *base = (char *)GetModuleHandleA(nullptr);
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+    IMAGE_DATA_DIRECTORY &d = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    for (IMAGE_IMPORT_DESCRIPTOR *i = (IMAGE_IMPORT_DESCRIPTOR *)(base + d.VirtualAddress); i->Name; i++) {
+        if (lstrcmpiA(base + i->Name, dll))
+            continue;
+        IMAGE_THUNK_DATA *names = (IMAGE_THUNK_DATA *)(base + (i->OriginalFirstThunk ? i->OriginalFirstThunk : i->FirstThunk));
+        void **slots = (void **)(base + i->FirstThunk);
+        for (int k = 0; names[k].u1.AddressOfData; k++)
+            if (!(names[k].u1.Ordinal & IMAGE_ORDINAL_FLAG) &&
+                !lstrcmpA(((IMAGE_IMPORT_BY_NAME *)(base + names[k].u1.AddressOfData))->Name, name))
+                return &slots[k];
+    }
+    return nullptr;
+}
+
+static void SkipIntroIfAsked()
+{
+    FILE *f = fopen("testinput.txt", "r");
+    if (!f)
+        return;
+    char line[256];
+    bool skip = false;
+    while (fgets(line, sizeof(line), f))
+        if (strstr(line, "skipintro"))
+            skip = true;
+    fclose(f);
+    void **slot = skip ? ImportSlot("binkw32.dll", "_BinkOpen@8") : nullptr;
+    if (!slot)
+        return;
+    DWORD old;
+    VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &old);
+    g_binkOpen = (void *(__stdcall *)(const char *, unsigned))*slot;
+    *slot = (void *)SkipIntroBinkOpen;
+    VirtualProtect(slot, sizeof(void *), old, &old);
+}
+#endif
+
 DECOMP(0042F640)
 void GameMain(const char *cmdLine)
 {
@@ -334,6 +393,9 @@ void GameMain(const char *cmdLine)
                              cfg->x, cfg->y, cfg->width, cfg->height, GetDesktopWindow(), nullptr,
                              GetModuleHandleA(nullptr), nullptr);
     g_engine = CEngine::Instance();
+#ifdef DECOMP_TEST_INPUT
+    SkipIntroIfAsked();
+#endif
     g_engine->Init(std::string(cmdLine));
     g_engine->SetActive(g_appActive);
 

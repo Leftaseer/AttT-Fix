@@ -22,3 +22,5 @@ CreateFileA@28 KERNEL32.dll
 ReadFile@20 KERNEL32.dll
 WriteFile@20 KERNEL32.dll
 CloseHandle@4 KERNEL32.dll
+lstrcmpiA@8 KERNEL32.dll
+lstrcmpA@8 KERNEL32.dll
