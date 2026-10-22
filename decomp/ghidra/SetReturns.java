@@ -23,7 +23,13 @@ public class SetReturns extends GhidraScript {
                 if (!(rt instanceof VoidDataType) && !(rt instanceof Undefined) && !(rt instanceof DefaultDataType)) continue;
                 try {
                     // a locked undefined4: the decompiler must express the result instead of deciding there is none
-                    f.setReturnType(Undefined4DataType.dataType, SourceType.USER_DEFINED);
+                    // (with custom storage, the one of register parameters, the result needs its register
+                    // named: setReturnType leaves it without storage and the decompiler shows void, 0x4254A0)
+                    if (f.hasCustomVariableStorage())
+                        f.setReturn(Undefined4DataType.dataType, new VariableStorage(currentProgram,
+                            currentProgram.getRegister("EAX")), SourceType.USER_DEFINED);
+                    else
+                        f.setReturnType(Undefined4DataType.dataType, SourceType.USER_DEFINED);
                     f.setSignatureSource(SourceType.USER_DEFINED);
                     set++;
                 } catch (Exception e) { fail++; }
