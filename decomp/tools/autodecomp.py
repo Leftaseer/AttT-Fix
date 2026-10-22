@@ -57,6 +57,18 @@ convs = {}         # addr -> (registers in parameter order, ret pop) of the prot
 
 import_args = {}    # IAT slot -> argument bytes callers remove after calling it (tools/importargs.py)
 stack_slots = {}    # addr -> stack slots the machine code uses (tools/stackparams.py, exact ones only)
+fsize = {}          # addr -> bytes of machine code
+
+
+def call_returns(a):
+    """the addresses right after the calls of the function at a"""
+    import capstone
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    try:
+        code = image[0].read(a, fsize.get(a, 0))
+    except Exception:
+        return set()
+    return {i.address + i.size for i in md.disasm(code, a) if i.mnemonic == 'call'}
 
 
 def load_machine(path):
@@ -65,6 +77,7 @@ def load_machine(path):
             continue
         q = l.rstrip('\n').split('\t')
         machine[int(q[0], 16)] = (set(x for x in q[2].split(',') if x and x != 'EBP'), None if q[3] == '?' else int(q[3] or 0))
+        fsize[int(q[0], 16)] = int(q[1])
         if 'EBP' in q[2].split(','):
             ebp_in[int(q[0], 16)] = {'EBP'}
     ia = path.replace('_functions.tsv', '_importargs.tsv')
@@ -333,6 +346,11 @@ def convert(f, protos, skip, imports, impnames):
     for pat, why in BLOCK:
         if re.search(pat, code):
             return None, why
+    # a call's return address as a value: the decompiler lost the stack depth and took the pushes of the calls for
+    # arguments of a later one (0x475440 'uVar5 = 0x47552f' passed on to 0x475330 with a vector by value)
+    rets_here = call_returns(a)
+    if any(int(x, 16) in rets_here for x in re.findall(r'\b0x([0-9a-f]{6,8})\b', code)):
+        return None, 'return address as a value (stack depth lost)'
     # comments before the definition (the demangled name of an exported function, its own signature with '(void)'
     # that the parameter parsing would take for the definition's), once the warnings among them have been seen
     code = re.sub(r'^(?:\s*/\*.*?\*/)+', '', code, flags=re.S)
