@@ -90,6 +90,9 @@ def effect(i, code, known):
         if ops[1].type != x86.X86_OP_IMM:
             return STOP
         return -ops[1].imm if m == 'sub' else ops[1].imm
+    if m == 'lea' and ops[0].type == x86.X86_OP_REG and ops[0].reg == ESP and ops[1].mem.base == ESP and \
+            ops[1].mem.index == 0:
+        return ops[1].mem.disp                  # 'lea esp, [esp+0]': an alignment nop (0x4212D8)
     if m == 'leave' or (ops and ops[0].type == x86.X86_OP_REG and ops[0].reg == ESP and m in ('mov', 'lea', 'and')):
         return STOP
     if m == 'call':
@@ -109,9 +112,9 @@ def depths(code, start, known, check=None):
     """depth (bytes below the return address, negative) at each instruction reachable from the entry; with check (a
     list), a disagreement where paths meet or a ret away from the return address is appended to it"""
     d = {}
-    todo = [(start, 0)]
+    todo = [(start, 0, None)]
     while todo:
-        p, dep = todo.pop()
+        p, dep, ebp = todo.pop()
         while p in code:
             if p in d:
                 if check is not None and d[p] != dep:
@@ -125,6 +128,24 @@ def depths(code, start, known, check=None):
                 break
             if i.mnemonic in ('int3', 'hlt'):
                 break
+            # an EBP frame: 'mov ebp, esp' remembers the depth, 'mov esp, ebp' and 'leave' go back to it (the
+            # epilogue is reached, so the frame-depth check below can accept the function)
+            if i.mnemonic == 'mov' and i.op_str == 'ebp, esp':
+                ebp = dep
+            elif i.mnemonic == 'mov' and i.op_str == 'esp, ebp' and ebp is not None:
+                dep = ebp
+                p = i.address + i.size
+                continue
+            elif i.mnemonic == 'leave' and ebp is not None:
+                dep = ebp + 4
+                ebp = None
+                p = i.address + i.size
+                continue
+            elif i.mnemonic == 'pop' and i.op_str == 'ebp':
+                ebp = None
+            elif ebp is not None and i.operands and i.operands[0].type == x86.X86_OP_REG and \
+                    i.operands[0].reg == x86.X86_REG_EBP and i.mnemonic not in ('push', 'cmp', 'test'):
+                ebp = None                      # EBP written otherwise
             e = effect(i, code, known)
             if e is STOP:
                 break
@@ -141,7 +162,7 @@ def depths(code, start, known, check=None):
                 break
             if i.mnemonic.startswith('j') or i.mnemonic.startswith('loop'):
                 if i.operands[0].type == x86.X86_OP_IMM:
-                    todo.append((i.operands[0].imm, dep))
+                    todo.append((i.operands[0].imm, dep, ebp))
             p = i.address + i.size
     return d
 

@@ -75,3 +75,10 @@ D3DXVec3Unproject	void *	void *, void *, void *, void *, void *, void *
 ??0?$basic_ostream@DU?$char_traits@D@std@@@std@@QAE@PAV?$basic_streambuf@DU?$char_traits@D@std@@@1@_N@Z	void *	void *, void *, int, int	__thiscall
 ??0?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z	void *	void *, void *, int, int	__thiscall
 ??0?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@1@H@Z	void *	void *, void *, int, int	__thiscall
+# void, but callers of the functions that end with them use what they leave in EAX (an in_eax handed on, a virtual
+# slot others return a value from): the result keeps it (0x431B50 returns EAX after operator delete)
+??3@YAXPAX@Z	uint	void *	__cdecl
+??_V@YAXPAX@Z	uint	void *	__cdecl
+free	uint	void *	__cdecl
+??1?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@XZ	uint	void *	__thiscall
+??_D?$basic_fstream@DU?$char_traits@D@std@@@std@@QAEXXZ	uint	void *	__thiscall
