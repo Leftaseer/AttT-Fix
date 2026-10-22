@@ -58,6 +58,9 @@ convs = {}         # addr -> (registers in parameter order, ret pop) of the prot
 import_args = {}    # IAT slot -> argument bytes callers remove after calling it (tools/importargs.py)
 stack_slots = {}    # addr -> stack slots the machine code uses (tools/stackparams.py, exact ones only)
 fsize = {}          # addr -> bytes of machine code
+# dwords of the objects the decompiler addresses in the outgoing arguments (MSVC 8 std::string: 28 bytes)
+OBJ_DWORDS = {'_Demangler_std_basic_string_char_struct_std__char_traits_char__class_std__allocator_char___': 7,
+              'float': 1, 'undefined4': 1, 'int': 1, 'uint': 1, 'undefined8': 2, 'double': 2, 'longlong': 2}
 
 
 def call_returns(a):
@@ -426,6 +429,25 @@ def convert(f, protos, skip, imports, impnames):
     # TableGet at -0x24, 0x43A970) or a by-value argument built in the outgoing arguments (0x42AF50 copies a string
     # to &stack0xffffff98 and passes in_stack_ffffff98.. on): frame variables at those offsets like local_24
     if re.search(r'\bstack0xff[0-9a-f]{6}\b', body):
+        # an object built there and passed on by value must be passed whole: the decompiler gives the callee only
+        # the slots it knows of (0x53CD20 has a string written to &stack0xffffff74 by 0x561520 and passes one dword
+        # of it to 0x46D380, which takes the string)
+        flat = re.sub(r'\s+', ' ', body)
+        for m in re.finditer(r'(?:\((\w+) \*\) ?)?&stack0x(ff[0-9a-f]{6})\b', flat):
+            off = int(m.group(2), 16)
+            if not re.search(r'\bin_stack_%08x\b' % off, flat):
+                continue                       # not passed on: an object of the frame (0x43A970)
+            need = OBJ_DWORDS.get(m.group(1))
+            run = 0
+            for r in re.finditer(r'\bin_stack_%08x\b(?:\s*,\s*in_stack_ff[0-9a-f]{6}\b)*' % off, flat):
+                n = 0
+                for v in re.findall(r'in_stack_(ff[0-9a-f]{6})', r.group(0)):
+                    if int(v, 16) != off + 4 * n:
+                        break
+                    n += 1
+                run = max(run, n)
+            if need is None or run < need:
+                return None, 'object built in the outgoing arguments, passed on in part'
         def at(m):
             return 'local_%x' % (0x100000000 - int(m.group(1), 16))
         body = re.sub(r'\bin_stack_(ff[0-9a-f]{6})\b', at, body)
