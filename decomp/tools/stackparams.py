@@ -263,6 +263,18 @@ for a, (size, pop) in funcs.items():
             n = ins[k + 1]
             add = n.operands[1].imm if n.mnemonic == 'add' and n.operands[0].type == x86.X86_OP_REG and \
                 n.operands[0].reg == ESP and n.operands[1].type == x86.X86_OP_IMM else 0
+            # the pushes right before (with only moves between): an add that removes more cleans up after an
+            # earlier call too (0x46AC27 'lea ecx, [esp+18h]; call 427820' pushes nothing; the destructor was
+            # given six parameters from such adds)
+            pushes = 0
+            for j in range(k - 1, -1, -1):
+                m = ins[j].mnemonic
+                if m == 'push':
+                    pushes += 1
+                elif not (m.startswith('mov') or m == 'lea' or m.startswith('fld') or m.startswith('fst')):
+                    break
+            if add > 4 * pushes:
+                add = 0
             cleanups.setdefault(i.operands[0].imm, []).append(add)
 
 

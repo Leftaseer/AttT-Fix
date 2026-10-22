@@ -463,7 +463,7 @@ public class AutoExport extends GhidraScript {
     @Override
     public void run() throws Exception {
         String out = getScriptArgs()[0], typesOut = getScriptArgs()[1];
-        int maxSize = getScriptArgs().length > 2 ? Integer.parseInt(getScriptArgs()[2]) : 4096;
+        int maxSize = getScriptArgs().length > 2 ? Integer.parseInt(getScriptArgs()[2]) : 200000;
         List<Function> funcs = new ArrayList<>();
         for (Function f : currentProgram.getFunctionManager().getFunctions(true))
             if (!f.isExternal() && !f.isThunk() && f.getBody().getNumAddresses() <= maxSize &&
