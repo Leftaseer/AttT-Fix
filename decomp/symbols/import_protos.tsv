@@ -82,3 +82,10 @@ D3DXVec3Unproject	void *	void *, void *, void *, void *, void *, void *
 free	uint	void *	__cdecl
 ??1?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@XZ	uint	void *	__thiscall
 ??_D?$basic_fstream@DU?$char_traits@D@std@@@std@@QAEXXZ	uint	void *	__thiscall
+# Miles Sound System 7 (mss32.dll): the volume and pan arguments are F32 (decorated names give only their size; an
+# int there converted 0.8 to 0 and the game went silent: 0x4C1760)
+_AIL_set_sample_volume_pan@12	int	void *, float, float
+_AIL_set_sample_volume_levels@12	int	void *, float, float
+_AIL_quick_set_volume@12	int	void *, float, float
+_AIL_set_digital_master_volume_level@8	int	void *, float
+_AIL_digital_master_volume_level@4	float	void *

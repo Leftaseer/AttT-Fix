@@ -125,7 +125,19 @@ public class AutoExport extends GhidraScript {
                 if (mix(pointee(htype(op.getInput(1))), htype(out))) return "load at " + op.getSeqnum().getTarget();
             } else if (c == PcodeOp.CALL) {
                 Function t = getFunctionAt(op.getInput(0).getAddress());
-                if (t == null) continue;
+                // a call through an import slot ('call [0x607898]'): the import's prototype (0x4C1760 passed a float
+                // volume to AIL_set_sample_volume_pan, typed undefined4 from its decorated name: converted to 0, the
+                // game went silent)
+                if (t == null)
+                    for (Reference ref : getReferencesFrom(op.getInput(0).getAddress()))
+                        if (ref.isExternalReference() && ((ExternalReference) ref).getExternalLocation() != null)
+                            t = ((ExternalReference) ref).getExternalLocation().getFunction();
+                if (t == null) {
+                    for (int k = 1; k < op.getNumInputs(); k++)
+                        if (isFloat(htype(op.getInput(k)))) return "argument of an unknown callee at " + op.getSeqnum().getTarget();
+                    continue;
+                }
+                if (out != null && mix(t.getReturnType(), htype(out))) return "call result at " + op.getSeqnum().getTarget();
                 Parameter[] ps = t.getParameters();
                 for (int k = 1; k < op.getNumInputs() && k - 1 < ps.length; k++)
                     if (mix(ps[k - 1].getDataType(), htype(op.getInput(k)))) return "argument at " + op.getSeqnum().getTarget();
