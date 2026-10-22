@@ -58,6 +58,7 @@ convs = {}         # addr -> (registers in parameter order, ret pop) of the prot
 import_args = {}    # IAT slot -> argument bytes callers remove after calling it (tools/importargs.py)
 stack_slots = {}    # addr -> stack slots the machine code uses (tools/stackparams.py, exact ones only)
 fsize = {}          # addr -> bytes of machine code
+noreturn = set()    # functions without a ret or a jump out (they throw: 0x493740): no ret pop to know
 # dwords of the objects the decompiler addresses in the outgoing arguments (MSVC 8 std::string: 28 bytes)
 OBJ_DWORDS = {'_Demangler_std_basic_string_char_struct_std__char_traits_char__class_std__allocator_char___': 7,
               'float': 1, 'undefined4': 1, 'int': 1, 'uint': 1, 'undefined8': 2, 'double': 2, 'longlong': 2}
@@ -108,7 +109,7 @@ def fit_convention(a, pr):
     if len(storage) != len(plist):
         return 'parameter storage unknown'
     regs_in, pop = machine[a]
-    if pop is None:
+    if pop is None and a not in noreturn:
         return 'ret pop unknown (no ret found)'
     regs = [s for s in storage if s != 'stack']
     if storage[:len(regs)] != regs:
@@ -118,6 +119,8 @@ def fit_convention(a, pr):
     if not regs_in <= set(regs):
         return 'reads registers the prototype lacks (%s)' % ','.join(sorted(regs_in - set(regs)))
     stack = sum(8 if t.strip() in WIDE else 4 for (t, _), s in zip(plist, storage) if s == 'stack')
+    if pop is None:             # never returns: what a ret would pop does not matter, the convention's is taken
+        pop = stack if cc in ('__stdcall', '__thiscall', '__fastcall') and not custom else 0
     if pop == 0 and stack_slots.get(a, 0) * 4 > stack:
         return 'stack parameters the decompiler missed'
     native = {'__cdecl': ([], 0), '__stdcall': ([], stack), '__thiscall': (['ECX'], stack),
@@ -676,6 +679,17 @@ def main():
                     break
         except Exception:
             pass
+    for fa, (_, pop) in machine.items():
+        if pop is not None or not fsize.get(fa):
+            continue
+        try:
+            ins = list(md.disasm(pe.read(fa, fsize[fa]), fa))
+        except Exception:
+            continue
+        if ins and sum(i.size for i in ins) == fsize[fa] and not any(
+                i.mnemonic.startswith('ret') or (i.mnemonic == 'jmp' and not (
+                    i.operands[0].type == cx.X86_OP_IMM and fa <= i.operands[0].imm < fa + fsize[fa])) for i in ins):
+            noreturn.add(fa)
     for fa in machine:
         try:
             b = pe.read(fa, 6)
