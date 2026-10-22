@@ -113,8 +113,12 @@ public class AutoExport extends GhidraScript {
                     if (ot != null && pt != null && isFloat(ot) != isFloat(pt)) return "piece at " + op.getSeqnum().getTarget();
                 }
             }
-            if (c == PcodeOp.COPY || c == PcodeOp.CAST || c == PcodeOp.MULTIEQUAL || c == PcodeOp.INDIRECT) {
-                if (mix(htype(out), htype(op.getInput(0)))) return "copy at " + op.getSeqnum().getTarget();
+            // (not INDIRECT: a value a call may have changed, nothing the C text moves; 0x4EA940's float field
+            // across a virtual call)
+            if (c == PcodeOp.COPY || c == PcodeOp.CAST || c == PcodeOp.MULTIEQUAL) {
+                if (mix(htype(out), htype(op.getInput(0))))
+                    return "copy at " + op.getSeqnum().getTarget() + ": " + op.getMnemonic() + " " + htype(out).getName() +
+                        " <- " + htype(op.getInput(0)).getName() + (op.getInput(0).isConstant() ? " const" : "");
             } else if (c == PcodeOp.STORE) {
                 if (mix(pointee(htype(op.getInput(1))), htype(op.getInput(2)))) return "store at " + op.getSeqnum().getTarget();
             } else if (c == PcodeOp.LOAD) {
@@ -219,6 +223,9 @@ public class AutoExport extends GhidraScript {
                 if (op != null) span.add(op);
             }
             DataType printed = ((ClangTypeToken) toks.get(next(toks, i + 1))).getDataType();
+            // '(T *)': the type token is T, the stars are tokens of their own
+            for (int k = next(toks, i + 1) + 1; k < c; k++)
+                if (txt(toks, k).equals("*") && printed != null) printed = new PointerDataType(printed);
             PcodeOp found = null;
             int n = 0;
             // the CAST: an op of the operand's tokens (a lone variable carries the op reading it), or the op that

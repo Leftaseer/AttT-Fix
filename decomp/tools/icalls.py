@@ -204,6 +204,25 @@ def predecessors(ins, code):
     return preds
 
 
+def pushes_since_call(ins, k, preds):
+    """pushes between the last call (or jump, ret, change of ESP other than a push, join of paths) and the call at
+    ins[k], whatever else lies between (x87 code between the pushes of the arguments: 0x4E17FA); None when the
+    walk reaches the function's start (its own pushes are saves)"""
+    n = 0
+    for j in range(k - 1, -1, -1):
+        i = ins[j]
+        m = i.mnemonic
+        if m == 'push':
+            n += 1
+        elif m in ('call', 'pop', 'leave') or m.startswith(('ret', 'j', 'loop')):
+            return n
+        elif i.operands and i.operands[0].type == x86.X86_OP_REG and i.operands[0].reg == ESP:
+            return n
+        if len(preds.get(i.address, [])) > 1 or (j and ins[j - 1].address not in preds.get(i.address, [])):
+            return n
+    return None
+
+
 def ecx_set(a, preds, code, start, ecx_in, limit=200):
     """1 if on some path to the call ECX is written after the last call (or is the function's own ECX input):
     a __thiscall callee needs it; for a __stdcall one a value in ECX does no harm"""
@@ -397,7 +416,7 @@ def vslot(ins, k):
 with open(sys.argv[3], 'w') as f:
     f.write('# call address\tfunction\tecx set (1/0)\tadd esp after (-1: none)\tpushes right before'
             '\tbytes the callee pops (ESP balance, -1: unknown)\n')
-    n = solved = byvt = ntail = bym = byimp = 0
+    n = solved = byvt = ntail = bym = byimp = bynone = 0
     tails = []
     for start, size, ecx_in in funcs:
         try:
@@ -437,7 +456,7 @@ with open(sys.argv[3], 'w') as f:
             com = com_call(ins, k)
             if com:
                 ecx = 0             # stdcall with this on the stack
-            rows.append((i.address, ecx, cl, pushes, None if com else vslot(ins, k)))
+            rows.append((i.address, ecx, cl, pushes, None if com else vslot(ins, k), pushes_since_call(ins, k, preds)))
             slot = reg_import(ins, k)
             if slot is not None:
                 fixed[i.address] = imports[slot]
@@ -448,8 +467,11 @@ with open(sys.argv[3], 'w') as f:
         tails.clear()
         if not rows:
             continue
-        known = callee_pops(code, start, [r[0] for r in rows], cleanup, fixed)
-        for a, ecx, cl, pushes, off in rows:
+        # nothing pushed since the last call, counted either way: no arguments, nothing to pop (all 203 such sites
+        # measured in the game agree); known before the balance, it solves the calls around them
+        nopush = {r[0]: 0 for r in rows if cleanup[r[0]] < 0 and r[3] == 0 and r[5] == 0 and r[0] not in fixed}
+        known = callee_pops(code, start, [r[0] for r in rows], cleanup, {**fixed, **nopush})
+        for a, ecx, cl, pushes, off, outstanding in rows:
             if a in fixed:
                 f.write('%08X\t%08X\t%d\t%d\t%d\t%d\n' % (a, start, ecx, cl, pushes, fixed[a] if cl < 0 else 0))
                 n += 1
@@ -471,8 +493,10 @@ with open(sys.argv[3], 'w') as f:
             if pop < 0 and cl < 0 and a in measured and (measured[a] > 0 or pushes == 0):
                 pop = measured[a]
                 bym += 1
+            if a in nopush:
+                bynone += 1
             f.write('%08X\t%08X\t%d\t%d\t%d\t%d\n' % (a, start, ecx, cl, pushes, pop))
             n += 1
 print('%d indirect calls (%d of them tail jumps), the pop of %d callee-pop ones from the ESP balance, %d from the '
-      'vftables (%d offsets agree), %d measured, %d imports called through a register'
-      % (n, ntail, solved, byvt, len(vt_pops), bym, byimp))
+      'vftables (%d offsets agree), %d measured, %d imports called through a register, %d with nothing pushed'
+      % (n, ntail, solved, byvt, len(vt_pops), bym, byimp, bynone))
