@@ -257,6 +257,8 @@ for a, (size, pop) in funcs.items():
         ins = list(md.disasm(pe.read(a, size), a))
     except Exception:
         continue
+    at = {i.address: i for i in ins}
+    pro = prologue_end(at.get, a)
     for k, i in enumerate(ins[:-1]):
         if i.mnemonic == 'call' and i.operands[0].type == x86.X86_OP_IMM and i.operands[0].imm in funcs and \
                 funcs[i.operands[0].imm][1] == 0:
@@ -268,6 +270,8 @@ for a, (size, pop) in funcs.items():
             # given six parameters from such adds)
             pushes = 0
             for j in range(k - 1, -1, -1):
+                if ins[j].address < pro:
+                    break              # the prologue's 'push ecx' (room for a local) is no argument (0x4D4B11)
                 m = ins[j].mnemonic
                 if m == 'push':
                     pushes += 1
