@@ -205,19 +205,29 @@ def predecessors(ins, code):
 
 
 def pushes_since_call(ins, k, preds):
-    """pushes between the last call (or jump, ret, change of ESP other than a push, join of paths) and the call at
-    ins[k], whatever else lies between (x87 code between the pushes of the arguments: 0x4E17FA); None when the
-    walk reaches the function's start (its own pushes are saves)"""
+    """dwords pushed (or made room for with sub esp) between the last call (or jump, ret, join of paths) and the
+    call at ins[k], whatever else lies between (x87 code between the pushes of the arguments: 0x4E17FA); None when
+    the walk reaches the function's start (its own pushes are saves) or ESP changes otherwise"""
     n = 0
     for j in range(k - 1, -1, -1):
         i = ins[j]
         m = i.mnemonic
         if m == 'push':
             n += 1
-        elif m in ('call', 'pop', 'leave') or m.startswith(('ret', 'j', 'loop')):
+        elif m == 'call':
+            # a call on an object on the stack ('mov ecx, esp', 'lea ecx, [esp+N]' before it) may build an argument
+            # of this one in place: 0x48BA70 takes a std::string by value, copy-constructed at ESP
+            for b in ins[max(0, j - 4):j]:
+                if (b.mnemonic == 'mov' and b.op_str == 'ecx, esp') or (b.mnemonic == 'lea' and b.op_str.startswith('ecx, [esp')):
+                    return None
             return n
+        elif m in ('pop', 'leave') or m.startswith(('ret', 'j', 'loop')):
+            return n
+        elif m == 'sub' and i.operands[0].type == x86.X86_OP_REG and i.operands[0].reg == ESP and \
+                i.operands[1].type == x86.X86_OP_IMM:
+            n += i.operands[1].imm // 4          # room for arguments stored with mov/fstp (0x42BC0D: two floats)
         elif i.operands and i.operands[0].type == x86.X86_OP_REG and i.operands[0].reg == ESP:
-            return n
+            return None
         if len(preds.get(i.address, [])) > 1 or (j and ins[j - 1].address not in preds.get(i.address, [])):
             return n
     return None
