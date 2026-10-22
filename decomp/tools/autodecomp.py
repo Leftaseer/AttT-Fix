@@ -20,7 +20,10 @@ REBUILD = os.path.join(HERE, '..', 'rebuild')
 
 BLOCK = [
     (r'\bunaff_(?!FS_OFFSET\b)\w+', 'unaffected register'), (r'\bextraout_\w+', 'extra output register'),
-    (r'\bin_stack_\w+', 'stack outside the frame'), (r'\bin_[A-Z]{2,4}\b', 'register input'),
+    # (in_stack_ffff...: below the frame, a slot of the outgoing arguments never written, garbage the original
+    # passes on, e.g. the first field of a struct built on the stack for 0x4909E0: its declaration as a local is as
+    # good; above the frame it is a parameter the prototype lacks)
+    (r'\bin_stack_(?!ff)\w+', 'stack outside the frame'), (r'\bin_[A-Z]{2,4}\b', 'register input'),
     (r'\bin_ST\d\b', 'x87 register input (a value left on the FPU stack the decompiler lost track of)'),
     (r'WARNING: (?!Globals starting|Removing unreachable|Load size|Type propagation|Subroutine does not return)', 'decompiler warning'),
     (r'UNRESOLVED', 'unresolved name'), (r'halt_baddata|halt_unimplemented|software_\w+\(|swi\(', 'bad instruction'),
@@ -402,6 +405,10 @@ def convert(f, protos, skip, imports, impnames):
     # stack variables at their original offsets: the decompiler splits buffers and structures into scalars that the
     # original kept side by side (and walks across them with pointers), so all named stack variables become views
     # of one frame array laid out as the original stack frame (local_1c is at -0x1c from the return address)
+    # below-frame stack inputs (garbage of the original): zero, not an uninitialized C variable the optimizer may
+    # take liberties with
+    body = re.sub(r'^(\s*(?:undefined\d|u?int|uint|float|char|byte|short|ushort|[\w ]+\*+)\s*in_stack_ff\w+);',
+                  r'\1 = 0;', body, flags=re.M)
     body, frame_names = stack_frame(body)
     if body is None:
         return None, frame_names
