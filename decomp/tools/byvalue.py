@@ -52,6 +52,9 @@ def effect(i):
             p = funcs.get(o.imm, (0, '?'))[1]
             return None if p in ('?', '') else int(p)
         if o.type == x86.X86_OP_MEM and o.mem.base == 0 and o.mem.index == 0:
+            dll, name = pe.imports.get(o.mem.disp, ('', ''))
+            if o.mem.disp not in ipops and dll.upper() == 'MSVCR80.DLL' and not name.startswith('?'):
+                return 0                # the C runtime: __cdecl (_strlwr in 0x46D380)
             return ipops.get(o.mem.disp)
         return icp.get(i.address)
     return 0
@@ -79,17 +82,22 @@ for a, (size, pop) in funcs.items():
         ins = {i.address: i for i in md.disasm(pe.read(a, size), a)}
     except Exception:
         continue
-    seen, todo, offs = set(), [(a, 0)], set()
+    seen, todo, offs = set(), [(a, 0, None)], set()
     while todo:
-        p, d = todo.pop()
+        p, d, ebp = todo.pop()
         while p in ins and p not in seen:
             seen.add(p)
             i = ins[p]
             if i.mnemonic == 'lea' and i.operands[0].type == x86.X86_OP_REG and i.operands[0].reg == x86.X86_REG_ECX \
-                    and i.operands[1].mem.base == x86.X86_REG_ESP and dtor_follows(ins, p):
-                off = d + i.operands[1].mem.disp
-                if off > 0:
+                    and dtor_follows(ins, p):
+                base = i.operands[1].mem.base
+                # (an EBP frame: 0x46D380 'lea ecx, [ebp+8]')
+                off = d + i.operands[1].mem.disp if base == x86.X86_REG_ESP else \
+                    ebp + i.operands[1].mem.disp if base == x86.X86_REG_EBP and ebp is not None else None
+                if off is not None and off > 0:
                     offs.add(off)
+            if i.mnemonic == 'mov' and i.op_str == 'ebp, esp':
+                ebp = d
             if i.mnemonic.startswith('ret') or i.mnemonic in ('int3', 'hlt'):
                 break
             e = effect(i)
@@ -102,7 +110,7 @@ for a, (size, pop) in funcs.items():
                     continue
                 break
             if (i.mnemonic.startswith('j') or i.mnemonic.startswith('loop')) and i.operands[0].type == x86.X86_OP_IMM:
-                todo.append((i.operands[0].imm, d))
+                todo.append((i.operands[0].imm, d, ebp))
             p += i.size
     if offs:
         res[a] = (sorted(offs), pop)

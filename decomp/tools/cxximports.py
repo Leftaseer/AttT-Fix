@@ -32,6 +32,11 @@ def split_top(s):
     return out
 
 
+# classes the imports take by value, by size (std::string::operator[](_Size_type_nosscl) of the checked
+# iterators: a size_t in a struct; 0x46D380 calls it)
+BY_VALUE_SIZES = {'::_Size_type_nosscl': 4}
+
+
 def arg_bytes(t):
     t = t.strip()
     if t in ('void', '...'):
@@ -43,7 +48,11 @@ def arg_bytes(t):
     if t == 'long double':
         return 8
     if re.match(r'^(class|struct|union) ', t):
-        return None                    # a class by value: its size is not in the name
+        # a class by value: its size is not in the name, except for the few the C++ runtime passes
+        for k, n in BY_VALUE_SIZES.items():
+            if t.endswith(k):
+                return n
+        return None
     return 4                           # int, char, bool, enums, float: one stack slot
 
 

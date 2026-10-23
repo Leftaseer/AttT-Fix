@@ -50,6 +50,12 @@ def load_protos(path):
 
 REG_ORDER = ['ECX', 'EAX', 'EDX', 'EBX', 'ESI', 'EDI']
 WIDE = {'double', 'longlong', 'ulonglong', 'undefined8', 'qword', 'float10'}
+BYVALUE = {'_decomp_StrByValue': 28}     # objects passed by value (ghidra/ByValueParams.java)
+
+
+def slot_bytes(t):
+    t = t.strip()
+    return BYVALUE.get(t, 8 if t in WIDE else 4)
 machine = {}       # addr -> (register inputs, bytes popped by ret) from symbols/<game>_functions.tsv
 ebp_in = {}        # functions that read EBP before setting it (funclets using their caller's frame)
 convs = {}         # addr -> (registers in parameter order, ret pop) of the prototypes as written out
@@ -120,7 +126,7 @@ def fit_convention(a, pr):
         return 'odd register storage'
     if not regs_in <= set(regs):
         return 'reads registers the prototype lacks (%s)' % ','.join(sorted(regs_in - set(regs)))
-    stack = sum(8 if t.strip() in WIDE else 4 for (t, _), s in zip(plist, storage) if s == 'stack')
+    stack = sum(slot_bytes(t) for (t, _), s in zip(plist, storage) if s == 'stack')
     if pop is None:             # never returns: what a ret would pop does not matter, the convention's is taken
         pop = stack if cc in ('__stdcall', '__thiscall', '__fastcall') and not custom else 0
     if pop == 0 and stack_slots.get(a, 0) * 4 > stack:
@@ -483,6 +489,8 @@ def convert(f, protos, skip, imports, impnames):
             off = int(m.group(2), 16)
             if not re.search(r'\bin_stack_%08x\b' % off, flat):
                 continue                       # not passed on: an object of the frame (0x43A970)
+            if re.search(r'\b(?:%s)\s+in_stack_%08x\s*;' % ('|'.join(BYVALUE), off), flat):
+                continue                       # one variable of the whole object, passed by value (0x42AF50)
             need = OBJ_DWORDS.get(m.group(1))
             run = 0
             for r in re.finditer(r'\bin_stack_%08x\b(?:\s*,\s*in_stack_ff[0-9a-f]{6}\b)*' % off, flat):
@@ -619,7 +627,7 @@ def convert(f, protos, skip, imports, impnames):
             icc, _, iret, iplist, iva = cp[:5]
             if not iva and ca in import_args:
                 ps_ = iplist[1:] if icc == '__thiscall' else iplist[2:] if icc == '__fastcall' else iplist
-                have = sum(8 if t.strip() in WIDE else 4 for t, _ in ps_)
+                have = sum(slot_bytes(t) for t, _ in ps_)
                 cleaned, pushed = import_args[ca]
                 need = 4 * pushed if icc in ('__stdcall', '__thiscall', '__fastcall') else cleaned
                 # (the pushes before a call that pops its own arguments may be the next call's, pushed early: the
