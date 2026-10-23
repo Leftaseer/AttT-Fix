@@ -58,6 +58,8 @@ convs = {}         # addr -> (registers in parameter order, ret pop) of the prot
 import_args = {}    # IAT slot -> argument bytes callers remove after calling it (tools/importargs.py)
 stack_slots = {}    # addr -> stack slots the machine code uses (tools/stackparams.py, exact ones only)
 fsize = {}          # addr -> bytes of machine code
+SYSTEM_DLLS = {'KERNEL32.DLL', 'USER32.DLL', 'GDI32.DLL', 'ADVAPI32.DLL', 'SHLWAPI.DLL', 'SHELL32.DLL', 'WINMM.DLL',
+               'OLE32.DLL', 'VERSION.DLL', 'MSVCR80.DLL', 'MSVCP80.DLL'}
 noreturn = set()    # functions without a ret or a jump out (they throw: 0x493740): no ret pop to know
 # dwords of the objects the decompiler addresses in the outgoing arguments (MSVC 8 std::string: 28 bytes)
 OBJ_DWORDS = {'_Demangler_std_basic_string_char_struct_std__char_traits_char__class_std__allocator_char___': 7,
@@ -508,7 +510,11 @@ def convert(f, protos, skip, imports, impnames):
     # labels keep their names (the address substitution below is for LAB_ used as a value)
     body = re.sub(r'\bgoto\s+(LAB_[0-9a-fA-F]{8})\b', r'goto L\1', body)
     body = re.sub(r'^(\s*)(LAB_[0-9a-fA-F]{8}):', r'\1L\2:', body, flags=re.M)
-    # pieces of a variable: v._1_3_ is the 3 bytes at offset 1 of v
+    # pieces of a variable: v._1_3_ is the 3 bytes at offset 1 of v; a 3-byte store is a 2-byte and a 1-byte one
+    body = re.sub(r'(?m)^(\s*)([A-Za-z_]\w*)\._(\d+)_3_ = ([^;\n]+);$',
+                  lambda m: '%s{ unsigned int gh3 = (unsigned int)(%s); *(unsigned short *)((char *)&%s + %d) = '
+                            '(unsigned short)gh3; *(unsigned char *)((char *)&%s + %d) = (unsigned char)(gh3 >> 16); }'
+                            % (m.group(1), m.group(4), m.group(2), int(m.group(3)), m.group(2), int(m.group(3)) + 2), body)
     bad = []
     def piece(m):
         var, off, size = m.group(1), int(m.group(2)), int(m.group(3))
@@ -584,6 +590,12 @@ def convert(f, protos, skip, imports, impnames):
                 have = sum(8 if t.strip() in WIDE else 4 for t, _ in ps_)
                 cleaned, pushed = import_args[ca]
                 need = 4 * pushed if icc in ('__stdcall', '__thiscall', '__fastcall') else cleaned
+                # (the pushes before a call that pops its own arguments may be the next call's, pushed early: the
+                # prototypes of the system DLLs and of the C++ runtime, from Ghidra's type libraries and the
+                # decorated names, are trusted for those; GetStdHandle had 3 pushes before it)
+                dll = image[0].imports.get(ca, ('', ''))[0].upper()
+                if need != cleaned and dll in SYSTEM_DLLS:
+                    need = 0
                 if need > have:
                     return None, 'import %s takes more arguments than its prototype' % c
             w = cc_word(icc, False) or '__cdecl'
