@@ -69,7 +69,7 @@ WIDE_PARAM = re.compile(r'\b(double|long\s+long|longlong|ulonglong|undefined8|__
 
 def split_params(text):
     """'(lua_State *L, int narg)' -> number of 4-byte stack slots the parameters take: an 8-byte one (double,
-    long long, undefined8) takes two.  Counted as one, an adapter copied a dword too few of 0x48C2D0's arguments
+    long long, undefined8) takes two, a string by value seven.  Counted as one, an adapter copied a dword too few of 0x48C2D0's arguments
     (byte, short, undefined8, int, int: 24 bytes), its ret 24 then took an argument for the return address."""
     t = text.strip()
     if t.startswith('('):
@@ -89,7 +89,13 @@ def split_params(text):
         else:
             cur += c
     parts.append(cur)
-    return sum(2 if WIDE_PARAM.search(p_) and '*' not in p_ and '(' not in p_ else 1 for p_ in parts)
+    def slots(p_):
+        if '*' in p_ or '(' in p_:
+            return 1
+        if 'StrByValue' in p_:
+            return 7            # a std::string by value (ghidra/ByValueParams.java): 28 bytes, 0x4F7430
+        return 2 if WIDE_PARAM.search(p_) else 1
+    return sum(slots(p_) for p_ in parts)
 
 
 def scan_sources(files, cflags):
