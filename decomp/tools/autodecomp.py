@@ -510,6 +510,28 @@ def convert(f, protos, skip, imports, impnames):
     # labels keep their names (the address substitution below is for LAB_ used as a value)
     body = re.sub(r'\bgoto\s+(LAB_[0-9a-fA-F]{8})\b', r'goto L\1', body)
     body = re.sub(r'^(\s*)(LAB_[0-9a-fA-F]{8}):', r'\1L\2:', body, flags=re.M)
+    # '(undefined4)x' of a float variable is the decompiler's cast of the bits (an fstp to a dword: 0x587D30 stores
+    # a float read from Lua into an array this way); in C it would convert the value (text placed off screen)
+    fl = {}
+    for t_, n_ in re.findall(r'(?m)^\s+(float10|double|float)\s+(\w+)\s*;', body):
+        fl[n_] = t_
+    for t_, n_ in [(x.rsplit(' ', 1) + [''])[:2] for x in params]:
+        if t_.strip() in ('float', 'double', 'float10'):
+            fl[n_] = t_.strip()
+    def bits(m):
+        n_, v = int(m.group(1)), m.group(2)
+        if v not in fl:
+            return m.group(0)
+        if n_ == 4:
+            return 'BITCAST(undefined4, ((float)(%s)))' % v
+        if n_ == 8:
+            return 'BITCAST(undefined8, ((double)(%s)))' % v
+        bad_cast.append(v)
+        return m.group(0)
+    bad_cast = []
+    body = re.sub(r'\(undefined([1248])\)\s*(\w+)\b(?!\s*[\[(.])', bits, body)
+    if bad_cast:
+        return None, 'float variable cast to a smaller undefined type'
     # pieces of a variable: v._1_3_ is the 3 bytes at offset 1 of v; a 3-byte store is a 2-byte and a 1-byte one
     body = re.sub(r'(?m)^(\s*)([A-Za-z_]\w*)\._(\d+)_3_ = ([^;\n]+);$',
                   lambda m: '%s{ unsigned int gh3 = (unsigned int)(%s); *(unsigned short *)((char *)&%s + %d) = '
@@ -527,6 +549,14 @@ def convert(f, protos, skip, imports, impnames):
     body = re.sub(r'\b([A-Za-z_]\w*)\._(\d+)_(\d+)_\b', piece, body)
     if bad:
         return None, 'piece of a variable'
+    # a float value stored to a piece keeps its bits ('v._4_4_ = fVar2 + fVar2' in 0x572170), not converted
+    def piece_store(m):
+        rhs = m.group(3)
+        if not any(re.search(r'\b%s\b' % re.escape(v), rhs) for v in fl) or \
+                re.match(r'\s*(?:BITCAST|\((?:u?int|undefined\d|longlong|ulonglong|short|ushort|char|byte|uint)\)|TRUNC|ROUND)', rhs):
+            return m.group(0)
+        return '%s = BITCAST(%s, ((%s)(%s)));' % (m.group(1), m.group(2), 'float' if m.group(2) == 'unsigned int' else 'double', rhs)
+    body = re.sub(r'(\(\*\((unsigned int|unsigned long long) \*\)\(\(char \*\)&\w+ \+ \d+\)\)) = ([^;]+);', piece_store, body)
     # void * dereferenced: the decompiler did not know the type of the value (int or float), neither do we
     for t_, n_ in [(x.rsplit(' ', 1) + [''])[:2] for x in params]:
         n_ = n_.lstrip('*')
