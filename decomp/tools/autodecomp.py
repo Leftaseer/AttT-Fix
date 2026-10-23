@@ -373,9 +373,13 @@ def convert(f, protos, skip, imports, impnames):
     # a register a callee takes, declared as a local of this function (it is no parameter here): the decompiler
     # lets the callee have this function's own EAX, an uninitialized variable in C (0x547F10 passes 'in_eax' on
     # to 0x4AC7F0, 0x491F50 to 0x491CF0, which then faulted)
-    decl = code[code.find('{') + 1:].strip('\n').split('\n\n')[0]
-    if re.search(r'(?m)^\s+(?!return\b)[A-Za-z_][\w ]*?\**\s*\bin_(?:eax|ecx|edx|ebx|esi|edi)\s*;', decl):
-        return None, 'register input passed on, not a parameter'
+    # (unless its first use sets it at the top level of the body: then it is an ordinary local the decompiler named
+    # after the callee's parameter, 0x422160 'in_eax = ExceptionList;')
+    decl, rest = (re.split(r'\n[ \t]*\n', code[code.find('{') + 1:].strip('\n'), 1) + [''])[:2]
+    for m in re.finditer(r'(?m)^\s+(?!return\b)[A-Za-z_][\w ]*?\**\s*\b(in_(?:eax|ecx|edx|ebx|esi|edi))\s*;', decl):
+        first = re.search(r'(?m)^.*\b%s\b.*$' % m.group(1), rest)
+        if not first or not re.match(r'  %s = (?!.*\b%s\b)' % (m.group(1), m.group(1)), first.group(0)):
+            return None, 'register input passed on, not a parameter'
     # a call's return address as a value: the decompiler lost the stack depth and took the pushes of the calls for
     # arguments of a later one (0x475440 'uVar5 = 0x47552f' passed on to 0x475330 with a vector by value)
     rets_here = call_returns(a)
@@ -440,6 +444,15 @@ def convert(f, protos, skip, imports, impnames):
             return None, 'exception frame without a known handler'
         if catches(int(hs[0], 16)):
             return None, 'catches exceptions'
+    # the statements on the SEH chain go; a variable given its head and used elsewhere would be left unset (0x491F50
+    # passes 'in_eax = ExceptionList' on to 0x491CF0 when a branch does not set it): it reads fs:[0] itself
+    seh = r'\b(?:G_FFDFF000|unaff_FS_OFFSET|ExceptionList)\b'
+    for v in set(re.findall(r'(?m)^\s*(\w+)\s*=\s*(?:\([^()]*\)\s*)?(?:G_FFDFF000|unaff_FS_OFFSET|ExceptionList)\s*;', body)):
+        if any(re.search(r'\b%s\b' % v, st) and not re.search(seh, st) and not re.match(r'\s*#define', st) and
+               not re.match(r'\s*[A-Za-z_][\w ]*?[\s*]+%s\s*(?:\[\d+\])?\s*;\s*$' % v, st)
+               for st in re.findall(r'[^;{}]*[;{}]', body)):
+            body = re.sub(r'(?m)^(\s*%s\s*=\s*(?:\([^()]*\)\s*)?)(?:G_FFDFF000|unaff_FS_OFFSET|ExceptionList)(\s*;)' % v,
+                          r'\1GH_FS0\2', body)
     body = re.sub(r'\n[^\n;]*\b(?:G_FFDFF000|unaff_FS_OFFSET|ExceptionList)\b[^\n;]*;', '\n', body)
 
     # vftable of the function's own class
