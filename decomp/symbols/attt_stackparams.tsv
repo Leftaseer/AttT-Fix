@@ -2206,7 +2206,7 @@
 0044E7A0	1	exact	0	1	
 0044E830	1	exact	0	0	
 0044E8E0	1	exact	0	0	
-0044E970	7	exact	6	0	
+0044E970	8	exact	7	0	
 0044EA20	0	exact		0	
 0044F2E0	1	exact	0	0	
 0044FD50	0	exact		0	
@@ -3221,7 +3221,7 @@
 0047A5A0	1	exact	0	0	0:f
 0047A660	0	exact		0	
 0047A760	0	exact		0	
-0047A840	1	exact	0	0	
+0047A840	0	exact		0	
 0047A8E0	2	exact		0	
 0047A9A0	2	exact	1	0	
 0047AA40	1	exact		0	
