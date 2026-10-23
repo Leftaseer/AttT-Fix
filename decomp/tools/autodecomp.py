@@ -465,6 +465,10 @@ def convert(f, protos, skip, imports, impnames):
         body = re.sub(r'(?<![\w:.>])(vftable(?:_\w+)?)\b',
                       lambda m: m.group(1) if re.search(r'(?:\.|->)\s*$', body[max(0, m.start() - 40):m.start()])
                       else cls + '::' + m.group(1), body)
+    # the x87 control word as fnstcw stored it (the decompiler's in_FPUControlWord, never set: 0x58B200 returned it
+    # with the truncation bits for its caller's fldcw, garbage in C)
+    body = re.sub(r'(?m)^\s*\w+\s+in_FPUControlWord;\n', '', body)
+    body = re.sub(r'\bin_FPUControlWord\b', 'GH_FNSTCW', body)
     # the decompiler's NAN(x) tests x (math.h has NAN as the constant)
     body = re.sub(r'\bNAN\(', 'NAN_CHECK(', body)
     # addresses of stack slots below the frame: an object the decompiler declared nothing for ('&stack0xffffffdc' a
@@ -781,6 +785,10 @@ def main():
               '-fno-builtin', '-w', '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types',
               '-Wno-error=incompatible-function-pointer-types', '-Wno-error=int-to-pointer-cast',
               '-Wno-error=return-type'] + inc
+    # a variable read before anything set it is a value the decompiler lost (0x520380 passes three unset 'this'
+    # pointers on): the original read whatever a register held, C reads garbage of its own
+    cflags = [x for x in cflags if x != '-w'] + ['-Wno-everything', '-Werror=uninitialized',
+                                                 '-Werror=sometimes-uninitialized', '-Werror=conditional-uninitialized']
     pch = pre + '.pch'
     r = subprocess.run(['clang'] + cflags[:1] + ['-x', 'c-header', '-std=gnu11', '-fms-extensions', '-ffreestanding',
                         '-w'] + inc + [pre, '-o', pch], capture_output=True, text=True)

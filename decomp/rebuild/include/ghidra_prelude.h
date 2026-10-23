@@ -88,6 +88,8 @@ typedef void code;
 #define SBORROW1(a, b) ((((signed char)(a) ^ (signed char)(b)) & ((signed char)(a) ^ (signed char)((signed char)(a) - (signed char)(b)))) < 0)
 #define SBORROW2(a, b) ((((short)(a) ^ (short)(b)) & ((short)(a) ^ (short)((short)(a) - (short)(b)))) < 0)
 #define NAN_CHECK(x) ((x) != (x))
+/* the x87 control word (fnstcw), the decompiler's in_FPUControlWord */
+#define GH_FNSTCW ({ unsigned short gh_cw; __asm__ volatile("fnstcw %0" : "=m"(gh_cw)); gh_cw; })
 /* the head of the SEH chain, fs:[0] (generated code drops the function's own registration; a value read from it
  * stays: tools/autodecomp.py) */
 #define GH_FS0 ({ void *gh_fs0; __asm__ volatile("movl %%fs:0, %0" : "=r"(gh_fs0)); gh_fs0; })
