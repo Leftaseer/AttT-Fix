@@ -90,6 +90,7 @@ EOF
     py stackparams.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv" - "$O/${g}_icalls0.tsv"
     py importargs.py "$WORK/bin/$g.exe" "$SYMS/${g}_importargs.tsv"
     py cxximports.py "$WORK/bin/$g.exe" "$SYMS/${g}_cxximports.tsv"
+    py byvalue.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$O/${g}_icalls0.tsv" "$SYMS/${g}_byvalue.tsv"   # strings by value
   done
   # functions that hand on their caller's EAX (found by earlier exports: tools/eaxin.py update)
   [ -f "$SYMS/${g}_eaxin.tsv" ] && py eaxin.py apply "$SYMS/${g}_eaxin.tsv" "$O/${g}_regparams.tsv" "$SYMS/${g}_functions.tsv"
@@ -106,6 +107,7 @@ for g in attt valk; do
      -postScript FloatReturns.java "$SYMS/${g}_x87ret.tsv" \
      -postScript FixStackParams.java "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv" \
      -postScript SetReturns.java "$SYMS/${g}_retlive.tsv" \
+     -postScript ByValueParams.java "$SYMS/${g}_byvalue.tsv" \
      -postScript FpuIntrinsics.java \
      -postScript DecoratedImports.java "$SYMS/import_protos.tsv" "$SYMS/${g}_cxximports.tsv" \
      -postScript ThrowNoReturn.java \
