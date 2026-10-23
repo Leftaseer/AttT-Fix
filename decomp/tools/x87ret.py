@@ -58,7 +58,8 @@ FPU_ARGS = {'_CIsin': 1, '_CIcos': 1, '_CItan': 1, '_CIsqrt': 1, '_CIatan': 1, '
 DOUBLE_IMPORTS = {'floor', 'ceil', 'atof', 'strtod', 'wcstod', 'modf', 'ldexp', 'frexp', 'fabs', 'sqrt', 'pow',
                   'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'exp', 'log', 'log10', 'fmod', 'sinh',
                   'cosh', 'tanh', '_hypot', '_copysign', '_chgsign', '_logb', '_nextafter', '_scalb', 'difftime',
-                  '_atof_l', '_strtod_l', '_wtof'}
+                  '_atof_l', '_strtod_l', '_wtof',
+                  '_AIL_digital_master_volume_level@4'}     # (Miles: F32 in ST0; 0x4C13D0 hands it on)
 
 
 def import_at(a):
