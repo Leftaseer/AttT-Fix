@@ -549,14 +549,12 @@ def convert(f, protos, skip, imports, impnames):
     body = re.sub(r'\b([A-Za-z_]\w*)\._(\d+)_(\d+)_\b', piece, body)
     if bad:
         return None, 'piece of a variable'
-    # a float value stored to a piece keeps its bits ('v._4_4_ = fVar2 + fVar2' in 0x572170), not converted
-    def piece_store(m):
-        rhs = m.group(3)
-        if not any(re.search(r'\b%s\b' % re.escape(v), rhs) for v in fl) or \
-                re.match(r'\s*(?:BITCAST|\((?:u?int|undefined\d|longlong|ulonglong|short|ushort|char|byte|uint)\)|TRUNC|ROUND)', rhs):
-            return m.group(0)
-        return '%s = BITCAST(%s, ((%s)(%s)));' % (m.group(1), m.group(2), 'float' if m.group(2) == 'unsigned int' else 'double', rhs)
-    body = re.sub(r'(\(\*\((unsigned int|unsigned long long) \*\)\(\(char \*\)&\w+ \+ \d+\)\)) = ([^;]+);', piece_store, body)
+    # a value stored to a piece keeps its bits when it is a float ('v._4_4_ = fVar2 + fVar2' in 0x572170; 0x587D30
+    # 'v._0_4_ = *(float *)(this + 0x5c) + ...' placed the character window's text off screen): the compiler, which
+    # knows the type of the expression, picks (ghidra_prelude.h GH_BITS4/GH_BITS8)
+    body = re.sub(r'(\(\*\((unsigned int|unsigned long long) \*\)\(\(char \*\)&\w+ \+ \d+\)\)) = ([^;]+);',
+                  lambda m: '%s = %s(%s);' % (m.group(1), 'GH_BITS4' if m.group(2) == 'unsigned int' else 'GH_BITS8',
+                                              m.group(3)), body)
     # void * dereferenced: the decompiler did not know the type of the value (int or float), neither do we
     for t_, n_ in [(x.rsplit(' ', 1) + [''])[:2] for x in params]:
         n_ = n_.lstrip('*')

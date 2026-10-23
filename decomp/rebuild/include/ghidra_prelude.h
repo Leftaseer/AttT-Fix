@@ -101,6 +101,15 @@ static inline double gh_rint(double x) { double r; __asm__("frndint" : "=t"(r) :
 #define BITCAST(T, x) ({ __typeof__(x) gh_bc_v = (x); T gh_bc_r; \
     _Static_assert(sizeof gh_bc_v == sizeof gh_bc_r, "BITCAST of different sizes"); \
     __builtin_memcpy(&gh_bc_r, &gh_bc_v, sizeof gh_bc_r); gh_bc_r; })
+/* a value stored to a piece of a variable (v._4_4_ = x): the bits of a float, the value of anything else (the
+ * functions, not casts, keep the other branches valid for pointers) */
+static inline unsigned int gh_f2u4(float x) { unsigned int r; __builtin_memcpy(&r, &x, 4); return r; }
+static inline unsigned int gh_d2u4(double x) { float f = (float)x; unsigned int r; __builtin_memcpy(&r, &f, 4); return r; }
+static inline unsigned int gh_u4(unsigned int x) { return x; }
+static inline unsigned long long gh_d2u8(double x) { unsigned long long r; __builtin_memcpy(&r, &x, 8); return r; }
+static inline unsigned long long gh_u8(unsigned long long x) { return x; }
+#define GH_BITS4(x) _Generic((x), float: gh_f2u4, double: gh_d2u4, long double: gh_d2u4, default: gh_u4)(x)
+#define GH_BITS8(x) _Generic((x), float: gh_d2u8, double: gh_d2u8, long double: gh_d2u8, default: gh_u8)(x)
 #define FLOOR(x) __builtin_floor(x)
 #define CEIL(x) __builtin_ceil(x)
 #define POPCOUNT(x) __builtin_popcount(x)
