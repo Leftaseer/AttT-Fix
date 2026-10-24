@@ -352,8 +352,43 @@ def catches(handler):
             except Exception:
                 continue
             if magic in (0x19930520, 0x19930521, 0x19930522):
-                return pe.u32(fi + 12) != 0          # nTryBlocks
+                # try blocks whose every handler is catch (...) { clean up; throw; } (the rollback of the standard
+                # library's containers, 276 functions): without an exception the function never enters one, with
+                # one it goes on to the caller's handler either way; only the clean-up is lost
+                n_try, p_try = pe.u32(fi + 12), pe.u32(fi + 16)
+                for t in range(n_try):
+                    e = p_try + 20 * t
+                    for c in range(pe.u32(e + 12)):
+                        hd = pe.u32(e + 16) + 16 * c
+                        if pe.u32(hd + 4) != 0 or not rethrows(pe.u32(hd + 12)):
+                            return True
+                return False
     return True
+
+
+def rethrows(funclet):
+    """a catch funclet that throws again ('throw;': _CxxThrowException(0, 0)) before any ret or jmp"""
+    import capstone
+    pe = image[0]
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    throw = {a for a, (d, n) in pe.imports.items() if n == '_CxxThrowException'}
+    try:
+        code = pe.read(funclet, 0x200)
+    except Exception:
+        return False
+    for i in md.disasm(code, funclet):
+        if i.mnemonic == 'call':
+            t = i.op_str
+            m = re.match(r'dword ptr \[(0x[0-9a-f]+)\]$', t)
+            if m and int(m.group(1), 16) in throw:
+                return True
+            if re.match(r'0x[0-9a-f]+$', t):
+                b = pe.read(int(t, 16), 6)
+                if b[:2] == b'\xff\x25' and int.from_bytes(b[2:6], 'little') in throw:
+                    return True
+        if i.mnemonic in ('ret', 'jmp'):
+            return False
+    return False
 
 
 def convert(f, protos, skip, imports, impnames):
