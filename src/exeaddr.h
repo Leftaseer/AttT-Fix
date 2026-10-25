@@ -103,5 +103,5 @@ static const struct { DWORD o, v; } g_valkDeMap[] = {
 };
 // Valkyrie-only addresses used by the mod (stream refill fix), Russian build -> German build
 static const struct { DWORD v, d; } g_valkDeVV[] = {
-    { 0x6F1130, 0x6F1060 }, { 0x6F1300, 0x6F1230 }, { 0x6F1404, 0x6F1334 }, { 0x6F1414, 0x6F1344 }, { 0x6F1490, 0x6F1385 },
+    { 0x6F0600, 0x6F0530 }, { 0x6F1130, 0x6F1060 }, { 0x6F1300, 0x6F1230 }, { 0x6F1404, 0x6F1334 }, { 0x6F1414, 0x6F1344 }, { 0x6F1490, 0x6F1385 },
 };

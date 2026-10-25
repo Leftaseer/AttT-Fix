@@ -1,8 +1,17 @@
-﻿AttTFix 2.1.0 — technical update for Ascension to the Throne and Ascension to the Throne: Valkyrie
+﻿AttTFix 2.1.1 — technical update for Ascension to the Throne and Ascension to the Throne: Valkyrie
 ==================================================================================================
 
 An unofficial, non-commercial mod for the Steam version of the game. No game files are
 modified: the mod is a dinput8.dll that the game loads by itself (plus an optional dxvk folder).
+
+
+WHAT'S NEW IN 2.1.1
+-------------------
+  * Valkyrie: fixed a crash at start (error at address 48030F), most often when the intro
+    videos play. The game decodes sound on two threads at once (the main thread opens a
+    sound while the streaming thread decodes another one) and the decoder keeps its state
+    in shared memory. Now the sound is decoded by one thread at a time.
+    [Game] DecodeLock=0 switches it off.
 
 
 WHAT'S NEW IN 2.1.0
@@ -349,6 +358,7 @@ changes apply on the next start):
            AmbientRate=1       1 = random ambient sounds, butterflies and water ripples
                                as often as intended at any FPS
            StreamFix=1         Valkyrie: 1 = music and ambient sounds without repeats / breaks
+           DecodeLock=1        Valkyrie: 1 = sound decoded by one thread at a time (crash at start)
 
 
 DXVK (OPTIONAL)

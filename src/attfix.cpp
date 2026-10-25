@@ -12,7 +12,7 @@
 #include <dwmapi.h>
 #include <tlhelp32.h>
 #include <vector>
-#define ATTFIX_VERSION "2.1.0"
+#define ATTFIX_VERSION "2.1.1"
 
 // ---------------------------------------------------------------- exe profiles
 // The mod is written against the AttT exe (Steam build 2007-12-11, TimeDateStamp 475EABAF). The add-on
@@ -2699,8 +2699,36 @@ static void __fastcall h_StreamStop(BYTE* o, void* edx) {
     if (o[0x7C]) LOG("stream stop %p \"%s\" written=%lu (from %p)", o, StreamName(o), *(DWORD*)(o + 0x80), __builtin_return_address(0));
     o_StreamStop(o, edx);
 }
+// The Ogg decoder of the sound streams (0x6F0600, thiscall(dst, bytes), ret 8) keeps its state in globals (0xA86CDC,
+// 0xA86CE0, 0xA86CF0, 0x878632). The streaming thread decodes under the manager lock (0x6F1980), but opening a stream
+// (0x6F1130: the first 4 s, e.g. the sound of a video or the menu music) and loading a sound (0x6F0D0B) decode on the
+// main thread without it. Two decodes at once spoil that state: crash at 0x48030F (Vorbis reads a NULL packet), seen
+// at the start of the 1CLogo video. The game hid it on one core; with the main thread and the streaming thread on one
+// core (KeepGameThreadsTogether) the streaming thread can still wake in the middle of a decode. One lock around it.
+static CRITICAL_SECTION g_decodeCS;
+typedef int (__fastcall *StreamDecode_t)(void*, void*, void*, int);
+static StreamDecode_t o_StreamDecode = nullptr;
+static int __fastcall h_StreamDecode(void* o, void* edx, void* dst, int bytes) {
+    EnterCriticalSection(&g_decodeCS);
+    int r = o_StreamDecode(o, edx, dst, bytes);
+    LeaveCriticalSection(&g_decodeCS);
+    return r;
+}
+static void InstallDecodeLock(const char* path) {
+    char tmp[16];
+    if (!GetPrivateProfileStringA("Game", "DecodeLock", "", tmp, sizeof tmp, path))
+        WritePrivateProfileStringA("Game", "DecodeLock", "1  ; Valkyrie: 1 = sound decoding one thread at a time (crash at 0x48030F at start), 0 = original", path);
+    if (!GetPrivateProfileIntA("Game", "DecodeLock", 1, path)) { LOG("decode lock: off ([Game] DecodeLock=0)"); return; }
+    static const BYTE pd[5] = { 0x51, 0x53, 0x56, 0x8B, 0xF1 };   // push ecx; push ebx; push esi; mov esi, ecx
+    InitializeCriticalSectionAndSpinCount(&g_decodeCS, 4000);
+    DWORD at = VV(0x006F0600);
+    o_StreamDecode = at ? (StreamDecode_t)Detour((BYTE*)at, pd, 5, (void*)h_StreamDecode) : nullptr;
+    LOG(o_StreamDecode ? "decode lock: sound stream decoding serialized (main thread / streaming thread)"
+                       : "decode lock: unexpected bytes, not applied");
+}
 static void InstallStreamFix(const char* path) {
     char tmp[16];
+    InstallDecodeLock(path);
     if (!GetPrivateProfileStringA("Game", "StreamFix", "", tmp, sizeof tmp, path))
         WritePrivateProfileStringA("Game", "StreamFix", "1  ; Valkyrie: 1 = music and ambient loops no longer repeat fragments / break off, 0 = original", path);
     if (!GetPrivateProfileStringA("Perf", "StreamLog", "", tmp, sizeof tmp, path))
