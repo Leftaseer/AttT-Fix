@@ -98,6 +98,9 @@ def split_params(text):
     return sum(slots(p_) for p_ in parts)
 
 
+STACK_ONLY = set()      # DECOMP_STACK: replacements taking every argument on the stack (decomp.h)
+
+
 def scan_sources(files, cflags):
     """DECOMP annotations: (attt_addr, qualified name, param count, is_member) and ORIG_* prototypes, from the
     preprocessed sources (so #if DECOMP_GAME_ATTT / DECOMP_GAME_VALK is honoured)."""
@@ -109,6 +112,8 @@ def scan_sources(files, cflags):
         for m in re.finditer(r'__decomp_marker__\(\s*([0-9A-Fa-f]{8})\s*\)\s*([^{;]*?)\b([A-Za-z_][\w:~<>]*)\s*(\((?:[^()]|\([^()]*\))*\))', src):
             addr, name, params = int(m.group(1), 16), m.group(3), m.group(4)
             decomp.append((addr, name, split_params(params), '::' in name, fn))
+            if '__decomp_stack__' in m.group(2):
+                STACK_ONLY.add(addr)
         for m in re.finditer(r'(__cdecl|__stdcall|__fastcall|__thiscall)\s+sub_([0-9A-Fa-f]{8})\s*(\((?:[^()]|\([^()]*\))*\))', src):
             protos[int(m.group(2), 16)] = (conv_of[m.group(1)], split_params(m.group(3)))
     return decomp, protos
@@ -262,8 +267,21 @@ def main():
     decomp, protos = scan_sources(files, cflags)
     # compile
     objs = []
+    lua_dir = os.path.join(HERE, 'src', 'lua51')
     for fn in files:
         obj = os.path.join(work, os.path.relpath(fn, os.path.join(HERE, 'src')).replace(os.sep, '_') + '.obj')
+        if os.path.dirname(fn) == lua_dir:
+            # Lua 5.1.2 as the game built it: C++ (an error is a C++ exception through the game's frames) and
+            # x87 arithmetic, whose precision the game sets to single (src/lua51/decomp_entries.c)
+            fl = [x for x in cflags if x not in ('-march=pentium4', '-msse2')]
+            # (the runtime is MSVCR80: time_t is 64 bits, os.time calls _time64 as the original does)
+            run(['clang'] + fl + ['-march=pentium-mmx', '-mfpmath=387', '-x', 'c++', '-std=c++17', '-fexceptions',
+                                  '-fcxx-exceptions', '-w', '-D__MSVCRT_VERSION__=0x0800', '-D__USE_MINGW_ANSI_STDIO=0',
+                                  '-D__MINGW_USE_VC2005_COMPAT',
+                                  '-include', os.path.join(lua_dir, 'decomp_crt.h'),
+                                  '-c', fn, '-o', obj])
+            objs.append(obj)
+            continue
         extra = ['-std=c++17', '-fno-exceptions', '-fno-rtti'] if fn.endswith('.cpp') else ['-std=c11']
         run(['clang'] + cflags + extra + ['-c', fn, '-o', obj])
         objs.append(obj)
@@ -363,6 +381,8 @@ def main():
                      'symbols/attt2valk.tsv, or exclude the function with #if DECOMP_GAME_ATTT'
                      % (fn, name, addr, fhow.get(addr)))
         size, regs, retpop, clob = funcs.get(ga, (0, [], 0, {'EAX', 'ECX', 'EDX'}))
+        if addr in STACK_ONLY:
+            regs = []
         preserve = {'EAX', 'ECX', 'EDX'} - clob      # LTCG callers may use a register argument again after the call
         conv = forced_conv or symbol_conv(sym, member)
         if conv == 'thiscall':
@@ -476,6 +496,8 @@ def main():
             n = s_[6:]
         elif re.match(r'^_\w+@\d+$', s_):
             n = s_                         # stdcall call through the import thunk
+        elif re.match(r'^_[A-Za-z_]\w*$', s_) and (s_[1:] in have or s_[1:] in extra_map):
+            n = s_                         # a C runtime function called directly (the Lua sources: strcmp)
         else:
             continue
         if not n.startswith('?'):

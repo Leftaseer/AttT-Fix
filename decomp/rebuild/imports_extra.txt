@@ -25,3 +25,12 @@ CloseHandle@4 KERNEL32.dll
 lstrcmpiA@8 KERNEL32.dll
 lstrcmpA@8 KERNEL32.dll
 CreateThread@24 KERNEL32.dll
+fputs MSVCR80.dll
+memcmp MSVCR80.dll
+strcpy MSVCR80.dll
+strcat MSVCR80.dll
+DuplicateHandle@28 KERNEL32.dll
+SuspendThread@4 KERNEL32.dll
+ResumeThread@4 KERNEL32.dll
+GetThreadContext@8 KERNEL32.dll
+GetCurrentThread@0 KERNEL32.dll

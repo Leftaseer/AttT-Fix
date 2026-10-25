@@ -26,9 +26,14 @@
 
 #ifdef DECOMP_SCAN
 #define DECOMP(addr) __decomp_marker__(addr)
+#define DECOMP_STACK(addr) __decomp_marker__(addr) __decomp_stack__
 #else
 #define DECOMP(addr)
+#define DECOMP_STACK(addr)
 #endif
+/* DECOMP_STACK: the same for a function its callers call with all arguments on the stack, where the analysis
+ * found register inputs that only pass through to internals with conventions of their own (/LTCG: lua_tolstring
+ * hands the caller's EBX on to luaV_tostring); the register list is ignored */
 /* code that differs between the games: #if DECOMP_GAME_ATTT / #if DECOMP_GAME_VALK (set by build.py) */
 #ifndef DECOMP_GAME_ATTT
 #define DECOMP_GAME_ATTT 0

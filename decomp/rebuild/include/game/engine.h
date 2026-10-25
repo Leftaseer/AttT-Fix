@@ -86,6 +86,7 @@ void TestInput(CInput *input);
 void TestLua();                              /* engine.cpp: Lua of the test input, at the end of a frame */
 #endif
 void StartICallTrace();                      /* icalltrace.cpp (DECOMP_TRACE_ICALLS): indirect callee pops */
+void StartProfiler();                        /* profile.cpp (DECOMP_PROFILE): where the main thread spends its time */
 
 struct CCursor {                             /* CSingleton<CCursor> (0x284 bytes) */
     void **vftable;

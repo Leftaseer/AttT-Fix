@@ -123,6 +123,14 @@ for act in [s.strip() for s in script.split(';') if s.strip()]:
     elif q[0] == 'shot':
         subprocess.run(['import', '-window', 'root', os.path.join(SHOTS, '%s_%s.png' % (name, q[1]))], env=env,
                        stderr=subprocess.DEVNULL, timeout=30)
+    elif q[0] == 'bt':                      # the stacks of all the game's threads (a hang) appended to $WORK/game/NAME/bt.txt
+        r = subprocess.run(['winedbg'], input='info process\nquit\n', env=env, capture_output=True, text=True, timeout=60)
+        pid = next((l.split()[0] for l in r.stdout.splitlines() if 'ATThrone' in l), None)
+        if pid:
+            r = subprocess.run(['winedbg'], input='attach 0x%s\nbt all\ndetach\nquit\n' % pid,
+                               env=env, capture_output=True, text=True, errors='replace', timeout=120)
+            open(os.path.join(D, 'bt.txt'), 'a').write(r.stdout + r.stderr)
+        print('bt', pid, flush=True)
 alive = game.poll() is None
 game.kill()
 try:
