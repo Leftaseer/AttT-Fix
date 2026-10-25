@@ -39,7 +39,17 @@ typedef void code;
 
 /* CONCATxy(a, b): a (x bytes) in the high part, b (y bytes) in the low part */
 #define GH_MASK(n) ((n) >= 8 ? ~0ULL : ((1ULL << ((n) * 8)) - 1))
-#define GH_CONCAT(x, y, a, b) ((((unsigned long long)(a) & GH_MASK(x)) << ((y) * 8)) | ((unsigned long long)(b) & GH_MASK(y)))
+/* (a float operand gives its bits, as the register or stack slot held them: 0x42DEE0 passes a float pair by value
+ * as CONCAT44(uVar1, fStack_8)) */
+static inline unsigned long long gh_fbits(const void *p, unsigned n)
+{
+    if (n == 4) { unsigned int r; __builtin_memcpy(&r, p, 4); return r; }
+    double d = n == 8 ? *(const double *)p : (double)*(const long double *)p;
+    unsigned long long r; __builtin_memcpy(&r, &d, 8); return r;
+}
+#define GH_U(x) ({ __typeof__(x) gh_u_v = (x); \
+    __builtin_classify_type(gh_u_v) == 8 ? gh_fbits(&gh_u_v, sizeof gh_u_v) : (unsigned long long)gh_u_v; })
+#define GH_CONCAT(x, y, a, b) (((GH_U(a) & GH_MASK(x)) << ((y) * 8)) | (GH_U(b) & GH_MASK(y)))
 #define CONCAT11(a, b) ((unsigned short)GH_CONCAT(1, 1, a, b))
 #define CONCAT12(a, b) ((unsigned int)GH_CONCAT(1, 2, a, b))
 #define CONCAT13(a, b) ((unsigned int)GH_CONCAT(1, 3, a, b))
@@ -59,7 +69,7 @@ typedef void code;
 #define CONCAT62(a, b) GH_CONCAT(6, 2, a, b)
 #define CONCAT71(a, b) GH_CONCAT(7, 1, a, b)
 /* SUBxy(v, off): y bytes of v starting at byte off */
-#define GH_SUB(v, off, y) ((unsigned long long)(v) >> ((off) * 8) & GH_MASK(y))
+#define GH_SUB(v, off, y) (GH_U(v) >> ((off) * 8) & GH_MASK(y))
 #define SUB21(v, o) ((unsigned char)GH_SUB(v, o, 1))
 #define SUB41(v, o) ((unsigned char)GH_SUB(v, o, 1))
 #define SUB42(v, o) ((unsigned short)GH_SUB(v, o, 2))

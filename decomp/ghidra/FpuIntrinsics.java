@@ -5,9 +5,10 @@
 // ST0, or two in ST1 and ST0 (pow(x, y): x in ST1), the result in ST0.  tools/autodecomp.py calls them through
 // helpers that put the arguments there (rebuild/rt_support.c).
 // Also the runtime's _ftol2_sse / _ftol2 (float to integer of ST0, found by their code): x in ST0, the result in
-// EAX or EDX:EAX.
+// EAX or EDX:EAX, and calls of them replaced by that p-code (a call fixup) which pops the FPU stack as they do.
 // Args: none.  Prints the thunk addresses as 'FPU <address> <name> <arguments>', the conversions as 'FTOL'.
 import ghidra.app.script.GhidraScript;
+import ghidra.program.database.SpecExtension;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.data.*;
 import ghidra.program.model.lang.Register;
@@ -79,6 +80,7 @@ public class FpuIntrinsics extends GhidraScript {
         // EAX, _ftol2 EDX:EAX.  The decompiler had made _ftol2_sse a __fastcall of ECX and EDX, and its 221 callers
         // passed registers they had not set.
         int ftol = 0;
+        SpecExtension fixups = null;
         Register st0 = currentProgram.getRegister("ST0"), eax = currentProgram.getRegister("EAX"),
                  edx = currentProgram.getRegister("EDX");
         for (Function f : currentProgram.getFunctionManager().getFunctions(true)) {
@@ -92,6 +94,20 @@ public class FpuIntrinsics extends GhidraScript {
                 ? new ReturnParameterImpl(IntegerDataType.dataType, new VariableStorage(currentProgram, eax), currentProgram)
                 : new ReturnParameterImpl(LongLongDataType.dataType, new VariableStorage(currentProgram, edx, eax), currentProgram);
             f.updateFunction("__cdecl", ret, ps, Function.FunctionUpdateType.CUSTOM_STORAGE, true, SourceType.USER_DEFINED);
+            // and a call fixup: the conversion pops ST0, so what the caller keeps below it moves up.  A call keeps
+            // nothing on the FPU stack for the decompiler: 0x43D440 divides two values by one constant loaded once,
+            // and the second division became '/ extraout_ST0'
+            if (fixups == null) {
+                SpecExtension ext = new SpecExtension(currentProgram);
+                for (String[] k : new String[][] { { "int", "EAX = trunc(ST0);" },
+                                                   { "long long", "tmp:8 = trunc(ST0); EAX = tmp:4; EDX = tmp(4);" } })
+                    ext.addReplaceCompilerSpecExtension("<callfixup name=\"decomp_ftol_" + k[0].replace(' ', '_') +
+                        "\"><pcode><body><![CDATA[\n" + k[1] +
+                        "\nST0 = ST1; ST1 = ST2; ST2 = ST3; ST3 = ST4; ST4 = ST5; ST5 = ST6; ST6 = ST7;\n]]></body></pcode></callfixup>",
+                        monitor);
+                fixups = ext;
+            }
+            f.setCallFixup("decomp_ftol_" + kind.replace(' ', '_'));
             println(String.format("FTOL %08X %s", f.getEntryPoint().getOffset(), kind));
             ftol++;
         }

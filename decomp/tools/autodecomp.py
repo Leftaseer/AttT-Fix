@@ -25,7 +25,8 @@ BLOCK = [
     # good; above the frame it is a parameter the prototype lacks)
     (r'\bin_stack_(?!ff)\w+', 'stack outside the frame'), (r'\bin_[A-Z]{2,4}\b', 'register input'),
     (r'\bin_ST\d\b', 'x87 register input (a value left on the FPU stack the decompiler lost track of)'),
-    (r'WARNING: (?!Globals starting|Removing unreachable|Load size|Type propagation|Subroutine does not return)', 'decompiler warning'),
+    (r'WARNING: (?!Globals starting|Removing unreachable|Load size|Type propagation|Subroutine does not return|'
+     r'Function: \w+ replaced with injection: decomp_)', 'decompiler warning'),
     (r'UNRESOLVED', 'unresolved name'), (r'halt_baddata|halt_unimplemented|software_\w+\(|swi\(', 'bad instruction'),
     (r'\bLOCK\(\)|\bUNLOCK\(\)', 'locked instruction'), (r'_vbase_destructor|__alloca_probe', 'compiler helper'),
     (r'\bin_FS_OFFSET\b', 'TEB access'), (r'\bxRam|\bunique0x', 'unmapped storage'),
@@ -488,7 +489,9 @@ def convert(f, protos, skip, imports, impnames):
     # (or as unaff_FS_OFFSET, a pointer variable, where the decompiler did not see the segment, or as the TEB's
     # ExceptionList)
     if 'G_FFDFF000' in body or re.search(r'\b(?:unaff_FS_OFFSET|ExceptionList)\b', body):
-        hs = re.findall(r'\b(?:pu|pc|p)\w*Stack_\w+\s*=\s*&?\s*(?:&?(?:LAB|FUN)_|\(\([\w ]+(?:\s*\*)+\)G_)([0-9a-fA-F]{8})\b', body)
+        # (also through a cast: 'ppuStack_8 = (undefined1 **)&((void *)G_005E6394);', 0x432700)
+        hs = re.findall(r'\b(?:pu|pc|p)\w*Stack_\w+\s*=\s*(?:\([\w ]+(?:\s*\*)+\)\s*)?&?\s*'
+                        r'(?:&?(?:LAB|FUN)_|\(\([\w ]+(?:\s*\*)+\)G_)([0-9a-fA-F]{8})\b', body)
         if len(hs) != 1:
             return None, 'exception frame without a known handler'
         if catches(int(hs[0], 16)):
@@ -502,7 +505,14 @@ def convert(f, protos, skip, imports, impnames):
                for st in re.findall(r'[^;{}]*[;{}]', body)):
             body = re.sub(r'(?m)^(\s*%s\s*=\s*(?:\([^()]*\)\s*)?)(?:G_FFDFF000|unaff_FS_OFFSET|ExceptionList)(\s*;)' % v,
                           r'\1GH_FS0\2', body)
-    body = re.sub(r'\n[^\n;]*\b(?:G_FFDFF000|unaff_FS_OFFSET|ExceptionList)\b[^\n;]*;', '\n', body)
+    # then the chain's own statements go: its writes (also inside expressions, '(G_FFDFF000 = &local_c, cond)':
+    # 0x47DEB0) and the saves of the head in variables used nowhere else; whatever else reads it reads fs:[0]
+    # itself (the upper bytes of a bool result left from loading it: 0x438D70)
+    fs = r'(?:G_FFDFF000|unaff_FS_OFFSET|ExceptionList)'
+    body = re.sub(r'\b%s\s*=\s*&?\s*\w+\s*,\s*' % fs, '', body)
+    body = re.sub(r'(?m)^[ \t]*%s\s*=\s*[^;\n]*;[ \t]*\n' % fs, '', body)
+    body = re.sub(r'(?m)^[ \t]*\w+\s*=\s*(?:\([^()]*\)\s*)?%s\s*;[ \t]*\n' % fs, '', body)
+    body = re.sub(r'\b%s\b(?!\s*=[^=])' % fs, 'GH_FS0', body)
 
     # vftable of the function's own class
     own = symname.get(a, '')
@@ -635,6 +645,8 @@ def convert(f, protos, skip, imports, impnames):
         body = re.sub(r'&?(?:\b[A-Za-z_][\w<>,]*(?:<[^;{}()]*?>)?::)+(?:vftable(?:_\w+)?|vbtable\w*|`[^`]*\'|\w+_meta_ptr)', sym_ref, body)
     except KeyError as e:
         return None, 'unknown symbol %s' % e
+    # a small constant the decompiler took for an address ('&((void *)G_00000004)' passed on: 0x431100)
+    body = re.sub(r'&\s*\(\((\w+(?:\s*\*)+)\)\s*G_(0000[0-9A-F]{4})\)', lambda m: '((%s)0x%X)' % (m.group(1), int(m.group(2), 16)), body)
     for g in re.findall(r'\bG_([0-9A-F]{8})\b', body):
         ad = int(g, 16)
         if not (0x401000 <= ad < 0x1000000):        # (the headers at 400000 are no section)

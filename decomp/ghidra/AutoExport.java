@@ -106,11 +106,13 @@ public class AutoExport extends GhidraScript {
             // part of a value (or two put together) of the other kind: 0x525070 stored the low half of the int64 of
             // a fistp in a float variable and passed it on as '(float)x', a conversion in C (a particle count read as
             // a float's bits: bad_alloc)
+            // (a float put into an integer, CONCAT44(uVar1, fStack_8), or taken out of one, SUB84(dVar, 4), keeps its
+            // bits: ghidra_prelude.h's CONCAT and SUB read a float operand's bits; a float made of pieces does not)
             if (c == PcodeOp.SUBPIECE || c == PcodeOp.PIECE) {
                 DataType ot = htype(out);
                 for (int k = 0; k < (c == PcodeOp.PIECE ? 2 : 1); k++) {
                     DataType pt = htype(op.getInput(k));
-                    if (ot != null && pt != null && isFloat(ot) != isFloat(pt)) return "piece at " + op.getSeqnum().getTarget();
+                    if (ot != null && pt != null && isFloat(ot) && !isFloat(pt)) return "piece at " + op.getSeqnum().getTarget();
                 }
             }
             // (not INDIRECT: a value a call may have changed, nothing the C text moves; 0x4EA940's float field

@@ -633,9 +633,9 @@ if len(sys.argv) > 5:
 # the slot must be one of that class's own (an offset past its vftable belongs to a derived class: a sibling may
 # use it for another method).
 rt_group, rt_len, func_class = {}, {}, {}
+vt_sub = []                     # (functions, classes of the subobject the vftable is for)
 if len(sys.argv) > 7:
     import json
-    vt_sub = []                 # (functions, classes of the subobject the vftable is for)
     for c in json.load(open(sys.argv[7])):
         for v in c['vtables']:
             sub = {b['name'] for b in c['bases'] if b['mdisp'] == v['offset'] and b['pdisp'] == -1}
@@ -797,7 +797,8 @@ def infer_direct_pops():
     """bytes popped by functions with no ret of their own to tell (thunks jumping on through a vftable: 0x4205C0
     'mov eax, [ecx+4]; mov eax, [eax+4]; add ecx, 4; jmp eax') from the ESP balance of their callers: the depth
     before a call followed from the entry, the path after it to a ret.  Every caller that tells must agree, and two
-    must tell (one for a jump thunk); written into column 4 of functions.tsv"""
+    must tell (one for a jump thunk).  A virtual one also from the other implementations of its slot.  Written into
+    column 4 of functions.tsv"""
     found = {}
     for _ in range(4):
         votes = collections.defaultdict(list)
@@ -822,6 +823,15 @@ def infer_direct_pops():
                     p = -(d[i.address] + t.pop())
                     votes[i.operands[0].imm].append(p if 0 <= p <= min(64, -d[i.address]) and p % 4 == 0 else None)
         new = {}
+        # a virtual function: what the other implementations of its slot in the classes of its vftables pop
+        for fl, sub in vt_sub:
+            for k, f in enumerate(fl):
+                if pops.get(f, 0) is not None or f in new:
+                    continue
+                seen = {pops.get(g[k]) for t in sub for g in rt_group.get(t, ()) if k < len(g)}
+                seen.discard(None)
+                if len(seen) == 1 and all(k < rt_len.get(t, 0) for t in sub if t in rt_len):
+                    new[f] = seen.pop()
         for f, v in votes.items():
             last = None
             for j in md.disasm(pe.read(f, min(64, sizes[f])), f):
