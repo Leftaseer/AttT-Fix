@@ -32,6 +32,7 @@ def main():
     ap.add_argument('--syms'); ap.add_argument('--replace')
     ap.add_argument('--toggle', action='store_true', help='jmps through slots that rebuild/toggle.c can switch off '
                     'at start-up (decomp_toggle_table)')
+    ap.add_argument('--always-on', help='file of addresses (hex, one a line) --toggle leaves plainly replaced')
     a = ap.parse_args()
     pe = pefile.PE(a.exe)
     base = pe.OPTIONAL_HEADER.ImageBase
@@ -153,6 +154,7 @@ def main():
         tab, trel = bytearray(struct.pack('<I', len(repl))), []
         slots, lrel = bytearray(), []
         items = sorted(repl.items())
+        always_on = {int(x, 16) for x in open(a.always_on).read().split()} if a.always_on else set()
         plain = {}
         n_tr = 0
         for k, (va, newname) in enumerate(items):
@@ -192,7 +194,7 @@ def main():
                             trr.append((len(tr) + p_, sy, IMAGE_REL_I386_DIR32))
                     tr += b
                 cover += i.size
-            if cover < 5:
+            if cover < 5 or va in always_on:
                 ok = False
             if not ok:
                 plain[va] = newname

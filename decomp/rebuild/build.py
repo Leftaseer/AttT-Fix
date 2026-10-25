@@ -99,6 +99,9 @@ def split_params(text):
 
 
 STACK_ONLY = set()      # DECOMP_STACK: replacements taking every argument on the stack (decomp.h)
+# replacements a --toggle build never switches off: the entries of the Lua library, whose original code does not work
+# on the state the new one made
+ALWAYS_ON = set()
 
 
 def scan_sources(files, cflags):
@@ -114,6 +117,8 @@ def scan_sources(files, cflags):
             decomp.append((addr, name, split_params(params), '::' in name, fn))
             if '__decomp_stack__' in m.group(2):
                 STACK_ONLY.add(addr)
+            if os.path.basename(os.path.dirname(fn)) == 'lua51':
+                ALWAYS_ON.add(addr)
         for m in re.finditer(r'(__cdecl|__stdcall|__fastcall|__thiscall)\s+sub_([0-9A-Fa-f]{8})\s*(\((?:[^()]|\([^()]*\))*\))', src):
             protos[int(m.group(2), 16)] = (conv_of[m.group(1)], split_params(m.group(3)))
     return decomp, protos
@@ -473,9 +478,11 @@ def main():
         for ga, s in repl:
             f.write('%08X %s\n' % (ga, s[1:] if s.startswith('_') else s))
 
+    with open(os.path.join(work, 'always_on.txt'), 'w') as f:
+        f.write(''.join('%08X\n' % x for x in sorted(ALWAYS_ON)))
     run([sys.executable, '-I', os.path.join(TOOLS, 'exe2obj.py'), a.exe, work,
          '--syms', os.path.join(work, 'syms.txt'), '--replace', os.path.join(work, 'replace.txt')] +
-        (['--toggle'] if a.toggle else []))
+        (['--toggle', '--always-on', os.path.join(work, 'always_on.txt')] if a.toggle else []))
     # imports the new code needs and the original exe does not use
     have = {}
     for d in glob.glob(os.path.join(work, 'imports', '*.def')):

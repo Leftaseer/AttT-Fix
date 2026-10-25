@@ -18,7 +18,13 @@ For each 'call reg' / 'call [mem]' (not an import slot) inside a function:
 
 usage: icalls.py EXE symbols/GAME_functions.tsv OUT.tsv [AUTO.jsonl.protos (conventions of imports)]
                  [symbols/GAME.sym (vftables: the pop of a virtual call the balance leaves open)]
-                 [symbols/GAME_icall_pops.tsv (pops measured in the running game, rebuild/src/engine/icalltrace.cpp)]"""
+                 [symbols/GAME_icall_pops.tsv (pops measured in the running game, rebuild/src/engine/icalltrace.cpp)]
+                 [out/GAME_rtti.json (rtti.py: classes and their vftables, for virtual calls on this)]
+Also gives functions without a ret of their own their pop from their callers (column 4 of functions.tsv, in place).
+Where the balance leaves several pops open, guesses checked against the whole function: each callee pops what
+brings ESP back to the frame depth, or what was pushed since the call before it; exception-state writes tell the
+depth after a call.  Checked against the pops measured in the game (symbols/GAME_icall_pops.tsv, left out): 784 of
+them found, none wrong."""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
@@ -143,6 +149,11 @@ def depths(code, start, known, check=None):
                 continue
             elif i.mnemonic == 'pop' and i.op_str == 'ebp':
                 ebp = None
+            elif i.mnemonic == 'and' and i.op_str.startswith('esp, ') and ebp is not None:
+                # 'and esp, -8' aligning an EBP frame: what follows is counted from the aligned ESP, the epilogue's
+                # 'mov esp, ebp' goes back (0x428090)
+                p = i.address + i.size
+                continue
             elif ebp is not None and i.operands and i.operands[0].type == x86.X86_OP_REG and \
                     i.operands[0].reg == x86.X86_REG_EBP and i.mnemonic not in ('push', 'cmp', 'test'):
                 ebp = None                      # EBP written otherwise
@@ -225,7 +236,19 @@ def predecessors(ins, code):
     return preds
 
 
-def pushes_since_call(ins, k, preds):
+def register_saves(ins):
+    """pushes of EBX/EBP/ESI/EDI not written before them in the function: saves of the caller's values, also in the
+    middle of a function (0x477197's 'push ebx' before the code that uses EBX), no arguments"""
+    written, saves = set(), set()
+    for i in ins:
+        if i.mnemonic == 'push' and i.op_str in ('ebx', 'ebp', 'esi', 'edi') and i.op_str not in written:
+            saves.add(i.address)
+        elif i.operands and i.operands[0].type == x86.X86_OP_REG and i.mnemonic not in ('push', 'pop', 'cmp', 'test'):
+            written.add(i.reg_name(i.operands[0].reg))
+    return saves
+
+
+def pushes_since_call(ins, k, preds, saves=()):
     """dwords pushed (or made room for with sub esp) between the last call (or jump, ret, join of paths) and the
     call at ins[k], whatever else lies between (x87 code between the pushes of the arguments: 0x4E17FA); None when
     the walk reaches the function's start (its own pushes are saves) or ESP changes otherwise"""
@@ -234,7 +257,7 @@ def pushes_since_call(ins, k, preds):
         i = ins[j]
         m = i.mnemonic
         if m == 'push':
-            n += 1
+            n += i.address not in saves
         elif m == 'call':
             # a call on an object on the stack ('mov ecx, esp', 'lea ecx, [esp+N]' before it) may build an argument
             # of this one in place: 0x48BA70 takes a std::string by value, copy-constructed at ESP
@@ -317,7 +340,124 @@ def padding(i):
 exact = set()       # the calls callee_pops solved from a single path to a ret (not the frame-depth guess)
 
 
-def callee_pops(code, start, calls, cleanup, fixed=None):
+def seh_frame(code, start):
+    """the prologue of MSVC's exception frame on ESP: push -1; push HANDLER; mov eax, fs:[0]"""
+    i = code.get(start)
+    if not i or i.mnemonic != 'push' or i.operands[0].type != x86.X86_OP_IMM or i.operands[0].imm & 0xFFFFFFFF != 0xFFFFFFFF:
+        return False
+    j = code.get(start + i.size)
+    if not j or j.mnemonic != 'push' or j.operands[0].type != x86.X86_OP_IMM:
+        return False
+    k = code.get(j.address + j.size)
+    return bool(k) and k.mnemonic == 'mov' and 'fs:[0]' in k.op_str
+
+
+def state_store(i):
+    """N of 'mov byte/dword ptr [esp+N], imm' with a value an exception state can have, else None"""
+    if i.mnemonic != 'mov' or len(i.operands) != 2 or i.operands[0].type != x86.X86_OP_MEM or \
+            i.operands[1].type != x86.X86_OP_IMM:
+        return None
+    m = i.operands[0].mem
+    if m.base != ESP or m.index != 0 or i.operands[0].size not in (1, 4):
+        return None
+    v = i.operands[1].imm & 0xFFFFFFFF
+    if i.operands[0].size == 4 and not (v < 0x100 or v == 0xFFFFFFFF):
+        return None
+    return m.disp
+
+
+def state_write_depth(code, p, known, limit=60):
+    """depth right after a call at p from the first exception-state write on the straight path from it (ESP
+    changes on the way all known), None when there is none before a branch target is left or something unknown"""
+    acc = 0
+    for _ in range(limit):
+        i = code.get(p)
+        if i is None or i.mnemonic.startswith('ret') or i.mnemonic in ('int3', 'hlt'):
+            return None
+        n = state_store(i)
+        if n is not None:
+            return -4 - n - acc
+        if i.mnemonic == 'mov' and i.op_str == 'ebp, esp':
+            return None
+        e = effect(i, code, known)
+        if e is STOP:
+            return None
+        acc += e
+        if i.mnemonic == 'jmp':
+            if i.operands[0].type == x86.X86_OP_IMM and i.operands[0].imm in code:
+                p = i.operands[0].imm
+                continue
+            return None
+        p = i.address + i.size
+    return None
+
+
+def state_ok(code, d, a):
+    """a dword write of -1 to [esp+N] (leaving every try block: the state's commonest write) lands on the state, and
+    nothing takes the state's address: 'lea edx, [esp+0x44]' there was the function's own parameter, reused for a
+    result, and the write after it into the same slot no state (0x4CAA48 pops 28, not 20)"""
+    i = code[a]
+    if i.mnemonic == 'lea' and i.operands[1].mem.base == ESP and i.operands[1].mem.index == 0:
+        return d[a] + i.operands[1].mem.disp != -4
+    n = state_store(i)
+    return n is None or i.operands[0].size != 4 or i.operands[1].imm & 0xFFFFFFFF != 0xFFFFFFFF or d[a] + n == -4
+
+
+def deferred_cleanup(code):
+    """a call to a caller-pop function with pushes since the call before it and no 'add esp' after it: MSVC cleans
+    several calls up with one 'add esp' later (0x46C53B's five arguments): statements do not start at one depth"""
+    pushed = False
+    for a in sorted(code):
+        i = code[a]
+        if i.mnemonic == 'push':
+            pushed = True
+        elif i.mnemonic == 'call':
+            if pushed and i.operands[0].type == x86.X86_OP_IMM and pops.get(i.operands[0].imm) == 0 and \
+                    cleanup_after(code.get, a + i.size) < 0 and not noreturn_after(code, a + i.size):
+                return True
+            pushed = False
+        elif i.mnemonic.startswith(('j', 'ret')):
+            pushed = False
+    return False
+
+
+def noreturn_after(code, p):
+    """the call does not come back: int3 padding or another function right after it"""
+    i = code.get(p)
+    return i is None or i.mnemonic == 'int3'
+
+
+def prologue_frame(code, start, limit=24):
+    """depth after the prologue: the straight code from the entry to the first call or branch, its pushes of
+    EBX/EBP/ESI/EDI not written yet (saves: the caller's values), a first 'push ecx' (room for a local) and 'sub esp,
+    N'; None if anything else changes ESP"""
+    dep, frame, written, p = 0, 0, set(), start
+    for n in range(limit):
+        i = code.get(p)
+        if i is None or i.mnemonic == 'call' or i.mnemonic.startswith(('j', 'ret', 'loop')):
+            break
+        m, ops = i.mnemonic, i.operands
+        if m == 'push':
+            dep -= 4
+            r = i.op_str
+            if r in ('ebx', 'ebp', 'esi', 'edi') and r not in written or (r == 'ecx' and n == 0) or \
+                    (ops[0].type == x86.X86_OP_IMM and n < 2 and seh_frame(code, start)) or \
+                    (r == 'eax' and seh_frame(code, start) and n == 3):
+                frame = dep
+        elif m == 'sub' and ops[0].type == x86.X86_OP_REG and ops[0].reg == ESP and ops[1].type == x86.X86_OP_IMM:
+            dep -= ops[1].imm
+            frame = dep
+        elif ops and ops[0].type == x86.X86_OP_REG and ops[0].reg == ESP and not (m == 'mov' and 'fs:' in i.op_str):
+            return None
+        elif m == 'mov' and i.op_str.startswith('dword ptr fs:'):
+            pass
+        if ops and ops[0].type == x86.X86_OP_REG and m not in ('push', 'cmp', 'test'):
+            written.add(i.reg_name(ops[0].reg))
+        p = i.address + i.size
+    return frame
+
+
+def callee_pops(code, start, calls, cleanup, fixed=None, local=None):
     """bytes popped by each callee-pop indirect call, from the ESP balance (resolved in rounds: one call's pop can
     be needed to follow the stack to the next one); fixed: pops already known (imports called through a register)"""
     known = {a: 0 for a in calls if cleanup[a] >= 0}
@@ -340,26 +480,119 @@ def callee_pops(code, start, calls, cleanup, fixed=None):
                 new = True
         if not new:
             break
-    # the rest (chains of indirect calls): each callee taken to pop what brings ESP back to the frame depth (the
-    # commonest depth in the function, where statements start), accepted only if the whole function then agrees:
-    # every ret at the return address, the same depth wherever paths meet, every instruction reached
+    # chains of indirect calls in a function with an exception frame on ESP ('push -1; push handler; mov eax, fs:[0]'):
+    # its state variable sits right below the return address (depth -4), and the code writes it after every object
+    # built or destroyed ('mov byte/dword ptr [esp+N], state'): the first such write after a call, with only known
+    # ESP changes between, tells the depth after the call (0x424330: five virtual calls in a row, the prologue's
+    # 'push edi' among the pushes before the first).  Kept only if the whole function then agrees.
+    if seh_frame(code, start):
+        anch = dict(known)
+        for _ in range(8):
+            d = depths(code, start, anch)
+            new = False
+            for a in calls:
+                if a in anch or a not in d:
+                    continue
+                after = state_write_depth(code, a + code[a].size, anch)
+                if after is None:
+                    continue
+                p = after - d[a]
+                if 0 <= p <= 64 and p % 4 == 0:
+                    anch[a] = p
+                    new = True
+            if not new:
+                break
+        if len(anch) > len(known):
+            bad = []
+            d = depths(code, start, anch, bad)
+            # (code past calls still unknown is not reached yet: the frame depth below may solve those)
+            if not bad and all(state_ok(code, d, a) for a in d):
+                known = anch
+            elif DEBUG == start:
+                print("anchors rejected: bad %s state %s" % (["%X" % b for b in bad], ["%X" % a for a in d if not state_ok(code, d, a)]))
+    # the rest (chains of indirect calls): each callee taken to pop what brings ESP back to the frame depth (where
+    # statements start), accepted only if the whole function then agrees: every ret at the return address, the same
+    # depth wherever paths meet, every instruction reached.  The frame depth: the prologue's (its saves of registers
+    # not written yet, also after other instructions: 0x425620's 'push edi' after 'mov esi, ecx; mov eax, [esi]'),
+    # else the commonest depth in the function
+    # Where MSVC cleans up after several calls at once (deferred_cleanup) statements start at other depths: there
+    # each callee is first taken to pop what was pushed since the call before it (0x46C556 pops 16, not the 36 down
+    # to the frame depth that also hold 0x46C53B's arguments), elsewhere that comes last (an argument that is a call's
+    # result has the arguments after it pushed before that call)
+    # Not where the epilogue takes ESP back from EBP ('mov esp, ebp', 'leave'): the balance proves nothing there
+    # (0x405E90 never cleans up after its caller-pop calls)
     rest = [a for a in calls if a not in known]
-    if rest:
+    if rest and not any(i.mnemonic == 'leave' or (i.mnemonic == 'mov' and i.op_str == 'esp, ebp') for i in code.values()):
         d = depths(code, start, known)
         if d:
             vals = list(d.values())
-            frame = max(set(vals), key=vals.count)
-            guess = dict(known)
-            for _ in range(len(rest) + 1):
-                d = depths(code, start, guess)
-                for a in rest:
-                    if a in d and a not in guess:
-                        guess[a] = frame - d[a]
-            bad = []
-            d = depths(code, start, guess, bad)
-            if not bad and all(a in guess and guess[a] >= 0 and guess[a] % 4 == 0 for a in rest) and \
-                    all(a_ in d or padding(i) for a_, i in code.items()):
-                known = guess
+            frames = [prologue_frame(code, start)]
+            frames += [f for f in [max(set(vals), key=vals.count)] if f not in frames]
+            frames = [f for f in frames if f is not None] + ['local']
+            defer = deferred_cleanup(code)
+            if defer:
+                frames = frames[:1] + ['local'] if frames[0] != 'local' else frames
+                frames.reverse()
+            bad, guess, ok = ['ceiling'], {}, []
+            for frame in frames:
+                guess = dict(known)
+                if frame == 'local':
+                    guess.update({a: local[a] for a in rest if local and a in local})
+                # (the local guess takes the frame depth where it has nothing: the first call, pushes since the
+                # entry being saves)
+                fill = frame if frame != 'local' else prologue_frame(code, start)
+                for _ in range(len(rest) + 1):
+                    if fill is None:
+                        break
+                    d = depths(code, start, guess)
+                    for a in rest:
+                        if a in d and a not in guess:
+                            guess[a] = fill - d[a]
+                # ESP never above the frame depth after a call (the saved registers are there): a known callee
+                # taking more than was pushed since the guessed one before it took the rest from what that one was
+                # given (0x4EE6DC pops nothing: the 'push eax' before it is 0x4C2E10's second argument), so that one
+                # pops less
+                fr = frame if frame != 'local' else prologue_frame(code, start)
+                if fr is not None:
+                    for _ in range(len(rest) + 2):
+                        d = depths(code, start, guess)
+                        over = next(((a, d[a] + effect(code[a], code, guess) - fr) for a in sorted(d)
+                                     if code[a].mnemonic == 'call' and effect(code[a], code, guess) is not STOP and
+                                     d[a] + effect(code[a], code, guess) > fr), None)
+                        if not over:
+                            break
+                        prev = max((c for c in rest if c < over[0] and c in guess), default=None)
+                        if prev is None or guess[prev] < over[1] or any(
+                                code[b].mnemonic == 'call' and b not in guess and
+                                code[b].operands[0].type != x86.X86_OP_IMM for b in d if prev < b < over[0]):
+                            guess = None
+                            break
+                        guess[prev] -= over[1]
+                    else:
+                        guess = None
+                    if guess is None:
+                        bad, guess = ['ceiling'], {}
+                        continue
+                bad = []
+                d = depths(code, start, guess, bad)
+                if DEBUG == start:
+                    print('frame %s guess %s bad %s unreached %s' % (frame, {'%X' % k: v for k, v in guess.items()},
+                          ['%X' % b for b in bad], ['%X' % a_ for a_, i in code.items() if a_ not in d and not padding(i)][:10]))
+                if not bad and all(a in guess and guess[a] >= 0 and guess[a] % 4 == 0 for a in rest) and \
+                        all(a_ in d or padding(i) for a_, i in code.items()):
+                    ok.append((frame, guess))
+            # each guess can be wrong where the other is right and still balance (a register saved in the middle,
+            # 0x474B1A's 'push ebx' before a loop, misleads the frame depth; a call's result pushed for the next one
+            # the pushes since the call before): a callee's pop is kept where the guesses that balance agree
+            # (a frame depth guess alone is not taken where calls are cleaned up later)
+            if ok and (len(ok) > 1 or (POLICY == 'agree1' and not (defer and ok[0][0] != 'local'))):
+                known = dict(known)
+                known.update({a: ok[0][1][a] for a in rest if all(g[a] == ok[0][1][a] for _, g in ok)})
+            elif not ok:
+                if STATS is not None:
+                    STATS[('merge/ret' if bad else 'unsolved' if any(a not in guess for a in rest) else
+                           'negative' if any(guess[a] < 0 or guess[a] % 4 for a in rest) else 'unreached')] += 1
+                    STATS['f %X %s' % (start, 'bad' if bad else '')] += 1
     return known
 
 
@@ -368,6 +601,10 @@ def callee_pops(code, start, calls, cleanup, fixed=None):
 # COM objects such as Direct3D's pass this on the stack and have no vftable in the symbols) and no more arguments
 # than the pushes before the call.
 vt_pops = {}
+DEBUG = int(os.environ.get('ICALLS_DEBUG', '0'), 16)
+import collections
+STATS = collections.Counter() if os.environ.get('ICALLS_STATS') else None
+POLICY = os.environ.get('ICALLS_POLICY', 'agree1')   # a function to print the balance of
 if len(sys.argv) > 5:
     vts = []
     for l in open(sys.argv[5], encoding='utf-8'):
@@ -387,6 +624,106 @@ if len(sys.argv) > 5:
                 seen.add(pops[pe.u32(v + off)])
         if len(seen) == 1 and None not in seen:
             vt_pops[off] = seen.pop()
+
+
+# virtual calls on the method's own object ('mov eax, [esi]; mov ecx, esi; call [eax+0x30]' with esi = this): every
+# override of one slot has the signature of the slot, so the pop of any implementation known in the class of this
+# (from RTTI, out/GAME_rtti.json of rtti.py) is the pop of the call.  The class of this: the one each vftable
+# holding the method has at the method's subobject (a base at that offset, not virtual), the most derived of them;
+# the slot must be one of that class's own (an offset past its vftable belongs to a derived class: a sibling may
+# use it for another method).
+rt_group, rt_len, func_class = {}, {}, {}
+if len(sys.argv) > 7:
+    import json
+    vt_sub = []                 # (functions, classes of the subobject the vftable is for)
+    for c in json.load(open(sys.argv[7])):
+        for v in c['vtables']:
+            sub = {b['name'] for b in c['bases'] if b['mdisp'] == v['offset'] and b['pdisp'] == -1}
+            fl = [int(x, 16) for x in v['funcs']]
+            vt_sub.append((fl, sub))
+            if v['offset'] == 0:
+                rt_len[c['name']] = max(rt_len.get(c['name'], 0), len(fl))
+    for fl, sub in vt_sub:
+        for t in sub:
+            rt_group.setdefault(t, []).append(fl)
+    inter = {}
+    for fl, sub in vt_sub:
+        for f in set(fl):
+            inter[f] = inter[f] & sub if f in inter else set(sub)
+    for f, ts in inter.items():
+        if ts:
+            # the most derived: the class with the fewest vftables taking it as a base
+            func_class[f] = min(ts, key=lambda t: (len(rt_group.get(t, ())), t))
+
+
+def class_slot_pop(cls, off):
+    """the pop every known implementation of slot off in the vftables of cls and its derived classes agrees on"""
+    if off is None or off % 4 or off // 4 >= rt_len.get(cls, 0):
+        return None
+    seen = {pops.get(fl[off // 4]) for fl in rt_group.get(cls, ()) if off // 4 < len(fl)}
+    seen.discard(None)
+    return seen.pop() if len(seen) == 1 else None
+
+
+def this_regs(ins, start):
+    """registers holding this for the whole function: 'mov esi, ecx' before any call or other write of ECX, the
+    register written nowhere else (but the epilogue's pop)"""
+    regs = set()
+    for i in ins[:16]:
+        if i.mnemonic == 'call':
+            break
+        if i.mnemonic == 'mov' and i.operands[0].type == x86.X86_OP_REG and i.op_str.endswith(', ecx') and \
+                i.op_str.split(',')[0] in ('esi', 'edi', 'ebx', 'ebp'):
+            regs.add(i.op_str.split(',')[0])
+        elif i.operands and i.operands[0].type == x86.X86_OP_REG and i.op_str.split(',')[0] == 'ecx' and \
+                i.mnemonic not in ('push', 'cmp', 'test'):
+            break
+    for r in list(regs):
+        if sum(1 for i in ins if i.operands and i.operands[0].type == x86.X86_OP_REG and
+               i.op_str.split(',')[0] == r and i.mnemonic not in ('push', 'pop', 'cmp', 'test')) != 1:
+            regs.discard(r)
+    return regs
+
+
+def this_vcall(ins, k, regs):
+    """slot offset of a virtual call on this ('mov eax, [esi]; ...; mov ecx, esi; call [eax+off]' or through a
+    register loaded from [eax+off]), None if the object or the slot is not plain"""
+    i = ins[k]
+    op = i.operands[0]
+    win = []
+    for j in range(k - 1, max(k - 10, -1), -1):
+        if ins[j].mnemonic == 'call' or ins[j].mnemonic.startswith('j'):
+            break
+        win.append(ins[j])
+    def last_write(reg, before=None):
+        for w in win:
+            if before is not None and w.address >= before:
+                continue
+            if w.operands and w.operands[0].type == x86.X86_OP_REG and w.op_str.split(',')[0] == reg and \
+                    w.mnemonic not in ('push', 'cmp', 'test'):
+                return w
+        return None
+    if op.type == x86.X86_OP_MEM and op.mem.index == 0 and op.mem.base:
+        vt, off = i.reg_name(op.mem.base), op.mem.disp
+        at = i.address
+    elif op.type == x86.X86_OP_REG:
+        w = last_write(i.reg_name(op.reg))
+        if not w or w.mnemonic != 'mov' or w.operands[1].type != x86.X86_OP_MEM or w.operands[1].mem.index:
+            return None
+        vt, off, at = w.reg_name(w.operands[1].mem.base), w.operands[1].mem.disp, w.address
+    else:
+        return None
+    w = last_write(vt, at)
+    if not w or w.mnemonic != 'mov' or w.operands[1].type != x86.X86_OP_MEM or w.operands[1].mem.index or \
+            w.operands[1].mem.disp != 0:
+        return None
+    obj = w.reg_name(w.operands[1].mem.base)
+    if obj not in regs:
+        return None
+    e = last_write('ecx')
+    if not e or e.mnemonic != 'mov' or e.op_str != 'ecx, ' + obj:
+        return None
+    return off
 
 
 measured = {}       # call address -> bytes popped, measured (icalltrace.cpp) where the code alone does not tell
@@ -456,10 +793,65 @@ def vslot(ins, k):
     return None
 
 
+def infer_direct_pops():
+    """bytes popped by functions with no ret of their own to tell (thunks jumping on through a vftable: 0x4205C0
+    'mov eax, [ecx+4]; mov eax, [eax+4]; add ecx, 4; jmp eax') from the ESP balance of their callers: the depth
+    before a call followed from the entry, the path after it to a ret.  Every caller that tells must agree, and two
+    must tell (one for a jump thunk); written into column 4 of functions.tsv"""
+    found = {}
+    for _ in range(4):
+        votes = collections.defaultdict(list)
+        for start, size, _e in funcs:
+            if 0x401000 <= start < 0x4205A0:        # (the Lua library, built from its sources)
+                continue
+            try:
+                ins = list(md.disasm(pe.read(start, size), start))
+            except Exception:
+                continue
+            sites = [i for i in ins if i.mnemonic == 'call' and i.operands[0].type == x86.X86_OP_IMM and
+                     i.operands[0].imm in pops and pops[i.operands[0].imm] is None]
+            if not sites:
+                continue
+            code = {i.address: i for i in ins}
+            d = depths(code, start, {})
+            for i in sites:
+                if i.address not in d:
+                    continue
+                t = to_ret(code, i.address + i.size, {})
+                if t and len(t) == 1:
+                    p = -(d[i.address] + t.pop())
+                    votes[i.operands[0].imm].append(p if 0 <= p <= min(64, -d[i.address]) and p % 4 == 0 else None)
+        new = {}
+        for f, v in votes.items():
+            last = None
+            for j in md.disasm(pe.read(f, min(64, sizes[f])), f):
+                if j.mnemonic != 'int3':
+                    last = j
+            thunk = last is not None and last.mnemonic == 'jmp'
+            if None not in v and len(set(v)) == 1 and (len(v) >= 2 or thunk):
+                new[f] = v[0]
+        if not new:
+            break
+        pops.update(new)
+        found.update(new)
+    if found:
+        rows = open(sys.argv[2]).read().splitlines(True)
+        with open(sys.argv[2], 'w') as out:
+            for l in rows:
+                q = l.split('\t')
+                if l[0] != '#' and int(q[0], 16) in found and q[3] == '?':
+                    q[3] = str(found[int(q[0], 16)])
+                    l = '\t'.join(q)
+                out.write(l)
+    print('pops of %d functions without a ret from their callers' % len(found))
+
+
+sizes = {a: s_ for a, s_, _e in funcs}
+infer_direct_pops()
 with open(sys.argv[3], 'w') as f:
     f.write('# call address\tfunction\tecx set (1/0)\tadd esp after (-1: none)\tpushes right before'
             '\tbytes the callee pops (ESP balance, -1: unknown)\n')
-    n = solved = byvt = ntail = bym = byimp = bynone = 0
+    n = solved = byvt = ntail = bym = byimp = bynone = bycls = 0
     tails = []
     for start, size, ecx_in in funcs:
         try:
@@ -469,6 +861,7 @@ with open(sys.argv[3], 'w') as f:
         code = {i.address: i for i in ins}
         preds = predecessors(ins, code)
         rows, cleanup, fixed = [], {}, {}
+        saves = register_saves(ins)
         # the prologue's pushes save registers (or reserve locals, or are the SEH frame): not arguments of a call
         # with only moves between (0x479885's 'call edx' after 'push ecx; push esi' takes none)
         pe_end = prologue_end(code.get, start)
@@ -499,7 +892,8 @@ with open(sys.argv[3], 'w') as f:
             com = com_call(ins, k)
             if com:
                 ecx = 0             # stdcall with this on the stack
-            rows.append((i.address, ecx, cl, pushes, None if com else vslot(ins, k), pushes_since_call(ins, k, preds)))
+            rows.append((i.address, ecx, cl, pushes, None if com else vslot(ins, k), pushes_since_call(ins, k, preds),
+                         pushes_since_call(ins, k, preds, saves)))
             slot = reg_import(ins, k)
             if slot is not None:
                 fixed[i.address] = imports[slot]
@@ -513,8 +907,19 @@ with open(sys.argv[3], 'w') as f:
         # nothing pushed since the last call, counted either way: no arguments, nothing to pop (all 203 such sites
         # measured in the game agree); known before the balance, it solves the calls around them
         nopush = {r[0]: 0 for r in rows if cleanup[r[0]] < 0 and r[3] == 0 and r[5] == 0 and r[0] not in fixed}
-        known = callee_pops(code, start, [r[0] for r in rows], cleanup, {**fixed, **nopush})
-        for a, ecx, cl, pushes, off, outstanding in rows:
+        # virtual calls on this, from the class (before the balance: they solve the calls around them)
+        clsfix = {}
+        if start in func_class:
+            tregs = this_regs(ins, start)
+            for r in rows:
+                if cleanup[r[0]] < 0 and r[1] == 1 and r[0] not in fixed:
+                    t = class_slot_pop(func_class[start], this_vcall(ins, ins.index(code[r[0]]), tregs))
+                    # (no more than what was pushed or made room for: 'sub esp, 8' for two floats, 0x4266BB)
+                    if t is not None and t // 4 <= max(r[3], r[5] or 0):
+                        clsfix[r[0]] = t
+        known = callee_pops(code, start, [r[0] for r in rows], cleanup, {**fixed, **nopush, **clsfix},
+                            {r[0]: 4 * r[6] for r in rows if r[6] is not None})
+        for a, ecx, cl, pushes, off, outstanding, _ in rows:
             if a in fixed:
                 f.write('%08X\t%08X\t%d\t%d\t%d\t%d\n' % (a, start, ecx, cl, pushes, fixed[a] if cl < 0 else 0))
                 n += 1
@@ -525,7 +930,8 @@ with open(sys.argv[3], 'w') as f:
             # pushes is as likely another call taking them (0x5B52A0: two COM calls in a row, the second given 0
             # once the first was known; it pops its four arguments)
             # (a pop the path to a ret fixes alone is exact, 0 included: 0x45B8C2's getter after a saving 'push edi')
-            if cl < 0 and pop == 0 and pushes > 0 and a not in exact:
+            bycls += a in clsfix
+            if cl < 0 and pop == 0 and pushes > 0 and a not in exact and a not in clsfix:
                 pop = -1
             solved += pop >= 0 and cl < 0
             if pop < 0 and cl < 0 and ecx == 1 and off in vt_pops and vt_pops[off] // 4 <= pushes:
@@ -541,5 +947,7 @@ with open(sys.argv[3], 'w') as f:
             f.write('%08X\t%08X\t%d\t%d\t%d\t%d\n' % (a, start, ecx, cl, pushes, pop))
             n += 1
 print('%d indirect calls (%d of them tail jumps), the pop of %d callee-pop ones from the ESP balance, %d from the '
-      'vftables (%d offsets agree), %d measured, %d imports called through a register, %d with nothing pushed'
-      % (n, ntail, solved, byvt, len(vt_pops), bym, byimp, bynone))
+      'vftables (%d offsets agree), %d from the class of this, %d measured, %d imports called through a register, %d '
+      'with nothing pushed' % (n, ntail, solved, byvt, len(vt_pops), bycls, bym, byimp, bynone))
+if STATS is not None:
+    print('frame depth guesses rejected:', dict(STATS))

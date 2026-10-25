@@ -33,7 +33,7 @@ def main():
         new = set()
         for l in open(jsonl):
             d = json.loads(l)
-            if re.search(r'\bin_EAX\b', d['code']) and not 0x401000 <= int(d['a'], 16) < 0x420600:   # (Lua library)
+            if re.search(r'\bin_EAX\b', d['code']) and not 0x401000 <= int(d['a'], 16) < 0x4205A0:   # (Lua library)
                 new.add(d['a'])
         with open(out, 'w') as f:
             f.write('# functions that hand on their caller\'s EAX: EAX is a register input (tools/eaxin.py)\n')

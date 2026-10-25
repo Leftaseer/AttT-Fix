@@ -410,6 +410,12 @@ def convert(f, protos, skip, imports, impnames):
         return m.group(0)
     code = re.sub(r'/\* WARNING: Could not recover jumptable at 0x([0-9a-f]+)\. Too many branches \*/\s*'
                   r'/\* WARNING: Treating indirect jump as call \*/', import_jump, code)
+    # a bool result handed on: the upper bytes of EAX are what the callee left there (0x420BC0 returns std::operator==
+    # of strings), which callers never read (they test AL): zero
+    code = re.sub(r'\bCONCAT31\(extraout_var(?:_\d+)?\s*,', 'CONCAT31(0,', code)
+    xdecl = r'(?m)^[ \t]*\w+[ \t]+extraout_var(?:_\d+)?;\n'
+    if not re.search(r'\bextraout_var', re.sub(xdecl, '', code)):
+        code = re.sub(xdecl, '', code)
     for pat, why in BLOCK:
         if re.search(pat, code):
             return None, why
@@ -732,7 +738,7 @@ def main():
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
     ap.add_argument('--per-unit', type=int, default=150)
     ap.add_argument('--exclude-range', action='append', default=[], metavar='LO-HI',
-                    help='addresses left out (e.g. 401000-420600, the Lua 5.1 library: build it from its sources)')
+                    help='addresses left out (e.g. 401000-4205A0, the Lua 5.1 library: build it from its sources)')
     ap.add_argument('--icalls', help='call-site prototypes of indirect calls (ghidra/ICallOverride.java output)')
     ap.add_argument('--functions', required=True, help='symbols/<game>_functions.tsv (machine-code register inputs)')
     a = ap.parse_args()

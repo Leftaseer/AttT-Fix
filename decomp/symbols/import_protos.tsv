@@ -82,6 +82,18 @@ D3DXVec3Unproject	void *	void *, void *, void *, void *, void *, void *
 free	uint	void *	__cdecl
 ??1?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@XZ	uint	void *	__thiscall
 ??_D?$basic_fstream@DU?$char_traits@D@std@@@std@@QAEXXZ	uint	void *	__thiscall
+# (the other destructors of the runtime's classes: the virtual base destructors of stream classes end with them,
+# 0x43FA90, 0x446C90)
+??1?$basic_ios@DU?$char_traits@D@std@@@std@@UAE@XZ	uint	void *	__thiscall
+??1?$basic_iostream@DU?$char_traits@D@std@@@std@@UAE@XZ	uint	void *	__thiscall
+??1strstreambuf@std@@UAE@XZ	uint	void *	__thiscall
+??_D?$basic_ofstream@DU?$char_traits@D@std@@@std@@QAEXXZ	uint	void *	__thiscall
+??_D?$basic_ifstream@DU?$char_traits@D@std@@@std@@QAEXXZ	uint	void *	__thiscall
+??1?$basic_streambuf@DU?$char_traits@D@std@@@std@@UAE@XZ	uint	void *	__thiscall
+??1?$basic_ostream@DU?$char_traits@D@std@@@std@@UAE@XZ	uint	void *	__thiscall
+??_D?$basic_istringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXXZ	uint	void *	__thiscall
+??_D?$basic_stringstream@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXXZ	uint	void *	__thiscall
+??1exception@std@@UAE@XZ	uint	void *	__thiscall
 # Miles Sound System 7 (mss32.dll): the volume and pan arguments are F32 (decorated names give only their size; an
 # int there converted 0.8 to 0 and the game went silent: 0x4C1760)
 _AIL_set_sample_volume_pan@12	int	void *, float, float
