@@ -108,7 +108,11 @@ public class DecoratedImports extends GhidraScript {
         int have = 0;
         for (int k = start; k < cur.length; k++) have += (cur[k].getLength() + 3) / 4 * 4;
         int purge = cc.equals("__cdecl") ? 0 : bytes;
-        if (!cls && f.getCallingConventionName().equals(cc) && have == bytes && !f.hasVarArgs()) {
+        // (a class passed by value that the demangler made a 1-byte placeholder, std::string's _Size_type_nosscl
+        // around operator[]'s index: the decompiler dropped the 4-byte argument, 0x45A990; an undefined4 instead)
+        boolean odd = false;
+        for (int k = start; k < cur.length; k++) if (cur[k].getLength() % 4 != 0) odd = true;
+        if (!cls && f.getCallingConventionName().equals(cc) && have == bytes && !f.hasVarArgs() && !odd) {
             if (f.getStackPurgeSize() == purge) return false;
             f.setStackPurgeSize(purge);
             return true;
@@ -123,7 +127,8 @@ public class DecoratedImports extends GhidraScript {
             if (cls && cur[k].getName().equals("hidden_result")) continue;     // fitted before (the thunk and its import)
             int len = (cur[k].getLength() + 3) / 4 * 4;
             if (n + len > bytes) break;
-            ps.add(new ParameterImpl(cur[k].getName(), cur[k].getDataType(), currentProgram));
+            ps.add(new ParameterImpl(cur[k].getName(), cur[k].getLength() % 4 == 0 ? cur[k].getDataType() :
+                Undefined4DataType.dataType, currentProgram));
             n += len;
         }
         while (n < bytes) {

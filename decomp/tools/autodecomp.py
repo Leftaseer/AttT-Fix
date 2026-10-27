@@ -305,6 +305,11 @@ def rewrite_icalls(code, floats=None):
                     return None, 'float argument of an indirect call not on the stack'
                 params[int(x)] = 'float'
         callee = code[m.end():close]
+        # (a result the decompiler uses where ICallOverride.java, deciding before, found none: 0x4DDF10
+        # 'iVar5 = (*vf)(obj)' at 0x4DE566; EAX after the call, as the machine code reads it)
+        alone = re.search(r'[;{}]\s*$', code[:m.start()]) and re.match(r'\s*;', code[end + 1:])
+        if ret == 'void' and not alone:
+            ret = 'undefined4'
         code = code[:m.start()] + '((%s (%s *)(%s))(%s))(%s)' % (
             ret, cc, ', '.join(params) or 'void', callee, ', '.join(args)) + code[end + 1:]
     return code, None
