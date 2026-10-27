@@ -518,13 +518,18 @@ def convert(f, protos, skip, imports, impnames):
     # ExceptionList)
     if 'G_FFDFF000' in body or re.search(r'\b(?:unaff_FS_OFFSET|ExceptionList)\b', body):
         # (also through a cast: 'ppuStack_8 = (undefined1 **)&((void *)G_005E6394);', 0x432700)
-        hs = re.findall(r'\b(?:pu|pc|p)\w*Stack_\w+\s*=\s*(?:\([\w ]+(?:\s*\*)+\)\s*)?&?\s*'
+        hs = re.findall(r'\b((?:pu|pc|p)\w*Stack_\w+)\s*=\s*(?:\([\w ]+(?:\s*\*)+\)\s*)?&?\s*'
                         r'(?:&?(?:LAB|FUN)_|\(\([\w ]+(?:\s*\*)+\)G_)([0-9a-fA-F]{8})\b', body)
+        # (other pointers to code or data stored in the frame, 0x50C3C0: the handler's slot is the one under the
+        # state, at -8, or -0xc after an aligned frame)
+        if len(set(hs)) > 1:
+            hs = [h for h in hs if re.search(r'Stack_(?:8|c)$', h[0])] or hs
+        hs = sorted(set(h[1] for h in hs))
         if len(hs) != 1:
             if not FORCE[0]:
                 return None, 'exception frame without a known handler'
             NOTES.append('exception frame without a known handler')
-        if catches(int(hs[0], 16)):
+        if hs and catches(int(hs[0], 16)):
             if not FORCE[0]:
                 return None, 'catches exceptions'
             NOTES.append('catches exceptions')

@@ -11103,10 +11103,10 @@
 005E40B2	0	exact		0	
 005E40B8	0	exact		0	
 005E40BE	0	exact		3	
-005E40D6	4	exact	1,3	0	
-005E4134	4	exact	1,3	0	
+005E40D6	4	exact	0,1,2,3	0	
+005E4134	4	exact	0,1,2,3	0	
 005E417F	0	exact		0	
-005E4197	4	exact	1,2,3	0	
+005E4197	5	exact	0,1,2,3,4	0	
 005E41E4	0	exact		0	
 005E41FC	0	exact		0	
 005E4202	0	exact		0	

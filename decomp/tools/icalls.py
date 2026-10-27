@@ -831,6 +831,119 @@ def this_vcall(ins, k, regs):
     return off
 
 
+# virtual calls on an object whose vftable is known where the call is made: one just built (the constructor called on
+# it, or the result of the constructor, which returns this: 'push 0x224; call new; ...; mov ecx, eax; call ctor; mov
+# edi, eax', 0x4C8C34) or one given its vftable in this function: the slot of that vftable is the callee itself
+vt_funcs = {}
+if len(sys.argv) > 7:
+    for c in json.load(open(sys.argv[7])):
+        for v in c['vtables']:
+            vt_funcs[int(v['vt'], 16)] = [int(x, 16) for x in v['funcs']]
+_ctor_vt = {}
+
+
+def ctor_vt(f):
+    """the vftable a constructor leaves in its object: its last store of one at this+0, when it returns this"""
+    if f in _ctor_vt:
+        return _ctor_vt[f]
+    _ctor_vt[f] = None
+    if f not in sizes:
+        return None
+    try:
+        ins = list(md.disasm(pe.read(f, sizes[f]), f))
+    except Exception:
+        return None
+    regs = {'ecx'}
+    for i in ins[:16]:
+        if i.mnemonic == 'mov' and i.op_str.endswith(', ecx') and i.operands[0].type == x86.X86_OP_REG:
+            regs.add(i.op_str.split(',')[0])
+        elif i.mnemonic == 'call' or (i.operands and i.operands[0].type == x86.X86_OP_REG and
+                                      i.op_str.split(',')[0] == 'ecx' and i.mnemonic not in ('push', 'cmp', 'test')):
+            break
+    regs = {r for r in regs if r == 'ecx' or sum(1 for i in ins if i.operands and i.operands[0].type == x86.X86_OP_REG
+                                                 and i.op_str.split(',')[0] == r and
+                                                 i.mnemonic not in ('push', 'pop', 'cmp', 'test')) == 1}
+    vt = None
+    for i in ins:
+        if i.mnemonic == 'mov' and len(i.operands) == 2 and i.operands[0].type == x86.X86_OP_MEM and \
+                i.operands[1].type == x86.X86_OP_IMM and i.operands[0].mem.disp == 0 and \
+                not i.operands[0].mem.index and i.reg_name(i.operands[0].mem.base) in regs and \
+                i.operands[1].imm in vt_funcs:
+            vt = i.operands[1].imm
+    if vt is not None and any(i.mnemonic == 'mov' and i.op_str in ['eax, ' + r for r in regs if r != 'ecx'] for i in ins):
+        _ctor_vt[f] = vt
+    return _ctor_vt[f]
+
+
+def known_vcall(ins, k):
+    """the callee of a virtual call on an object whose vftable is known here, None if not plain"""
+    i = ins[k]
+    op = i.operands[0]
+    lo = max(k - 12, 0)
+    def last_write(reg, before):
+        for j in range(before - 1, lo - 1, -1):
+            w = ins[j]
+            if w.mnemonic == 'call' or w.mnemonic.startswith('j'):
+                return None
+            if w.operands and w.operands[0].type == x86.X86_OP_REG and w.op_str.split(',')[0] == reg and \
+                    w.mnemonic not in ('push', 'cmp', 'test'):
+                return j
+        return None
+    if op.type == x86.X86_OP_MEM and op.mem.index == 0 and op.mem.base:
+        vt, off, at = i.reg_name(op.mem.base), op.mem.disp, k
+    elif op.type == x86.X86_OP_REG:
+        j = last_write(i.reg_name(op.reg), k)
+        w = ins[j] if j is not None else None
+        if not w or w.mnemonic != 'mov' or w.operands[1].type != x86.X86_OP_MEM or w.operands[1].mem.index:
+            return None
+        vt, off, at = w.reg_name(w.operands[1].mem.base), w.operands[1].mem.disp, j
+    else:
+        return None
+    j = last_write(vt, at)
+    w = ins[j] if j is not None else None
+    if not w or w.mnemonic != 'mov' or w.operands[1].type != x86.X86_OP_MEM or w.operands[1].mem.index or \
+            w.operands[1].mem.disp != 0 or off % 4:
+        return None
+    obj = w.reg_name(w.operands[1].mem.base)
+    if obj != 'ecx':
+        e = last_write('ecx', k)
+        if e is None or ins[e].mnemonic != 'mov' or ins[e].op_str != 'ecx, ' + obj:
+            return None
+    # where the object came from: back through the code before the load of its vftable (a null tested and set on
+    # another path, 'xor edi, edi', does not count)
+    found = None
+    for j in range(j - 1, max(j - 80, -1), -1):
+        x = ins[j]
+        if x.mnemonic in ('ret', 'int3'):
+            break
+        if x.mnemonic == 'call':
+            t = x.operands[0].imm if x.operands[0].type == x86.X86_OP_IMM else None
+            ce = last_write('ecx', j)
+            if t is not None and (obj == 'eax' or (ce is not None and ins[ce].op_str == 'ecx, ' + obj)):
+                found = ctor_vt(t)
+                break
+            if obj in ('eax', 'ecx', 'edx'):
+                break
+            continue
+        if x.mnemonic == 'mov' and len(x.operands) == 2 and x.operands[0].type == x86.X86_OP_MEM and \
+                x.operands[1].type == x86.X86_OP_IMM and x.operands[0].mem.disp == 0 and \
+                not x.operands[0].mem.index and x.reg_name(x.operands[0].mem.base) == obj and \
+                x.operands[1].imm in vt_funcs:
+            found = x.operands[1].imm
+            break
+        if x.operands and x.operands[0].type == x86.X86_OP_REG and x.op_str.split(',')[0] == obj and \
+                x.mnemonic not in ('push', 'cmp', 'test'):
+            if x.mnemonic == 'xor' and x.op_str == obj + ', ' + obj:
+                continue
+            if x.mnemonic == 'mov' and x.operands[1].type == x86.X86_OP_REG:
+                obj = x.op_str.split(', ')[1]
+                continue
+            break
+    if found is None or off // 4 >= len(vt_funcs[found]):
+        return None
+    return vt_funcs[found][off // 4]
+
+
 measured = {}       # call address -> bytes popped, measured (icalltrace.cpp) where the code alone does not tell
 if len(sys.argv) > 6:
     for l in open(sys.argv[6]):
@@ -1081,6 +1194,14 @@ with open(sys.argv[3], 'w') as f:
                     # (no more than what was pushed or made room for: 'sub esp, 8' for two floats, 0x4266BB)
                     if t is not None and t // 4 <= max(r[3], r[5] or 0):
                         clsfix[r[0]] = t
+        for r in rows:
+            if cleanup[r[0]] < 0 and r[1] == 1 and r[0] not in fixed and r[0] not in clsfix:
+                c = known_vcall(ins, ins.index(code[r[0]]))
+                t = pops.get(c) if c is not None else None
+                if t is not None and t // 4 <= max(r[3], r[5] or 0):
+                    clsfix[r[0]] = t
+                    if STATS is not None:
+                        STATS['vtable known here'] += 1
         known = callee_pops(code, start, [r[0] for r in rows], cleanup, {**fixed, **nopush, **clsfix},
                             {r[0]: 4 * r[6] for r in rows if r[6] is not None})
         for a, ecx, cl, pushes, off, outstanding, _ in rows:
