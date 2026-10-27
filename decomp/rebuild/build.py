@@ -448,7 +448,8 @@ def main():
             regs = machine_funcs.get(ga, (0, [], 0, set()))[1]
             if [r for r in regs if r != 'ECX']:
                 sys.exit('%s (%08X) has an LTCG register convention: call it through ORIG_FN' % (q, cands[0]))
-            syms.append((ga, s))
+            # (exe2obj adds the leading underscore of a C name: '__allrem' of a 64-bit remainder is '_allrem')
+            syms.append((ga, s if s[0] in '?@' else s[1:]))
             resolved.add(s)
     # references to originals
     for s in sorted(undefined):
