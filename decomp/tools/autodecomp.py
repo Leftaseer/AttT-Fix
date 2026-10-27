@@ -67,6 +67,7 @@ stack_slots = {}    # addr -> stack slots the machine code uses (tools/stackpara
 fsize = {}          # addr -> bytes of machine code
 SYSTEM_DLLS = {'KERNEL32.DLL', 'USER32.DLL', 'GDI32.DLL', 'ADVAPI32.DLL', 'SHLWAPI.DLL', 'SHELL32.DLL', 'WINMM.DLL',
                'OLE32.DLL', 'VERSION.DLL', 'MSVCR80.DLL', 'MSVCP80.DLL'}
+ONE_BYTE = set()    # classes the demangler made 1-byte placeholders (std::string, its _Size_type_nosscl)
 noreturn = set()    # functions without a ret or a jump out (they throw: 0x493740): no ret pop to know
 # dwords of the objects the decompiler addresses in the outgoing arguments (MSVC 8 std::string: 28 bytes)
 OBJ_DWORDS = {'_Demangler_std_basic_string_char_struct_std__char_traits_char__class_std__allocator_char___': 7,
@@ -547,6 +548,18 @@ def convert(f, protos, skip, imports, impnames):
     xdecl = r'(?m)^[ \t]*\w+[ \t]+extraout_var(?:_\d+)?;\n'
     if not re.search(r'\bextraout_var', re.sub(xdecl, '', code)):
         code = re.sub(xdecl, '', code)
+    # a byte stored through a pointer to a class the demangler made a 1-byte placeholder (std::string):
+    # 'this_01[0x70] = (_Demangler_..._ )0x1;' (0x45E4D0) assigns a number to a struct in C: the byte
+    code = re.sub(r'(?m)^(\s*)(\w+)\[([^\[\]]+)\]\s*=\s*\((_Demangler_\w+)\)\s*(0x[0-9a-fA-F]+|\d+)\s*;',
+                  r'\1((unsigned char *)\2)[\3] = (unsigned char)\5;', code)
+    # (and a byte variable the decompiler gave such a class, compared with '(class)0x0': 0x51AC00) an unsigned char
+    if ONE_BYTE:
+        one = '|'.join(sorted(ONE_BYTE, key=len, reverse=True))
+        code = re.sub(r'(?m)^(\s*)(?:%s)(\s+\w+\s*;)' % one, r'\1unsigned char\2', code)
+        code = re.sub(r'\((?:%s)\)(\s*(?:0x[0-9a-fA-F]+|\d+)\b)' % one, r'(unsigned char)\1', code)
+        # bytes read or written through a pointer to one ('bVar1 = pbVar2[0x45];'): through an unsigned char *
+        for v in set(re.findall(r'(?m)^\s*(?:%s)\s*\*\s*(\w+)\s*;' % one, code)):
+            code = re.sub(r'(?<![\w.>])%s\[' % v, '((unsigned char *)%s)[' % v, code)
     # ECX or EDX read though the machine code takes none (symbols/GAME_functions.tsv): 'push ecx' making room for
     # a local whose upper bytes stay what ECX held, passed on as an argument ('local_4 = in_ECX & 0xffffff00',
     # 0x4CB160 to 0x4CAF40): garbage of the original, 0
@@ -1220,6 +1233,7 @@ def main():
             skip.add(int(m.group(1), 16))
     pre = os.path.join(a.outdir, 'auto_pre.h')
     types = open(a.types, encoding='utf-8').read()
+    ONE_BYTE.update(re.findall(r'_Static_assert\(sizeof\((_Demangler_\w+)\) == 1,', types))
     # Ghidra's own names for a few base types
     types = types.replace('float10 ', 'double ')
     with open(pre, 'w', encoding='utf-8') as f:

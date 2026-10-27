@@ -103,14 +103,19 @@ static inline unsigned long long gh_fbits(const void *p, unsigned n)
 /* the head of the SEH chain, fs:[0] (generated code drops the function's own registration; a value read from it
  * stays: tools/autodecomp.py) */
 #define GH_FS0 ({ void *gh_fs0; __asm__ volatile("movl %%fs:0, %0" : "=r"(gh_fs0)); gh_fs0; })
-#define ABS(x) __builtin_fabs(x)
-#define SQRT(x) __builtin_sqrt(x)
+/* (of the operand's size, as the decompiler's: ABS of a float is a float, stored back in 4 bytes, 0x438D70) */
+#define ABS(x) __builtin_choose_expr(sizeof(x) == 4, __builtin_fabsf(x), __builtin_fabs(x))
+#define SQRT(x) __builtin_choose_expr(sizeof(x) == 4, __builtin_sqrtf(x), __builtin_sqrt(x))
 static inline double gh_rint(double x) { double r; __asm__("frndint" : "=t"(r) : "0"(x)); return r; }
 #define ROUND(x) gh_rint(x)
 /* float to integer, towards zero (the decompiler's TRUNC; also MSVC's fistp after its truncating fldcw) */
 #define TRUNC(x) ((long long)(x))
 /* the decompiler's CAST between a float and an integer type of one size keeps the bits (AutoExport.java) */
-#define BITCAST(T, x) ({ __typeof__(x) gh_bc_v = (x); T gh_bc_r; \
+/* (a double where the decompiler had a float, 'f - 1.0' with the constant a double in C, 0x5352E0, or a long
+ * long for a 4-byte integer, 0x5234B0: of 4 bytes first, as the decompiler's value is) */
+#define GH_BC_SRC(T, x) __typeof__(__builtin_choose_expr(sizeof(x) == 8 && sizeof(T) == 4, \
+    __builtin_choose_expr(__builtin_classify_type(x) == 8, (float)0, (unsigned int)0), (x)))
+#define BITCAST(T, x) ({ GH_BC_SRC(T, x) gh_bc_v = (x); T gh_bc_r; \
     _Static_assert(sizeof gh_bc_v == sizeof gh_bc_r, "BITCAST of different sizes"); \
     __builtin_memcpy(&gh_bc_r, &gh_bc_v, sizeof gh_bc_r); gh_bc_r; })
 /* a value stored to a piece of a variable (v._4_4_ = x): the bits of a float, the value of anything else (the
