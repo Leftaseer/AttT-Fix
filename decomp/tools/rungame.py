@@ -106,7 +106,10 @@ def pause(seconds):
     """sleep, but no longer than the game keeps going"""
     end = time.time() + seconds
     while time.time() < end:
-        if stopped():
+        why = stopped()
+        if why:
+            if os.environ.get('RUNGAME_DEBUG'):
+                print('pause stopped:', why, flush=True)
             return False
         time.sleep(min(0.5, max(0, end - time.time())))
     return True
@@ -174,6 +177,11 @@ try:
 except subprocess.TimeoutExpired:
     pass
 subprocess.run(['wineserver', '-k'], env=env, timeout=30)
+# (and gone: a run started while the old wineserver still shuts down attached to it and was killed with it)
+try:
+    subprocess.run(['wineserver', '-w'], env=env, timeout=30)
+except subprocess.TimeoutExpired:
+    pass
 if wm:
     wm.kill()
 xv.kill()

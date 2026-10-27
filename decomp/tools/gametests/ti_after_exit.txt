@@ -1,0 +1,2 @@
+L+20000 lua ExitGame()
+L+60000 lua for k,v in pairs(GUIScene) do if type(v)=='table' and rawget(v,'_ChooseHero') and v.scene then v:_Exit() end end

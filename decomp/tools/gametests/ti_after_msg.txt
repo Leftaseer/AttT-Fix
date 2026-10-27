@@ -1,0 +1,1 @@
+L+10000 lua Actions.Gold(0, 10) Actions.Gold(0, 20) Actions.Gold(0, 30)
