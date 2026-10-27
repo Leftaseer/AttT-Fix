@@ -3140,7 +3140,7 @@
 004769D0	0	exact		0	
 004769F0	0	exact		0	
 00476B10	1	exact		0	
-00476BB0	2	exact		0	
+00476BB0	2	exact	0,1	0	
 00476E20	0	exact		0	
 00476EB0	1	exact	0	0	
 00476F00	2	exact		0	
@@ -3162,7 +3162,7 @@
 004777A0	0	exact		0	
 004777D0	1	exact		0	
 004777F0	3	exact	1,2	0	
-00477A90	2	exact		0	
+00477A90	2	exact	0,1	0	
 00477AA0	4	exact	0,1,2,3	0	
 00477C50	4	exact	0,1,2,3	0	
 00477E00	0	exact		0	
@@ -8104,7 +8104,7 @@
 00527DE0	0	exact		0	
 00527E80	1	exact		0	
 00527EA0	0	exact		0	
-00527ED0	0	exact		0	
+00527ED0	2	exact	0,1	0	
 005282B0	1	exact	0	0	
 005283F0	0	exact		0	
 00528410	0	exact		0	

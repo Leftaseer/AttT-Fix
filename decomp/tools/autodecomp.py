@@ -68,6 +68,7 @@ fsize = {}          # addr -> bytes of machine code
 SYSTEM_DLLS = {'KERNEL32.DLL', 'USER32.DLL', 'GDI32.DLL', 'ADVAPI32.DLL', 'SHLWAPI.DLL', 'SHELL32.DLL', 'WINMM.DLL',
                'OLE32.DLL', 'VERSION.DLL', 'MSVCR80.DLL', 'MSVCP80.DLL'}
 STRUCT_SIZE = {}    # type name -> its size (the types header's static assertions)
+TRUNCATED = {}     # structure -> offset of the pad array its declaration ends in (members cut short)
 ONE_BYTE = set()    # classes the demangler made 1-byte placeholders (std::string, its _Size_type_nosscl)
 noreturn = set()    # functions without a ret or a jump out (they throw: 0x493740): no ret pop to know
 # dwords of the objects the decompiler addresses in the outgoing arguments (MSVC 8 std::string: 28 bytes)
@@ -717,6 +718,28 @@ def convert(f, protos, skip, imports, impnames):
         body = re.sub(r'\b_param_%s\b' % n, 'param_%s' % n, body)
         code = code[:hd.start()] + '%s%s%sparam_%s%s' % (hd.group(1), 'uint', hd.group(3), n, hd.group(4)) + \
             code[hd.end():i] + body
+    # undefined bytes past where the types header cut a structure short (CConsole's from 0x1059: 0x4426E0's
+    # '&this->field_0x1638')
+    for v, t in re.findall(r'(?:^|[(,])\s*(_\w+)\s*\*\s*(\w+)\s*(?=[,)])', code[:code.find('{')]) + \
+            re.findall(r'(?m)^[ \t]+(_\w+)\s*\*\s*(\w+);$', code):
+        if v in TRUNCATED:
+            code = re.sub(r'\b%s->field_0x([0-9a-f]+)\b' % t, lambda m: '((unsigned char *)%s)[0x%s]' % (t, m.group(1))
+                          if int(m.group(1), 16) >= TRUNCATED[v] else m.group(0), code)
+            if v in STRUCT_SIZE:      # ('&this[-1].field_0x1654', 0x4427D0)
+                code = re.sub(r'\b%s\[(-?\d+)\]\.field_0x([0-9a-f]+)\b' % t,
+                              lambda m: '((unsigned char *)%s)[%d]' % (t, int(m.group(1)) * STRUCT_SIZE[v] +
+                                                                     int(m.group(2), 16))
+                              if int(m.group(2), 16) >= TRUNCATED[v] else m.group(0), code)
+    # a switch on a pointer (0x54C6C0's 'switch(param_1)' of an undefined4 *, 0x5952A0's of an HWND): on its value
+    for m in set(re.findall(r'\bswitch\((\w+)\)', code)):
+        if re.search(r'(?:\*\s*|\b_WinDef_h_H[A-Z]+\s+)%s\s*[;,)]' % m, code[:code.find(')', code.find('{'))]) or \
+                re.search(r'(?m)^[ \t]+(?:[A-Za-z_][\w ]*?\s*\*+|_WinDef_h_H[A-Z]+)\s*%s;$' % m, code):
+            code = re.sub(r'\bswitch\(%s\)' % m, 'switch((unsigned int)%s)' % m, code)
+            code = re.sub(r'\bcase \((?:[\w ]+\*+|_WinDef_h_H[A-Z]+)\)(-?(?:0x[0-9a-f]+|\d+)):', r'case \1:', code)
+    # the bits of an array's first bytes ('BITCAST(float, (local_7c))' of a std::string, 0x47BA60): read there
+    arrays = set(re.findall(r'(?m)^[ \t]+[A-Za-z_][\w ]*?[\s*]+(\w+)\s*\[\d+\];$', code))
+    code = re.sub(r'\bBITCAST\(([^,()]+), \((\w+)\)\)',
+                  lambda m: '(*(%s *)(%s))' % (m.group(1), m.group(2)) if m.group(2) in arrays else m.group(0), code)
     # a global without a type subscripted ('(&((void *)G_006C7C90))[param_1]', 0x579BA0): the decompiler's
     # undefined1 elements, bytes (all such accesses are 'mov al, byte ptr [eax + 0x6c7c90]')
     code = re.sub(r'\(&\(\(void \*\)(&?G_[0-9A-F]{8})\)\)\[', r'((unsigned char *)\1)[', code)
@@ -1397,6 +1420,11 @@ def convert(f, protos, skip, imports, impnames):
             decls.append('#define G_%s ((%s *)d_%s)' % (g, parts[1], g))
         else:
             decls.append('#define G_%s (*(%s *)d_%s)' % (g, parts[0], g))
+            # (subscripted: a byte one the bytes from there, 'G_006C0BE4[0x1f]' 'cmp byte ptr [0x6c0c03], bl' in
+            # 0x464690; not a dword one, a pointer of elements of a type the decompiler does not say,
+            # 'G_006CA2C4[0x13]' floats in 0x449440)
+            if parts[0] in ('undefined1', 'char', 'byte', 'uchar', 'bool'):
+                body = re.sub(r'\bG_%s\[' % g, '((%s *)d_%s)[' % (parts[0], g), body)
             if parts[0] in ('undefined4', 'uint', 'int', 'dword', 'ulong', 'long'):
                 # a pointer the decompiler typed as a dword, dereferenced ('*G_006C8C10 + 0xe4', the vftable of
                 # a COM object): the load of a dword through it
@@ -1527,6 +1555,9 @@ def main():
     types = open(a.types, encoding='utf-8').read()
     ONE_BYTE.update(re.findall(r'_Static_assert\(sizeof\((_Demangler_\w+)\) == 1,', types))
     STRUCT_SIZE.update((t, int(n)) for t, n in re.findall(r'_Static_assert\(sizeof\((\w+)\) == (\d+),', types))
+    # structures the types header cut short (their last bytes one pad array): where the pad starts
+    TRUNCATED.update(('_' + t, int(n, 16) + 1) for t, n in re.findall(
+        r'\nstruct _(\w+) \{(?:(?!\n\};)[\s\S])*?\n    unsigned char field_0x([0-9a-f]+);\n    unsigned char pad_\d+\[\d+\];\n\};', types))
     # Ghidra's own names for a few base types
     types = types.replace('float10 ', 'double ')
     with open(pre, 'w', encoding='utf-8') as f:
