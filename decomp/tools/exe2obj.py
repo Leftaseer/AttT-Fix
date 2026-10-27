@@ -154,6 +154,7 @@ def main():
         tab, trel = bytearray(struct.pack('<I', len(repl))), []
         slots, lrel = bytearray(), []
         items = sorted(repl.items())
+        tdrop, tadd = set(), []         # relocations under the jmps to the stubs, and theirs (one pass, after)
         always_on = {int(x, 16) for x in open(a.always_on).read().split()} if a.always_on else set()
         plain = {}
         n_tr = 0
@@ -229,8 +230,8 @@ def main():
             o_ = va - s_[1]
             s_[3][o_] = 0xE9
             struct.pack_into('<I', s_[3], o_ + 1, st_off)
-            s_[4] = [x for x in s_[4] if not (o_ < x[0] + 4 and x[0] < o_ + 5)]
-            s_[4].append((o_ + 1, 'STUBS', IMAGE_REL_I386_REL32))
+            tdrop.update(range(o_ - 3, o_ + 5))
+            tadd.append((o_ + 1, 'STUBS', IMAGE_REL_I386_REL32))
             n_tr += 1
         SCN['.ntext'] = 0x60000020
         secs.append(['.ntext', 0xF0000000, len(stubs), stubs, srel])
@@ -240,15 +241,20 @@ def main():
         data_sec = len(secs)
         slot_sym = sym('$toggle_slots', len(tab), data_sec, 3)
         sym('_decomp_toggle_table', 0, data_sec, 2)
+        text[4] = [x for x in text[4] if x[0] not in tdrop] + tadd
         for s_ in secs:
             s_[4] = [(o, stub_sym if sy == 'STUBS' else slot_sym if sy == 'SLOTS' else sy, t) for o, sy, t in s_[4]]
         repl_jmp = plain
         print('toggle: %d switchable, %d always on' % (n_tr, len(plain)))
+    # (the relocations under the 5 bytes of each jmp go, in one pass per section: one per jmp took a minute)
+    drop, add = {}, {}
     for va, new in repl_jmp.items():
         si = find_sec(va); s = secs[si]; off = va - s[1]
         s[3][off] = 0xE9; struct.pack_into('<I', s[3], off + 1, 0)
-        s[4] = [x for x in s[4] if not (off < x[0] + 4 and x[0] < off + 5)]
-        s[4].append((off + 1, sym(cname(new)), IMAGE_REL_I386_REL32))
+        drop.setdefault(si, set()).update(range(off - 3, off + 5))
+        add.setdefault(si, []).append((off + 1, sym(cname(new)), IMAGE_REL_I386_REL32))
+    for si in drop:
+        secs[si][4] = [x for x in secs[si][4] if x[0] not in drop[si]] + add[si]
 
     # public symbols for new code
     if a.syms:

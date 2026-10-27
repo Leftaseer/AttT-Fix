@@ -4,7 +4,11 @@ rebuilt exe can be checked in the game itself on a machine without a GPU or a sc
 
     rungame.py EXE NAME 'wait 25; key Escape; wait 5; shot menu; click 640 480; wait 10; shot after'
 
-Actions (separated by ';'): wait SECONDS | key XDOTOOL_KEY | click X Y | abs X Y | move DX DY [TIMES] | press | focus | geom | shot LABEL
+Actions (separated by ';'): wait SECONDS | until REGEX SECONDS | key XDOTOOL_KEY | click X Y | abs X Y | move DX DY [TIMES] |
+press | focus | geom | shot LABEL | bt
+(a wait ends early and the script stops when the game exits or writes its error log; 'until' waits for a line of
+Wine's output, the game's debugger output included, '_' for a space in the expression, and stops the script if
+none comes)
 (the game moves its own cursor by DirectInput, which sees relative motion: use move, then press)
 The game folder is made in $WORK/game/NAME from symlinks to the installed game ($GAME_DIR) plus a copy of EXE;
 the startup videos are skipped (-nologo) unless LOGOS=1; screenshots go to $WORK/shots/NAME_LABEL.png; Wine's output, including the engine's errors of a build made with
@@ -89,13 +93,45 @@ def xdo(*a):
     subprocess.run(['xdotool'] + list(a), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
 
 
+def stopped():
+    """why the script cannot go on: the game exited, or wrote its engine error log (it may sit in a message box)"""
+    if game.poll() is not None:
+        return 'the game exited (%s)' % game.returncode
+    if any(f.startswith('__ATThrone__ERRORS') for f in os.listdir(D)):
+        return 'the game wrote an error log'
+    return None
+
+
+def pause(seconds):
+    """sleep, but no longer than the game keeps going"""
+    end = time.time() + seconds
+    while time.time() < end:
+        if stopped():
+            return False
+        time.sleep(min(0.5, max(0, end - time.time())))
+    return True
+
+
+import re
 for act in [s.strip() for s in script.split(';') if s.strip()]:
     q = act.split()
-    if game.poll() is not None:
-        print('the game exited (%s) before: %s' % (game.returncode, act))
+    why = stopped()
+    if why:
+        print('%s before: %s' % (why, act), flush=True)
         break
     if q[0] == 'wait':
-        time.sleep(float(q[1]))
+        pause(float(q[1]))
+    elif q[0] == 'until':                   # until REGEX SECONDS: a line of Wine's output (the debugger output too)
+        rx, end, found = re.compile(q[1].replace('_', ' ')), time.time() + float(q[2]), False
+        while not found and time.time() < end and not stopped():
+            out.flush()
+            found = bool(rx.search(open(os.path.join(D, 'wine.txt'), errors='replace').read()))
+            if not found:
+                time.sleep(0.5)
+        print('until %s: %s after %.0f s' % (q[1], 'seen' if found else 'not seen', float(q[2]) - (end - time.time())),
+              flush=True)
+        if not found:
+            break
     elif q[0] == 'key':                     # held for a while: DirectInput reads the key state once a frame
         xdo('keydown', q[1]); time.sleep(0.4); xdo('keyup', q[1])
     elif q[0] == 'click':

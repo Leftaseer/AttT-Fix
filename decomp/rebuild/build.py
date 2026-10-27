@@ -14,7 +14,7 @@
 5. lld-link puts everything together; tools/verify_relink.py checks the untouched original bytes.
 Addresses in the sources are AttT ones; for Valkyrie they are translated through symbols/attt2valk*.tsv.
 """
-import argparse, os, re, struct, subprocess, sys, glob
+import argparse, os, re, struct, subprocess, sys, glob, hashlib, json, shutil, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -28,11 +28,58 @@ REG_ORDER = ['ECX', 'EAX', 'EDX', 'EBX', 'ESI', 'EDI']
 
 
 def run(cmd, **kw):
+    t0 = time.time()
     r = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    if os.environ.get('DECOMP_BUILD_TIMES') and time.time() - t0 > 1:
+        sys.stderr.write('%5.1f s  %s\n' % (time.time() - t0, ' '.join(cmd)[:150]))
     if r.returncode != 0:
         sys.stderr.write('$ %s\n%s%s' % (' '.join(cmd), r.stdout, r.stderr))
         sys.exit(1)
     return r.stdout
+
+
+# Compiler runs are cached (DECOMP_BUILD_CACHE, default ~/.cache/decomp_build): the key is the command, the source
+# and every header the sources may include (rebuild/include, rebuild/src, the generated code's own headers), so a
+# rebuild compiles only what changed.  They run on all cores.
+CACHE = os.environ.get('DECOMP_BUILD_CACHE', os.path.expanduser('~/.cache/decomp_build'))
+_deps = []
+
+
+def header_digest(dirs):
+    h = hashlib.sha256()
+    for d in dirs:
+        for f in sorted(glob.glob(os.path.join(d, '**', '*.h'), recursive=True) +
+                        glob.glob(os.path.join(d, '**', '*.inc'), recursive=True)):
+            h.update(f.encode() + b'\0' + open(f, 'rb').read())
+    _deps[:] = [h.hexdigest()]
+
+
+def cached_run(cmd, src, out=None):
+    """run a compiler command on src: its stdout, or (out given) the file it writes, from the cache if it ran before"""
+    key = hashlib.sha256(json.dumps([[x if x != out else 'OUT' for x in cmd], _deps]).encode() +
+                         open(src, 'rb').read()).hexdigest()
+    path = os.path.join(CACHE, key[:2], key)
+    if os.path.exists(path):
+        if out:
+            shutil.copyfile(path, out)
+            return ''
+        return open(path, encoding='utf-8').read()
+    res = run(cmd)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + '.%d' % os.getpid()
+    if out:
+        shutil.copyfile(out, tmp)
+    else:
+        open(tmp, 'w', encoding='utf-8').write(res)
+    os.replace(tmp, path)
+    return res
+
+
+def pmap(f, items):
+    """f over items on all cores, in order"""
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(os.cpu_count() or 4) as ex:
+        return list(ex.map(f, items))
 
 
 def load_functions(game):
@@ -109,9 +156,10 @@ def scan_sources(files, cflags):
     preprocessed sources (so #if DECOMP_GAME_ATTT / DECOMP_GAME_VALK is honoured)."""
     decomp, protos = [], {}
     conv_of = {'__cdecl': 'FN', '__stdcall': 'STDCALL', '__fastcall': 'FASTCALL', '__thiscall': 'THISCALL'}
-    for fn in files:
+    def pre(fn):
         extra = ['-x', 'c++', '-std=c++17'] if fn.endswith('.cpp') else ['-x', 'c', '-std=c11']
-        src = run(['clang'] + cflags + extra + ['-DDECOMP_SCAN', '-E', '-P', fn])
+        return cached_run(['clang'] + cflags + extra + ['-DDECOMP_SCAN', '-E', '-P', fn], fn)
+    for fn, src in zip(files, pmap(pre, files)):
         for m in re.finditer(r'__decomp_marker__\(\s*([0-9A-Fa-f]{8})\s*\)\s*([^{;]*?)\b([A-Za-z_][\w:~<>]*)\s*(\((?:[^()]|\([^()]*\))*\))', src):
             addr, name, params = int(m.group(1), 16), m.group(3), m.group(4)
             decomp.append((addr, name, split_params(params), '::' in name, fn))
@@ -269,27 +317,28 @@ def main():
               # Win32 / Direct3D 9 declarations from mingw-w64 work with the MSVC ABI this way
               '-fgnuc-version=4.2.1', '-D_X86_', '-DWIN32_LEAN_AND_MEAN', '-isystem', mingw_inc,
               '-I', os.path.join(HERE, 'src'), '-D', 'DECOMP_GAME_%s=1' % game.upper()] + ['-D' + d for d in a.defines]
+    header_digest([os.path.join(HERE, 'include'), os.path.join(HERE, 'src')] + ([os.path.abspath(a.auto)] if a.auto else []))
     decomp, protos = scan_sources(files, cflags)
     # compile
-    objs = []
     lua_dir = os.path.join(HERE, 'src', 'lua51')
-    for fn in files:
+
+    def compile_src(fn):
         obj = os.path.join(work, os.path.relpath(fn, os.path.join(HERE, 'src')).replace(os.sep, '_') + '.obj')
         if os.path.dirname(fn) == lua_dir:
             # Lua 5.1.2 as the game built it: C++ (an error is a C++ exception through the game's frames) and
             # x87 arithmetic, whose precision the game sets to single (src/lua51/decomp_entries.c)
             fl = [x for x in cflags if x not in ('-march=pentium4', '-msse2')]
             # (the runtime is MSVCR80: time_t is 64 bits, os.time calls _time64 as the original does)
-            run(['clang'] + fl + ['-march=pentium-mmx', '-mfpmath=387', '-x', 'c++', '-std=c++17', '-fexceptions',
-                                  '-fcxx-exceptions', '-w', '-D__MSVCRT_VERSION__=0x0800', '-D__USE_MINGW_ANSI_STDIO=0',
-                                  '-D__MINGW_USE_VC2005_COMPAT',
-                                  '-include', os.path.join(lua_dir, 'decomp_crt.h'),
-                                  '-c', fn, '-o', obj])
-            objs.append(obj)
-            continue
+            cached_run(['clang'] + fl + ['-march=pentium-mmx', '-mfpmath=387', '-x', 'c++', '-std=c++17', '-fexceptions',
+                                         '-fcxx-exceptions', '-w', '-D__MSVCRT_VERSION__=0x0800', '-D__USE_MINGW_ANSI_STDIO=0',
+                                         '-D__MINGW_USE_VC2005_COMPAT',
+                                         '-include', os.path.join(lua_dir, 'decomp_crt.h'),
+                                         '-c', fn, '-o', obj], fn, obj)
+            return obj
         extra = ['-std=c++17', '-fno-exceptions', '-fno-rtti'] if fn.endswith('.cpp') else ['-std=c11']
-        run(['clang'] + cflags + extra + ['-c', fn, '-o', obj])
-        objs.append(obj)
+        cached_run(['clang'] + cflags + extra + ['-c', fn, '-o', obj], fn, obj)
+        return obj
+    objs = pmap(compile_src, files)
     native = set()          # DECOMP addresses that are already addresses of this game (auto-decompiled code)
     custom_auto = {}        # auto functions written as cdecl with the register parameters first
     if a.auto:
@@ -323,6 +372,7 @@ def main():
                 sys.exit('%08X: the hand-written code and the generated code see different conventions' % ad)
             funcs[ad] = (size, new, int(q[2]), clob)
         hand = set(d[0] for d in decomp) if game == 'attt' else set(gaddr(d[0]) for d in decomp)
+        srcs = []
         for fn in sorted(glob.glob(os.path.join(a.auto, 'auto_*.c'))):
             src = fn
             if allow is not None:
@@ -334,9 +384,16 @@ def main():
                     continue
                 src = os.path.join(work, 'sel_' + os.path.basename(fn))
                 open(src, 'w', encoding='utf-8').write(head + ''.join(keep))
+            srcs.append((fn, src))
+
+        def scan_compile(fs):
+            fn, src = fs
+            obj = os.path.join(work, 'auto_' + os.path.basename(fn) + '.obj')
+            cached_run(['clang'] + aflags + ['-c', src, '-o', obj], src, obj)
+            return cached_run(['clang'] + aflags + ['-DDECOMP_SCAN', '-E', '-P', src], src), obj
+        for (fn, src), (pre, obj) in zip(srcs, pmap(scan_compile, srcs)):
             for m in re.finditer(r'^/\* @func ([0-9A-F]{8}) custom \*/$', open(src, encoding='utf-8').read(), flags=re.M):
                 custom_auto[int(m.group(1), 16)] = True
-            pre = run(['clang'] + aflags + ['-DDECOMP_SCAN', '-E', '-P', src])
             for m in re.finditer(r'__decomp_marker__\(\s*([0-9A-Fa-f]{8})\s*\)\s*([^{;]*?)\b(f_[0-9A-F]{8})\s*(\((?:[^()]|\([^()]*\))*\))', pre):
                 ad = int(m.group(1), 16)
                 if ad in hand:
@@ -347,8 +404,6 @@ def main():
             for m in re.finditer(r'(__cdecl|__stdcall|__fastcall|__thiscall)\s+sub_([0-9A-Fa-f]{8})\s*(\((?:[^()]|\([^()]*\))*\))', pre):
                 conv_of = {'__cdecl': 'FN', '__stdcall': 'STDCALL', '__fastcall': 'FASTCALL', '__thiscall': 'THISCALL'}
                 protos.setdefault(int(m.group(2), 16), (conv_of[m.group(1)], split_params(m.group(3))))
-            obj = os.path.join(work, 'auto_' + os.path.basename(fn) + '.obj')
-            run(['clang'] + aflags + ['-c', src, '-o', obj])
             objs.append(obj)
     rt = os.path.join(work, 'rt_support.obj')
     run(['clang'] + cflags + ['-c', os.path.join(HERE, 'rt_support.c'), '-o', rt])

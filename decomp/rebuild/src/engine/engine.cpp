@@ -138,10 +138,12 @@ static int __cdecl DecompLogLua(void *L)
 }
 
 /* "MS loadsave NAME" (the bisection script's game0): from the main menu, open the load menu, choose the saved game
- * NAME (Saves/NAME.sav) and load it, tried every second until it is done or the save is not there */
+ * NAME (Saves/NAME.sav, '*' the first one) and load it, tried every second until it is done or the save is not
+ * there.  Once the world's GUI scene is up again, "autoload: loaded at MS ms" goes to the debugger output (the
+ * tests wait for it, tools/rungame.py 'until'), and lines "L+MS ..." run MS milliseconds after that. */
 static char g_autoload[64];
-static int g_autoloadState;     /* 0 none, 1 trying, 2 loading, 3 not found */
-static DWORD g_autoloadNext;
+static int g_autoloadState;     /* 0 none, 1 trying, 2 loading, 3 not found, 4 loaded */
+static DWORD g_autoloadNext, g_loadedAt;
 
 static int __cdecl DecompAutoloadLua(void *L)
 {
@@ -151,19 +153,29 @@ static int __cdecl DecompAutoloadLua(void *L)
     return 0;
 }
 
-static void AutoloadStep()
+static void AutoloadStep(DWORD start)
 {
-    if (g_autoloadState != 1 || g_testLua[0] || (int)(GetTickCount() - g_autoloadNext) < 0)
+    if (g_autoloadState == 4 && !g_loadedAt) {
+        g_loadedAt = GetTickCount();
+        char b[64];
+        sprintf(b, "autoload: loaded at %u ms", (unsigned)(g_loadedAt - start));
+        OutputDebugStringA(b);
+    }
+    if ((g_autoloadState != 1 && g_autoloadState != 2) || g_testLua[0] || (int)(GetTickCount() - g_autoloadNext) < 0)
         return;
     g_autoloadNext = GetTickCount() + 1000;
-    sprintf(g_testLua,
-            "pcall(function() local L = GUIScene and GUIScene.Load "
-            "if L and L.scene and L._SlotNames then "
-            "for i, n in pairs(L._SlotNames) do if n == '%s' then L._CurrentSlotNum = i DecompAutoload(2) "
-            "DecompLog('autoload: %s') L:StrongLoad() return end end "
-            "DecompAutoload(3) DecompLog('autoload: no saved game %s') return end "
-            "for k, v in pairs(GUIScene or {}) do if type(v) == 'table' and rawget(v, '_ChooseHero') and v.scene then "
-            "v:_Load() return end end end)", g_autoload, g_autoload, g_autoload);
+    if (g_autoloadState == 2)      /* loading: done when the world level's GUI scene is up (also under a battle) */
+        sprintf(g_testLua, "pcall(function() local W = GUIScene and GUIScene.WorldLevel "
+                           "if W and rawget(W, 'scene') then DecompAutoload(4) end end)");
+    else
+        sprintf(g_testLua,
+                "pcall(function() local L = GUIScene and GUIScene.Load "
+                "if L and L.scene and L._SlotNames then "
+                "for i, n in pairs(L._SlotNames) do if n == '%s' or '%s' == '*' then L._CurrentSlotNum = i "
+                "DecompAutoload(2) DecompLog('autoload: ' .. n) L:StrongLoad() return end end "
+                "DecompAutoload(3) DecompLog('autoload: no saved game %s') return end "
+                "for k, v in pairs(GUIScene or {}) do if type(v) == 'table' and rawget(v, '_ChooseHero') and v.scene then "
+                "v:_Load() return end end end)", g_autoload, g_autoload, g_autoload);
     g_testLuaWait = 0;
 }
 
@@ -215,7 +227,7 @@ void TestInput(CInput *input)
     }
     if (g_testLua[0] && ++g_testLuaWait > 30)
         TestLua();
-    AutoloadStep();
+    AutoloadStep(start);
     {   /* every move of the game's cursor, to see where scripted mouse input lands */
         static int lx = -1, ly = -1;
         const float *p = CCursor::Instance()->ScreenPos();
@@ -231,18 +243,24 @@ void TestInput(CInput *input)
         ORIG_CALL(0044A3F0)(d_006C901C, &info);
     }
     for (;;) {
+        static bool afterLoad;
         if (!pending) {
             if (!f || !fgets(line, sizeof(line), f))
                 return;
             unsigned ms = 0;
-            if (sscanf(line, "%u", &ms) != 1)
+            afterLoad = line[0] == 'L';
+            if (sscanf(line + afterLoad, "%u", &ms) != 1)
                 continue;
-            due = start + ms;
+            due = ms;
             pending = true;
         }
-        if ((int)(GetTickCount() - due) < 0)
+        if (afterLoad && !g_loadedAt)
+            return;
+        if ((int)(GetTickCount() - (afterLoad ? g_loadedAt : start) - due) < 0)
             return;
         pending = false;
+        if (afterLoad)                  /* the rest of the line as if it had a plain time */
+            memmove(line, line + 1, strlen(line));
         unsigned ms = 0;
         int x, y;
         sscanf(line, "%u", &ms);
