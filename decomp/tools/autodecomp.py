@@ -749,6 +749,13 @@ def convert(f, protos, skip, imports, impnames):
     # a global without a type subscripted ('(&((void *)G_006C7C90))[param_1]', 0x579BA0): the decompiler's
     # undefined1 elements, bytes (all such accesses are 'mov al, byte ptr [eax + 0x6c7c90]')
     code = re.sub(r'\(&\(\(void \*\)(&?G_[0-9A-F]{8})\)\)\[', r'((unsigned char *)\1)[', code)
+    # the 64-bit result of _ftol handed on whole (0x44A4D0 'return CONCAT44(extraout_EDX,(int)fVar1)': the
+    # injection decomp_ftol_int keeps EAX only): the float truncated to 64 bits, EDX:EAX as _ftol leaves them
+    if 'decomp_ftol_int' in code:
+        code = re.sub(r'\bCONCAT44\(extraout_EDX(?:_\d+)?,\(int\)(\w+)\)', r'(ulonglong)(longlong)\1', code)
+        for v in set(re.findall(r'(?m)^[ \t]*\w+[ \t]+(extraout_EDX(?:_\d+)?);$', code)):
+            if len(re.findall(r'\b%s\b' % v, code)) == 1:
+                code = re.sub(r'(?m)^[ \t]*\w+[ \t]+%s;\n' % v, '', code)
     # a local Ghidra declares undefined4 but assigns a pointer and dereferences (0x545400 'local_63c = (int
     # *)sub_0053EA20(); local_63c[1] = ...'): give the declaration that pointer type (same size)
     for v in re.findall(r'(?m)^  undefined4 (\w+);$', code):
