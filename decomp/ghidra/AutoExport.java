@@ -96,7 +96,15 @@ public class AutoExport extends GhidraScript {
         }
         return isFloat(a) != isFloat(b) && base(a).getLength() == base(b).getLength() && !(base(a) instanceof Pointer && false);
     }
-    String floatMix(HighFunction hf, Function f, Set<SequenceNumber> bits, Map<String, String> icallFloats) {
+    Function callTarget(PcodeOp op) {
+        Function t = getFunctionAt(op.getInput(0).getAddress());
+        if (t == null)
+            for (Reference ref : getReferencesFrom(op.getInput(0).getAddress()))
+                if (ref.isExternalReference() && ((ExternalReference) ref).getExternalLocation() != null)
+                    t = ((ExternalReference) ref).getExternalLocation().getFunction();
+        return t;
+    }
+    String floatMix(HighFunction hf, Function f, Set<SequenceNumber> bits, Set<String> fixed, Map<String, String> icallFloats) {
         Iterator<PcodeOpAST> it = hf.getPcodeOps();
         while (it.hasNext()) {
             PcodeOpAST op = it.next();
@@ -118,11 +126,12 @@ public class AutoExport extends GhidraScript {
             // (not INDIRECT: a value a call may have changed, nothing the C text moves; 0x4EA940's float field
             // across a virtual call)
             if (c == PcodeOp.COPY || c == PcodeOp.CAST || c == PcodeOp.MULTIEQUAL) {
-                if (mix(htype(out), htype(op.getInput(0))))
+                if (mix(htype(out), htype(op.getInput(0))) && !fixed.contains(op.getSeqnum() + ":0"))
                     return "copy at " + op.getSeqnum().getTarget() + ": " + op.getMnemonic() + " " + htype(out).getName() +
                         " <- " + htype(op.getInput(0)).getName() + (op.getInput(0).isConstant() ? " const" : "");
             } else if (c == PcodeOp.STORE) {
-                if (mix(pointee(htype(op.getInput(1))), htype(op.getInput(2)))) return "store at " + op.getSeqnum().getTarget();
+                if (mix(pointee(htype(op.getInput(1))), htype(op.getInput(2))) && !fixed.contains(op.getSeqnum() + ":2"))
+                    return "store at " + op.getSeqnum().getTarget();
             } else if (c == PcodeOp.LOAD) {
                 if (mix(pointee(htype(op.getInput(1))), htype(out))) return "load at " + op.getSeqnum().getTarget();
             } else if (c == PcodeOp.CALL) {
@@ -142,7 +151,8 @@ public class AutoExport extends GhidraScript {
                 if (out != null && mix(t.getReturnType(), htype(out))) return "call result at " + op.getSeqnum().getTarget();
                 Parameter[] ps = t.getParameters();
                 for (int k = 1; k < op.getNumInputs() && k - 1 < ps.length; k++)
-                    if (mix(ps[k - 1].getDataType(), htype(op.getInput(k)))) return "argument at " + op.getSeqnum().getTarget();
+                    if (mix(ps[k - 1].getDataType(), htype(op.getInput(k))) && !fixed.contains(op.getSeqnum() + ":" + k))
+                        return "argument at " + op.getSeqnum().getTarget();
             } else if (c == PcodeOp.CALLIND) {
                 // the call-site prototypes of ICallOverride.java take undefined4: a float argument would be converted.
                 // A 4-byte one is listed (icallfloat: call address -> argument indices) and tools/autodecomp.py types
@@ -155,7 +165,8 @@ public class AutoExport extends GhidraScript {
                         (x, y) -> x + "," + y);
                 }
             } else if (c == PcodeOp.RETURN && op.getNumInputs() > 1) {
-                if (mix(f.getReturnType(), htype(op.getInput(1)))) return "result at " + op.getSeqnum().getTarget();
+                if (mix(f.getReturnType(), htype(op.getInput(1))) && !fixed.contains(op.getSeqnum() + ":1"))
+                    return "result at " + op.getSeqnum().getTarget();
             }
         }
         return null;
@@ -303,7 +314,8 @@ public class AutoExport extends GhidraScript {
     }
 
     String render(DecompileResults r, Function f, Map<Long, String> globals, Map<Long, String> callees,
-                  Set<DataType> used, Map<Long, String> strings, Map<String, String> sized, Set<SequenceNumber> bits) {
+                  Set<DataType> used, Map<Long, String> strings, Map<String, String> sized, Set<SequenceNumber> bits,
+                  Set<String> fixed) {
         ClangTokenGroup g = r.getCCodeMarkup();
         List<ClangNode> toks = new ArrayList<>();
         g.flatten(toks);
@@ -322,10 +334,48 @@ public class AutoExport extends GhidraScript {
             after.put(end, after.getOrDefault(end, "") + "))");
             bits.add(e.getValue().getSeqnum());
         }
+        // implicit conversions the decompiler does not print: a float stored through an integer pointer, copied to an
+        // integer variable, returned or passed as one (or the other way round) keeps its bits for the decompiler
+        // ('*(undefined4 *)(p + 8) = fVar1;' is a conversion in C).  A lone variable or constant as the operand is
+        // written BITCAST(T, x); fixed: the op and its input index, for floatMix
+        Map<Integer, String> prefix = new HashMap<>();
+        for (Iterator<PcodeOpAST> it = r.getHighFunction().getPcodeOps(); it.hasNext(); ) {
+            PcodeOpAST op = it.next();
+            int c = op.getOpcode();
+            Map<Integer, DataType> want = new HashMap<>();      // input index -> the type it is used as
+            if (c == PcodeOp.STORE) want.put(2, pointee(htype(op.getInput(1))));
+            else if (c == PcodeOp.COPY) want.put(0, htype(op.getOutput()));
+            else if (c == PcodeOp.RETURN && op.getNumInputs() > 1) want.put(1, f.getReturnType());
+            else if (c == PcodeOp.CALL) {
+                Function t = callTarget(op);
+                if (t != null) {
+                    Parameter[] ps = t.getParameters();
+                    for (int k = 1; k < op.getNumInputs() && k - 1 < ps.length; k++) want.put(k, ps[k - 1].getDataType());
+                }
+            }
+            for (Map.Entry<Integer, DataType> w : want.entrySet()) {
+                Varnode v = op.getInput(w.getKey());
+                DataType tt = w.getValue();
+                if (tt == null || !mix(tt, htype(v)) || base(tt).getLength() != v.getSize()) continue;
+                int idx = -1, n = 0;
+                for (int k = 0; k < toks.size(); k++) {
+                    ClangToken tk = (ClangToken) toks.get(k);
+                    if (tk instanceof ClangVariableToken && tk.getPcodeOp() == op && ((ClangVariableToken) tk).getVarnode() == v) {
+                        idx = k;
+                        n++;
+                    }
+                }
+                if (n != 1 || before.containsKey(idx)) continue;
+                prefix.put(idx, prefix.getOrDefault(idx, "") + "BITCAST(" + ctype(tt, used) + ", ");
+                after.put(idx, ")" + after.getOrDefault(idx, ""));
+                fixed.add(op.getSeqnum() + ":" + w.getKey());
+            }
+        }
         for (int ti = 0; ti < toks.size(); ti++) {
             if (after.containsKey(ti - 1)) sb.append(after.get(ti - 1));   // the end of a BITCAST operand
             ClangToken t = (ClangToken) toks.get(ti);
             String text = t.getText();
+            if (prefix.containsKey(ti)) sb.append(prefix.get(ti));
             if (before.containsKey(ti)) {
                 sb.append(before.get(ti));
                 continue;
@@ -510,7 +560,8 @@ public class AutoExport extends GhidraScript {
                 Set<DataType> used = new HashSet<>();
                 String code;
                 Set<SequenceNumber> bits = new HashSet<>();
-                try { code = render(r, f, globals, callees, used, strings, sized, bits); }
+                Set<String> fixed = new HashSet<>();
+                try { code = render(r, f, globals, callees, used, strings, sized, bits, fixed); }
                 catch (Exception e) { return null; }
                 usedAll.addAll(used);
                 StringBuilder sb = new StringBuilder();
@@ -520,7 +571,7 @@ public class AutoExport extends GhidraScript {
                 sb.append(",\"custom\":").append(f.hasCustomVariableStorage());
                 String fm = null;
                 Map<String, String> icallFloats = new TreeMap<>();
-                try { fm = floatMix(r.getHighFunction(), f, bits, icallFloats); } catch (Exception e) { fm = "check failed"; }
+                try { fm = floatMix(r.getHighFunction(), f, bits, fixed, icallFloats); } catch (Exception e) { fm = "check failed"; }
                 if (fm != null) sb.append(",\"floatmix\":").append(js(fm));
                 if (!icallFloats.isEmpty()) {
                     sb.append(",\"icallfloat\":{");

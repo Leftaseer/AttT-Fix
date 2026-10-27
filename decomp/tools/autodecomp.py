@@ -498,21 +498,22 @@ def convert(f, protos, skip, imports, impnames):
             return None, 'catches exceptions'
     # the statements on the SEH chain go; a variable given its head and used elsewhere would be left unset (0x491F50
     # passes 'in_eax = ExceptionList' on to 0x491CF0 when a branch does not set it): it reads fs:[0] itself
-    seh = r'\b(?:G_FFDFF000|unaff_FS_OFFSET|ExceptionList)\b'
-    for v in set(re.findall(r'(?m)^\s*(\w+)\s*=\s*(?:\([^()]*\)\s*)?(?:G_FFDFF000|unaff_FS_OFFSET|ExceptionList)\s*;', body)):
-        if any(re.search(r'\b%s\b' % v, st) and not re.search(seh, st) and not re.match(r'\s*#define', st) and
+    # the head of the chain: the global at fs:[0] (G_FFDFF000), the TEB's ExceptionList, or what unaff_FS_OFFSET
+    # points at (*unaff_FS_OFFSET: 0x421020)
+    fshead = r'(?:\bG_FFDFF000\b|\bExceptionList\b|\*\s*unaff_FS_OFFSET\b)'
+    body = re.sub(r'(?m)^[ \t]*[A-Za-z_][\w ]*?[\s*]+(?:unaff_FS_OFFSET|ExceptionList)\s*;[ \t]*\n', '', body)
+    for v in set(re.findall(r'(?m)^\s*(\w+)\s*=\s*(?:\([^()]*\)\s*)?%s\s*;' % fshead, body)):
+        if any(re.search(r'\b%s\b' % v, st) and not re.search(fshead, st) and not re.match(r'\s*#define', st) and
                not re.match(r'\s*[A-Za-z_][\w ]*?[\s*]+%s\s*(?:\[\d+\])?\s*;\s*$' % v, st)
                for st in re.findall(r'[^;{}]*[;{}]', body)):
-            body = re.sub(r'(?m)^(\s*%s\s*=\s*(?:\([^()]*\)\s*)?)(?:G_FFDFF000|unaff_FS_OFFSET|ExceptionList)(\s*;)' % v,
-                          r'\1GH_FS0\2', body)
+            body = re.sub(r'(?m)^(\s*%s\s*=\s*(?:\([^()]*\)\s*)?)%s(\s*;)' % (v, fshead), r'\1GH_FS0\2', body)
     # then the chain's own statements go: its writes (also inside expressions, '(G_FFDFF000 = &local_c, cond)':
-    # 0x47DEB0) and the saves of the head in variables used nowhere else; whatever else reads it reads fs:[0]
+    # 0x47DEB0) and the saves of the fshead in variables used nowhere else; whatever else reads it reads fs:[0]
     # itself (the upper bytes of a bool result left from loading it: 0x438D70)
-    fs = r'(?:G_FFDFF000|unaff_FS_OFFSET|ExceptionList)'
-    body = re.sub(r'\b%s\s*=\s*&?\s*\w+\s*,\s*' % fs, '', body)
-    body = re.sub(r'(?m)^[ \t]*%s\s*=\s*[^;\n]*;[ \t]*\n' % fs, '', body)
-    body = re.sub(r'(?m)^[ \t]*\w+\s*=\s*(?:\([^()]*\)\s*)?%s\s*;[ \t]*\n' % fs, '', body)
-    body = re.sub(r'\b%s\b(?!\s*=[^=])' % fs, 'GH_FS0', body)
+    body = re.sub(r'%s\s*=\s*&?\s*\w+\s*,\s*' % fshead, '', body)
+    body = re.sub(r'(?m)^[ \t]*%s\s*=\s*[^;\n]*;[ \t]*\n' % fshead, '', body)
+    body = re.sub(r'(?m)^[ \t]*\w+\s*=\s*(?:\([^()]*\)\s*)?%s\s*;[ \t]*\n' % fshead, '', body)
+    body = re.sub(r'%s(?!\s*=[^=])' % fshead, 'GH_FS0', body)
 
     # vftable of the function's own class
     own = symname.get(a, '')
