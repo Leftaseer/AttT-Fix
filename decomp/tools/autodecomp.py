@@ -990,7 +990,13 @@ def convert(f, protos, skip, imports, impnames):
             bad.append(m.group(0))   # a 3-byte store has no C type
         t = {1: 'unsigned char', 2: 'unsigned short', 3: 'unsigned int', 4: 'unsigned int', 8: 'unsigned long long'}.get(size, 'int')
         return '(*(%s *)((char *)&%s + %d))' % (t, var, off)
-    body = re.sub(r'\b([A-Za-z_]\w*)\._(\d+)_(\d+)_\b', piece, body)
+    # (of a field or an element too: 'aCStack_124[0].field2_0x8._16_1_', 0x57C8D0)
+    body = re.sub(r'\b([A-Za-z_]\w*(?:\[[^\[\]]*\]|(?:\.|->)(?!_\d+_\d+_)[A-Za-z_]\w*)*)\._(\d+)_(\d+)_\b',
+                  piece, body)
+    # a piece holding a pointer, dereferenced ('*(undefined1 **)*dStack_47c._0_4_', 0x574830): through an
+    # unsigned int * (the piece is an unsigned int in C)
+    body = re.sub(r'((?:\(\s*[A-Za-z_][\w ]*\*+\s*\)|[=(,]|^)\s*)\*(\(\*\(unsigned int \*\)\(\(char \*\)&)',
+                  r'\1*(unsigned int *)\2', body, flags=re.M)
     if bad:
         if not FORCE[0]:
             return None, 'piece of a variable'
