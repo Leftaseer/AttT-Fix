@@ -92,12 +92,13 @@ _depths = {}
 call_sites = {}     # function -> {address of a direct call: callee}
 
 
-def stack_depths(a):
+def stack_depths(a, relative=False):
     """ESP at each instruction of the function at a, as bytes below its return address (negative), from the pops of
     its callees; None where that is not known everywhere (a pop unknown, paths that disagree, ESP set otherwise)"""
-    if a in _depths:
-        return _depths[a]
-    _depths[a] = None
+    key = (a, relative)
+    if key in _depths:
+        return _depths[key]
+    _depths[key] = None
     import capstone
     from capstone import x86 as cx
     from stackfx import switch_targets
@@ -135,6 +136,13 @@ def stack_depths(a):
                 if ops[1].type != cx.X86_OP_IMM:
                     return None
                 dep += -ops[1].imm if m == 'sub' else ops[1].imm
+            elif m == 'lea' and ops[0].type == cx.X86_OP_REG and ops[0].reg == cx.X86_REG_ESP and \
+                    ops[1].mem.base == cx.X86_REG_ESP and not ops[1].mem.index:
+                dep += ops[1].mem.disp      # 'lea esp, [esp]': an alignment nop (0x50554C)
+            elif relative and m == 'and' and ops[0].type == cx.X86_OP_REG and ops[0].reg == cx.X86_REG_ESP:
+                pass                        # (an aligned frame: depths from the aligned ESP, right relative to each other)
+            elif relative and m in ('leave', 'mov') and (m == 'leave' or i.op_str == 'esp, ebp'):
+                break                       # (its epilogue: nothing after it is looked at)
             elif m in ('leave', 'pushal', 'popal', 'pushfd', 'popfd') or (ops and ops[0].type == cx.X86_OP_REG and
                                                                         ops[0].reg == cx.X86_REG_ESP):
                 return None
@@ -165,7 +173,7 @@ def stack_depths(a):
                 if ops[0].type == cx.X86_OP_IMM:
                     todo.append((ops[0].imm, dep))
             p = i.address + i.size
-    _depths[a] = d
+    _depths[key] = d
     return d
 
 
@@ -187,6 +195,94 @@ def vararg_counts(a, slot):
             if n > 0:
                 out.add(n // 4)
     return out
+
+
+def outgoing_mismatch(a, code):
+    """why the text passes something else than the slot a pointer to the outgoing arguments was built in, or None:
+    'mov R, esp' hands a call (the builder) a pointer to a slot a later call (the consumer) takes as an argument;
+    the consumer's argument in the text must name what the builder's does"""
+    import capstone
+    from capstone import x86 as cx
+    dm = stack_depths(a, relative=True)
+    if dm is None:
+        if os.environ.get('AD_DEBUG'):
+            print('outgoing %08X: no depths' % a)
+        return None
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.detail = True
+    try:
+        ins = list(md.disasm(image[0].read(a, fsize.get(a, 0)), a))
+    except Exception:
+        return None
+    def text_calls(c):
+        out = []
+        for cm in re.finditer(r'\bsub_%08X\s*\(' % c, code):
+            depth, q = 1, cm.end()
+            while q < len(code) and depth:
+                depth += {'(': 1, ')': -1}.get(code[q], 0)
+                q += 1
+            out.append(split_args(code[cm.end():q - 1]))
+        return out
+    for k, i in enumerate(ins):
+        if not (i.mnemonic == 'mov' and i.op_str.endswith(', esp') and
+                i.op_str.split(',')[0] in ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi')) or i.address not in dm:
+            continue
+        reg, slot = i.op_str.split(',')[0], dm[i.address]
+        builder = consumer = None
+        pushes = 0
+        for j in ins[k + 1:k + 24]:
+            if j.mnemonic.startswith('ret') or j.mnemonic.startswith('j'):
+                break
+            if j.mnemonic == 'push':
+                pushes += 1
+                if builder is None and j.op_str == reg:
+                    builder = ['stack', pushes]
+                continue
+            if j.mnemonic == 'call':
+                if j.operands[0].type != cx.X86_OP_IMM or j.address not in dm:
+                    break
+                c, dc = j.operands[0].imm, dm[j.address]
+                if builder is not None and builder[0] == 'stack' and len(builder) == 2:
+                    builder = (c, 'stack', pushes - builder[1])          # its stack argument index
+                elif builder is None and reg == 'ecx':
+                    builder = (c, 'this', 0)
+                elif builder is not None and len(builder) == 3:
+                    regs, pop = machine.get(c, (set(), None))
+                    nstack = stack_slots.get(c, (pop or 0) // 4)
+                    if dc <= slot < dc + 4 * nstack:
+                        consumer = (c, (slot - dc) // 4, len(regs))
+                    break
+                if builder is None:
+                    break
+                continue
+            if j.operands and j.operands[0].type == cx.X86_OP_REG and j.op_str.split(',')[0] == reg and \
+                    j.mnemonic not in ('push', 'cmp', 'test') and builder is None:
+                break                               # the pointer overwritten before any use
+        if not builder or len(builder) != 3 or not consumer or consumer[0] in byvalue_offs:
+            continue
+        bc, kind, bk = builder
+        bregs = len(machine.get(bc, (set(), None))[0])
+        cc, ck, cregs = consumer
+        names = set()
+        for args in text_calls(bc):
+            idx = 0 if kind == 'this' else bregs + bk
+            if idx < len(args):
+                names.update(re.findall(r'\b(?:local_[0-9a-f]+|\w*Stack_[0-9a-f]+|stack0x[0-9a-f]+)\b', args[idx]))
+        if not names:
+            continue
+        # (one slot under its other names: stack0xffffffd8 written, in_stack_ffffffd8 read, 0x48EB50)
+        for n in list(names):
+            m = re.fullmatch(r'stack0x(ff[0-9a-f]{6})', n)
+            if m:
+                names.update(['in_stack_' + m.group(1), 'local_%x' % (0x100000000 - int(m.group(1), 16))])
+        calls = text_calls(cc)
+        if os.environ.get('AD_DEBUG'):
+            print('outgoing %08X: builder %08X arg %s, consumer %08X arg %d: %s' % (a, bc, names, cc, cregs + ck,
+                  [x[cregs + ck] if len(x) > cregs + ck else None for x in calls]))
+        if calls and not any(len(x) > cregs + ck and any(re.search(r'\b%s\b' % n, x[cregs + ck]) for n in names)
+                             for x in calls):
+            return 'argument of %08X built in the outgoing arguments, passed as another value' % cc
+    return None
 
 
 def load_machine(path):
@@ -683,6 +779,15 @@ def convert(f, protos, skip, imports, impnames):
             code = code[:s_] + t + code[e_:]
         return code
     code = string_at_call(code)
+    # a value built in the outgoing arguments through a pointer to them ('push ecx; mov ecx, esp; push ecx; call
+    # 0x4FCB40; call 0x511B30': 0x4FCB40 writes the argument of 0x511B30): the call that takes that slot must pass
+    # the variable of the slot; the decompiler may pass a stale value instead (0x505330 handed 0x511B30 another
+    # variable and the battle test crashed)
+    bad = outgoing_mismatch(a, code)
+    if bad:
+        if not FORCE[0]:
+            return None, bad
+        NOTES.append(bad)
     for v in set(re.findall(r'(?m)^[ \t]*\w[\w ]*?[\s*]+(in_stack_ff[0-9a-f]{6})\s*(?:\[\d+\])?;$', code)):
         if len(re.findall(r'\b%s\b' % v, code)) == 1:
             code = re.sub(r'(?m)^[ \t]*\w[\w ]*?[\s*]+%s\s*(?:\[\d+\])?;\n' % v, '', code)
@@ -699,7 +804,9 @@ def convert(f, protos, skip, imports, impnames):
             if l.strip():
                 prev = l
         for j, l in enumerate(lines):
-            if j == at or not re.search(r'\b%s\b' % v, l) or re.match(r'\s*%s = [^=]' % v, l) or \
+            # (a store that reads the variable too, 'uVar2 = f(x, uVar2);' at 0x48FB40, is a read)
+            if j == at or not re.search(r'\b%s\b' % v, l) or \
+                    (re.match(r'\s*%s = [^=]' % v, l) and not re.search(r'\b%s\b' % v, l.split('=', 1)[1])) or \
                     re.match(r'\s*[A-Za-z_][\w ]*?\**\s*\b%s\s*;\s*$' % v, l):
                 continue
             ind = indent[j]
@@ -750,7 +857,8 @@ def convert(f, protos, skip, imports, impnames):
                             if indent[q] <= ind and lines[q].strip():
                                 print('   ', q, indent[q], repr(lines[q][:100]))
                     return False
-                if indent[k] == ind and re.match(r'\s*%s = [^=]' % v, lk):
+                if indent[k] == ind and re.match(r'\s*%s = [^=]' % v, lk) and \
+                        not re.search(r'\b%s\b' % v, lk.split('=', 1)[1]):
                     break
             else:
                 return False
