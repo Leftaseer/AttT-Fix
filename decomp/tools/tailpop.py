@@ -4,7 +4,11 @@ finds no ret N, but its callers' stack is cleaned by the function it jumps to (t
 'mov ecx, [ecx+1C4]; jmp Method').  Follows jmp chains to a function with a known ret and writes the pop into
 column 4 of functions.tsv (in place).
 
-usage: tailpop.py EXE REGPARAMS.tsv symbols/GAME_functions.tsv [AUTO.jsonl.protos (import conventions)]"""
+A virtual function still without one (CHero::vf3 0x4632E0 'mov ecx, [ecx+22C]; ...; jmp [eax+0C]', forwarding to
+a member's virtual function) takes the pop of the other overrides of its slot: all the classes under the base
+that introduced the slot (RTTI.json of rtti.py) override it with one signature; used when the known ones agree.
+
+usage: tailpop.py EXE REGPARAMS.tsv symbols/GAME_functions.tsv [AUTO.jsonl.protos (import conventions) or -] [RTTI.json]"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
@@ -29,7 +33,7 @@ md.detail = True
 # import thunks (jmp [IAT]): the import's own convention, from AutoExport's .protos when given
 imp_pop = {}
 forced = set()      # thunks whose pop comes from the import table (the row may hold regparams' 0 for a jmp)
-if len(sys.argv) > 4:
+if len(sys.argv) > 4 and sys.argv[4] != '-':
     W8 = {'double', 'longlong', 'ulonglong', 'undefined8', 'qword'}
     for l in open(sys.argv[4], encoding='utf-8'):
         q = l.rstrip('\n').split('\t')
@@ -94,7 +98,55 @@ def pop_of(a, depth=0):
     return ps.pop() if len(ps) == 1 else None
 
 
-fixed = 0
+res = {}
+for a in sizes:
+    if a in known:
+        res[a] = known[a]
+    elif a in tails:
+        p = pop_of(a)
+        if p is not None:
+            res[a] = p
+for l in rows:          # (pops already in the table: from regparams' rets)
+    if l[0] != '#':
+        q = l.split('\t')
+        if q[3].isdigit():
+            res.setdefault(int(q[0], 16), int(q[3]))
+slotpop = {}
+if len(sys.argv) > 5:
+    import json
+    classes = {c['name']: c for c in json.load(open(sys.argv[5]))}
+
+    def own_len(name):
+        v = [t for t in classes.get(name, {}).get('vtables', []) if t['offset'] == 0]
+        return len(v[0]['funcs']) if v else 0
+    # (pure virtual slots hold the _purecall thunk, which pops nothing and never returns)
+    pure = set()
+    for a in sizes:
+        try:
+            i = next(md.disasm(pe.read(a, 6), a, 1))
+        except Exception:
+            continue
+        if i.mnemonic == 'jmp' and i.operands[0].type == x86.X86_OP_MEM and i.operands[0].mem.base == 0 and \
+                pe.imports.get(i.operands[0].mem.disp, ('', ''))[1] == '_purecall':
+            pure.add(a)
+    groups = {}
+    for c in classes.values():
+        for vt in c['vtables']:
+            chain = [b['name'] for b in c['bases'] if b['mdisp'] == vt['offset'] and b['pdisp'] == -1]
+            for k, fa in enumerate(vt['funcs']):
+                # the most basic class of the chain whose own vftable has the slot
+                root = next((b for b in reversed(chain) if own_len(b) > k), None)
+                if root is not None and int(fa, 16) not in pure:
+                    groups.setdefault((root, k), set()).add(int(fa, 16))
+    for key, fs in groups.items():
+        ps = {res[x] for x in fs if x in res}
+        if len(ps) == 1:
+            p = ps.pop()
+            for x in fs:
+                if x not in res:
+                    slotpop.setdefault(x, set()).add(p)
+    slotpop = {x: ps.pop() for x, ps in slotpop.items() if len(ps) == 1}
+fixed = nslot = 0
 with open(sys.argv[3], 'w') as f:
     for l in rows:
         if l[0] != '#':
@@ -109,5 +161,10 @@ with open(sys.argv[3], 'w') as f:
                     q[3] = str(p)
                     fixed += 1
                     l = '\t'.join(q) + '\n'
+            if q[3] == '?' and a in slotpop:
+                q[3] = str(slotpop[a])
+                nslot += 1
+                l = '\t'.join(q) + '\n'
         f.write(l)
-print('ret pop taken from the tail-jump target for %d functions' % fixed)
+print('ret pop taken from the tail-jump target for %d functions, from the other overrides of a vftable slot for %d'
+      % (fixed, nslot))

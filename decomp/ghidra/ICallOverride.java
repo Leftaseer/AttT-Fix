@@ -6,8 +6,8 @@
 //   caller-pop                 __cdecl    (stack arguments)
 //   callee-pop, ECX set        __thiscall (ECX, stack arguments)   - harmless for a __stdcall callee: it ignores ECX
 //   callee-pop, ECX not set    __stdcall  (stack arguments)
-// returning undefined4 when the decompiler found a result in EAX, void when it found none; calls with a float or
-// 8-byte result are left alone.  Writes OUT.tsv: call address, convention, stack arguments, result.
+// returning undefined4 when the decompiler found a result in EAX, void when it found none, float/double for one in
+// ST0, undefined8 for 8 bytes in EDX:EAX.  Writes OUT.tsv: call address, convention, stack arguments, result.
 // Args: icalls.tsv out.tsv
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.*;
@@ -73,6 +73,13 @@ public class ICallOverride extends GhidraScript {
                     // 'this = (*vf)(...)' in 0x442890): 4 bytes that are no float are EAX all the same
                     else if (o.getSize() == 4 && !o.isRegister() &&
                              !(o.getHigh() != null && o.getHigh().getDataType() instanceof AbstractFloatDataType)) s.out = "undefined4";
+                    // a float result: ST0 after the call, as the machine code goes on with it ('fstp' right after
+                    // 0x4E0750's 'call edx'); 8 other bytes: EDX:EAX
+                    else if ((o.isRegister() && currentProgram.getRegister(o.getAddress(), o.getSize()) != null &&
+                              currentProgram.getRegister(o.getAddress(), o.getSize()).getName().startsWith("ST")) ||
+                             (o.getHigh() != null && o.getHigh().getDataType() instanceof AbstractFloatDataType))
+                        s.out = o.getSize() == 4 ? "float" : "double";
+                    else if (o.getSize() == 8) s.out = "undefined8";
                     else s.out = "other";
                     sites.add(s);
                 }
@@ -110,7 +117,11 @@ public class ICallOverride extends GhidraScript {
                             if (cc.equals("__thiscall")) ps.add(new ParameterDefinitionImpl("this", new PointerDataType(VoidDataType.dataType, dtm), null));
                             for (int k = 0; k < s.nstack; k++) ps.add(new ParameterDefinitionImpl("a" + k, Undefined4DataType.dataType, null));
                             def.setArguments(ps.toArray(new ParameterDefinition[0]));
-                            def.setReturnType(s.out.equals("void") ? VoidDataType.dataType : Undefined4DataType.dataType);
+                            def.setReturnType(s.out.equals("void") ? VoidDataType.dataType :
+                                              s.out.equals("float") ? FloatDataType.dataType :
+                                              s.out.equals("double") ? DoubleDataType.dataType :
+                                              s.out.equals("undefined8") ? Undefined8DataType.dataType :
+                                              Undefined4DataType.dataType);
                             def.setCallingConvention(cc);
                             try {
                                 HighFunctionDBUtil.writeOverride(fn, ca, def);

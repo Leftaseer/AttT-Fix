@@ -83,7 +83,7 @@ with open('%s/%s_functions.tsv' % (s, g), 'w') as f:
         r = rp.get(a, [a, '', ''])
         f.write('%s\t%d\t%s\t%s\t%s\n' % (a, bf[a]['size'], r[1], r[2] if r[2] and ',' not in r[2] else '?', cl.get(a, 'EAX,ECX,EDX')))
 EOF
-    py tailpop.py "$WORK/bin/$g.exe" "$O/${g}_regparams.tsv" "$SYMS/${g}_functions.tsv"
+    py tailpop.py "$WORK/bin/$g.exe" "$O/${g}_regparams.tsv" "$SYMS/${g}_functions.tsv" - "$O/${g}_rtti.json"
     py retlive.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_retlive.tsv" "$SYMS/$g.sym"   # + virtual calls
     py x87ret.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$SYMS/${g}_x87ret.tsv"   # float results in ST0
     py icalls.py "$WORK/bin/$g.exe" "$SYMS/${g}_functions.tsv" "$O/${g}_icalls0.tsv"   # pops of indirect callees
