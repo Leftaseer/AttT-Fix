@@ -1128,11 +1128,13 @@ def device_call(ins, k):
     return None
 
 
-def com_call(ins, k):
+def com_call(ins, k, entry=0):
     """a COM method call: the last push before the call is the object whose vftable the call reads ('mov ecx, [eax];
-    push eax; call [ecx+0x108]' of Direct3D): this goes on the stack, ECX only holds the vftable"""
+    push eax; call [ecx+0x108]' of Direct3D): this goes on the stack, ECX only holds the vftable.  Pushes of the
+    prologue (from entry on: after it) save registers ('push esi; mov esi, ecx; mov eax, [esi]; call [eax+1Ch]' of
+    0x426FB0 is a method of this)"""
     last = None
-    for j in range(k - 1, max(-1, k - 8), -1):
+    for j in range(k - 1, max(entry - 1, k - 8), -1):
         m = ins[j].mnemonic
         if m == 'push':
             last = ins[j]
@@ -1293,7 +1295,7 @@ with open(sys.argv[3], 'w') as f:
                 elif not m.startswith(MOVES):
                     break
             cleanup[i.address] = cl
-            com = com_call(ins, k)
+            com = com_call(ins, k, entry)
             if com:
                 ecx = 0             # stdcall with this on the stack
                 dv = device_call(ins, k)

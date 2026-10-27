@@ -749,6 +749,41 @@ def convert(f, protos, skip, imports, impnames):
     # a global without a type subscripted ('(&((void *)G_006C7C90))[param_1]', 0x579BA0): the decompiler's
     # undefined1 elements, bytes (all such accesses are 'mov al, byte ptr [eax + 0x6c7c90]')
     code = re.sub(r'\(&\(\(void \*\)(&?G_[0-9A-F]{8})\)\)\[', r'((unsigned char *)\1)[', code)
+    # the ST0 result of an indirect call (an override cannot give the decompiler an x87 result, it writes
+    # extraout_ST0 where the value is used: 0x426FB0 'call edx; fstp [esp+4]'): the variable is set by the float
+    # call right before its first use, in straight code
+    if 'extraout_ST0' in code and icalls:
+        sites = []
+        for m in re.finditer(r'\(ICALL_([0-9A-F]{8})\*', code):
+            ic = icalls.get(int(m.group(1), 16))
+            close = matching(code, m.start())
+            k = close + 1
+            while 0 < k < len(code) and code[k] in ' \n':
+                k += 1
+            if not ic or ic[2] not in ('float', 'double') or close < 0 or k >= len(code) or code[k] != '(' or \
+                    not re.search(r'[;{}]\s*(?:/\*[^*]*\*/\s*)*$', code[:m.start()]):
+                continue
+            end = matching(code, k)
+            if end > 0 and re.match(r'\s*;', code[end + 1:]):
+                sites.append((m.start(), code.index(';', end) + 1))
+        vs = sorted(set(re.findall(r'\bextraout_ST0(?:_\d+)?\b', code)))
+        decl = re.compile(r'(?m)^[ \t]*float10[ \t]+(extraout_ST0(?:_\d+)?);$')
+        first = {}
+        for v in vs:
+            uses = [u.start() for u in re.finditer(r'\b%s\b' % v, code)
+                    if not decl.match(code, code.rfind('\n', 0, u.start()) + 1)]
+            if uses:
+                first[v] = uses[0]
+        put = {}
+        for v, at in first.items():
+            prev = [s for s in sites if s[1] <= at]
+            if prev and not re.search(r'[{}]|\belse\b', code[prev[-1][1]:at]):
+                put[v] = prev[-1]
+        if put and len(put) == len(first) == len(set(put.values())):
+            for v, (s_, _) in sorted(put.items(), key=lambda x: -x[1][0]):
+                code = code[:s_] + '%s = ' % v + code[s_:]
+            for v in put:
+                code = re.sub(r'\b%s\b' % v, v.replace('extraout_ST0', 'fST0_ret'), code)
     # the 64-bit result of _ftol handed on whole (0x44A4D0 'return CONCAT44(extraout_EDX,(int)fVar1)': the
     # injection decomp_ftol_int keeps EAX only): the float truncated to 64 bits, EDX:EAX as _ftol leaves them
     if 'decomp_ftol_int' in code:
