@@ -28,6 +28,10 @@ def cleanup_after(insn, a, limit=4):
             return o[1].imm if o[1].type == x86.X86_OP_IMM else -1
         if touches_esp(i):
             return -1
+        # the SEH chain restored: the epilogue, whose 'add esp, N' frees the frame (0x4B86F5 'call edx; mov ecx,
+        # [esp+4]; mov fs:[0], ecx; add esp, 0x10; ret' was taken for a call cleaning up 16 bytes)
+        if 'fs:[0]' in i.op_str and i.op_str.startswith('dword ptr fs:[0]'):
+            return -1
         a = i.address + i.size
     return -1
 
