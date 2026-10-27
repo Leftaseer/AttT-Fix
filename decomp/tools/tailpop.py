@@ -40,6 +40,14 @@ if len(sys.argv) > 4:
             n = sum(8 if t in W8 else 4 for t in ps)
             imp_pop[int(q[0], 16)] = n if q[1] in ('__stdcall', '__thiscall') and q[5] != 'true' else 0
 imp_pop.update(table_import_pops(pe))     # symbols/import_protos.tsv: D3DX9, MSVCP80 with hidden parameters
+# C++ imports by their decorated names (symbols/GAME_cxximports.tsv of cxximports.py, next to functions.tsv)
+cxx = os.path.join(os.path.dirname(os.path.abspath(sys.argv[3])), os.path.basename(sys.argv[3]).replace('_functions', '_cxximports'))
+if os.path.exists(cxx):
+    slot_of = {n: a for a, (dll, n) in pe.imports.items()}
+    for l in open(cxx):
+        q = l.rstrip('\n').split('\t')
+        if l[0] != '#' and len(q) > 2 and q[0] in slot_of and slot_of[q[0]] not in imp_pop:
+            imp_pop[slot_of[q[0]]] = int(q[2]) if q[1] in ('__thiscall', '__stdcall') else 0
 for a, size in sizes.items():
     if a in known:
         continue
@@ -57,11 +65,20 @@ for a, size in sizes.items():
         continue
     t = set()
     try:
+        moves_esp = False
         for i in md.disasm(pe.read(a, size), a):
             if i.mnemonic == 'jmp' and i.operands[0].type == x86.X86_OP_IMM:
                 d = i.operands[0].imm
                 if d in sizes and not (a <= d < a + size):
                     t.add(d)
+            # a jump on to an import after a few instructions ('mov [ecx], vftable; jmp [~exception]', 0x420600),
+            # nothing pushed or popped before it
+            elif i.mnemonic == 'jmp' and i.operands[0].type == x86.X86_OP_MEM and i.operands[0].mem.base == 0 and \
+                    i.operands[0].mem.index == 0 and i.operands[0].mem.disp in imp_pop and not moves_esp:
+                known[('imp', i.operands[0].mem.disp)] = imp_pop[i.operands[0].mem.disp]
+                t.add(('imp', i.operands[0].mem.disp))
+            if i.mnemonic in ('push', 'pop', 'call', 'leave') or 'esp' in i.op_str.split(',')[0]:
+                moves_esp = True
     except Exception:
         pass
     if t:
