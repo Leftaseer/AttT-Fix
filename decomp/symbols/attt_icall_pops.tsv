@@ -1133,3 +1133,10 @@
 005E3EEA	0
 005E415F	0
 005E41BB	0
+# set by hand: CDXUTDialog::GetControl(id, 3) (0x594600) gives a CDXUTRadioButton, the only control class with slot 21 (0x54), 0x594B70, ret 0xC (0x5A9550)
+005A95F6	12
+005A961C	12
+005A964A	12
+005A9670	12
+005A969E	12
+005A96C4	12

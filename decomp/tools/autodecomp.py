@@ -456,7 +456,7 @@ def convert(f, protos, skip, imports, impnames):
     def whole(m):
         lines = m.group(0).rstrip('\n').split('\n')
         fields = dict(re.match(r'\s*\w+\.d(\d) = ([^;]*);', l).groups() for l in lines)
-        v = fields.get('0', '')
+        v = re.sub(r'^\((?:u?int|undefined4)\)', '', fields.get('0', ''))
         # (a frame variable, or still the slot below the frame: in_stack_fffff8b4 read, &stack0xfffff8b4 passed)
         mv = re.fullmatch(r'(?:local|[a-zA-Z]+Stack)_([0-9a-f]+)', v)
         ms = re.fullmatch(r'in_stack_(ff[0-9a-f]{6})', v)
@@ -471,11 +471,80 @@ def convert(f, protos, skip, imports, impnames):
     for v in set(re.findall(r'(?m)^[ \t]*\w+\s+(in_stack_ff[0-9a-f]{6});$', code)):
         if len(re.findall(r'\b%s\b' % v, code)) == 1:
             code = re.sub(r'(?m)^[ \t]*\w+\s+%s;\n' % v, '', code)
-    # the return addresses then left in variables used nowhere else go
+    # the return addresses then left in variables go where every read of the variable follows another store to
+    # it in its own block (0x5A9550's 'uVar18 = 0x5a95a9', the variable used again for other values)
+    def dead_store(v, at):
+        lines = code.split('\n')
+        # (the indentation of a statement's first line for the lines it continues on)
+        indent, prev = [], None
+        for l in lines:
+            own = len(l) - len(l.lstrip())
+            cont = prev is not None and prev.strip() and not re.search(r'[;{}:]\s*$', prev)
+            indent.append(indent[-1] if cont and indent else own)
+            if l.strip():
+                prev = l
+        for j, l in enumerate(lines):
+            if j == at or not re.search(r'\b%s\b' % v, l) or re.match(r'\s*%s = [^=]' % v, l) or \
+                    re.match(r'\s*[A-Za-z_][\w ]*?\**\s*\b%s\s*;\s*$' % v, l):
+                continue
+            ind = indent[j]
+            k = j
+            while k > 0:
+                k -= 1
+                lk = lines[k]
+                if not lk.strip():
+                    continue
+                # an if/else chain ending here, every branch storing to the variable, is a store
+                if lk.strip() == '}' and indent[k] == ind:
+                    def stmt_start(q):
+                        while q > 0 and lines[q - 1].strip() and not re.search(r'[;{}:]\s*$', lines[q - 1]):
+                            q -= 1
+                        return q
+                    parts, end_, final_else, ok = [], k, None, False
+                    while True:
+                        o = next((q for q in range(end_ - 1, -1, -1) if indent[q] == ind and lines[q].strip()), None)
+                        if o is None or not lines[o].rstrip().endswith('{'):
+                            break
+                        head = lines[stmt_start(o)].strip()
+                        parts.append((o, end_))
+                        if final_else is None:
+                            final_else = head in ('else {', '} else {')
+                        if re.match(r'if\s*\(', head):
+                            ok = True
+                            break
+                        if head.startswith('} else'):
+                            end_ = o
+                        elif head.startswith('else'):
+                            p_ = next((q for q in range(stmt_start(o) - 1, -1, -1) if lines[q].strip()), None)
+                            if p_ is None or lines[p_].strip() != '}' or indent[p_] != ind:
+                                break
+                            end_ = p_
+                        else:
+                            break
+                    def stores(o_, e_):
+                        body = [r for r in range(o_ + 1, e_) if lines[r].strip()]
+                        return body and any(re.match(r'\s*%s = [^=]' % v, lines[q]) and
+                                            indent[q] == min(indent[r] for r in body) for q in body)
+                    if ok and final_else and all(stores(o_, e_) for o_, e_ in parts):
+                        break
+                    continue
+                if indent[k] < ind or k == at:
+                    if os.environ.get('AD_DEBUG'):
+                        print('dead_store', v, 'read', j, repr(l), 'stopped at', k, repr(lk))
+                        for q in range(k, j + 1):
+                            if indent[q] <= ind and lines[q].strip():
+                                print('   ', q, indent[q], repr(lines[q][:100]))
+                    return False
+                if indent[k] == ind and re.match(r'\s*%s = [^=]' % v, lk):
+                    break
+            else:
+                return False
+            if k == 0:
+                return False
+        return True
     for m in list(re.finditer(r'(?m)^[ \t]*(\w+) = 0x([0-9a-f]{6,8});\n', code)):
-        v = m.group(1)
         if int(m.group(2), 16) in rets_here and \
-                len(re.findall(r'\b%s\b' % v, code)) == len(re.findall(r'(?m)^[ \t]*%s = 0x[0-9a-f]+;$' % v, code)) + 1:
+                dead_store(m.group(1), code[:m.start()].count('\n')):
             code = code.replace(m.group(0), '', 1)
     if any(int(x, 16) in rets_here for x in re.findall(r'\b0x([0-9a-f]{6,8})\b', code)):
         if not FORCE[0]:
@@ -782,7 +851,10 @@ def convert(f, protos, skip, imports, impnames):
                         return None, 'import %s takes more arguments than its prototype' % c
                     NOTES.append('import %s takes more arguments than its prototype' % c)
             w = cc_word(icc, False) or '__cdecl'
-            ps = ', '.join(t for t, n in iplist) if iplist else 'void'
+            # (a class passed by value to the C++ runtime is a one-dword wrapper, std::string's _Size_type_nosscl
+            # around an index (operator[], 0x46D380): the call passes the number, an unsigned int in C)
+            ps = ', '.join('unsigned int' if t.startswith('_Demangler_') and '*' not in t else t
+                           for t, n in iplist) if iplist else 'void'
             if iva:
                 ps += ', ...'
             decls.append('DECOMP_C %s (%s *imp_%s)(%s) __asm__("%s");' % (wide_ret(iret), w, c, ps, impnames[ca]))
