@@ -103,7 +103,10 @@ public class FpuIntrinsics extends GhidraScript {
                                                    { "long long", "tmp:8 = trunc(ST0); EAX = tmp:4; EDX = tmp(4);" } })
                     ext.addReplaceCompilerSpecExtension("<callfixup name=\"decomp_ftol_" + k[0].replace(' ', '_') +
                         "\"><pcode><body><![CDATA[\n" + k[1] +
-                        "\nST0 = ST1; ST1 = ST2; ST2 = ST3; ST3 = ST4; ST4 = ST5; ST5 = ST6; ST6 = ST7;\n]]></body></pcode></callfixup>",
+                        "\nST0 = ST1; ST1 = ST2; ST2 = ST3; ST3 = ST4; ST4 = ST5; ST5 = ST6; ST6 = ST7;" +
+                        // (the fixup replaces the call, not the push of its return address: the ret's pop is ours,
+                        // else ESP stays 4 lower and 0x495300's frame variables move)
+                        "\nESP = ESP + 4;\n]]></body></pcode></callfixup>",
                         monitor);
                 fixups = ext;
             }
