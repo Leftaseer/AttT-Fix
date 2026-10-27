@@ -730,6 +730,10 @@ def convert(f, protos, skip, imports, impnames):
                               lambda m: '((unsigned char *)%s)[%d]' % (t, int(m.group(1)) * STRUCT_SIZE[v] +
                                                                      int(m.group(2), 16))
                               if int(m.group(2), 16) >= TRUNCATED[v] else m.group(0), code)
+    # a LARGE_INTEGER as a number ('(longlong)local_8', 0x4E41C0): its QuadPart
+    for v in re.findall(r'(?m)^[ \t]+_winnt_h_LARGE_INTEGER\s+(\w+);$', code):
+        code = re.sub(r'\((?:u?longlong|ulonglong|float10|double)\)%s\b(?!\.)' % v,
+                      lambda m: m.group(0).replace(v, v + '.QuadPart'), code)
     # a switch on a pointer (0x54C6C0's 'switch(param_1)' of an undefined4 *, 0x5952A0's of an HWND): on its value
     for m in set(re.findall(r'\bswitch\((\w+)\)', code)):
         if re.search(r'(?:\*\s*|\b_WinDef_h_H[A-Z]+\s+)%s\s*[;,)]' % m, code[:code.find(')', code.find('{'))]) or \
