@@ -4,7 +4,8 @@ code (both ways at branches, up to a limit) and see whether EAX is read before i
 caller reached with EAX unread passes the value on: it counts as a use when that caller's own result is used (a
 fixpoint), or when the caller may be reached other than by direct calls (its address appears in the image as a
 dword: vftables, callbacks); 0x4AC940, typed undefined4 by its callers' 'call; pop esi; ret' alone, ended in
-'return extraout_EAX' and was rejected.  The decompiler sometimes types such a function as void
+'return extraout_EAX' and was rejected.  (Tail jumps are not followed: the target of one that leaves EAX as it
+found it, typed undefined4, returns in_EAX and is rejected, 99 functions such as 0x427340.)  The decompiler sometimes types such a function as void
 (it saw no value being computed for EAX on the way out), and a replacement written that way would return garbage.
 
 Virtual calls count too (SYMS given): when the code after 'call [reg+off]' (or 'call reg' loaded from
@@ -120,10 +121,6 @@ used = set()
 passes = {}          # function -> callers that return its EAX unread
 slots = set()        # vftable offsets whose callers use EAX
 for a, i in insns.items():
-    if i.mnemonic == 'jmp' and i.operands[0].type == x86.X86_OP_IMM and i.operands[0].imm in funcs \
-            and func_of(a) != i.operands[0].imm:
-        passes.setdefault(i.operands[0].imm, set()).add(func_of(a))     # tail call: its ret is the caller's
-        continue
     if i.mnemonic != 'call':
         continue
     if i.operands[0].type == x86.X86_OP_IMM:
