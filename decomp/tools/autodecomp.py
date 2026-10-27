@@ -740,10 +740,12 @@ def convert(f, protos, skip, imports, impnames):
                 re.search(r'(?m)^[ \t]+(?:[A-Za-z_][\w ]*?\s*\*+|_WinDef_h_H[A-Z]+)\s*%s;$' % m, code):
             code = re.sub(r'\bswitch\(%s\)' % m, 'switch((unsigned int)%s)' % m, code)
             code = re.sub(r'\bcase \((?:[\w ]+\*+|_WinDef_h_H[A-Z]+)\)(-?(?:0x[0-9a-f]+|\d+)):', r'case \1:', code)
-    # the bits of an array's first bytes ('BITCAST(float, (local_7c))' of a std::string, 0x47BA60): read there
+    # the bits of an array, as in C its address ('BITCAST(float, (auStack_c4))' of a std::string passed as a
+    # float parameter, 0x580750: 'lea ecx, [esp + 0x80]; push ecx'; the array whole is of another size)
     arrays = set(re.findall(r'(?m)^[ \t]+[A-Za-z_][\w ]*?[\s*]+(\w+)\s*\[\d+\];$', code))
     code = re.sub(r'\bBITCAST\(([^,()]+), \((\w+)\)\)',
-                  lambda m: '(*(%s *)(%s))' % (m.group(1), m.group(2)) if m.group(2) in arrays else m.group(0), code)
+                  lambda m: 'BITCAST(%s, ((void *)%s))' % (m.group(1), m.group(2)) if m.group(2) in arrays
+                  else m.group(0), code)
     # a global without a type subscripted ('(&((void *)G_006C7C90))[param_1]', 0x579BA0): the decompiler's
     # undefined1 elements, bytes (all such accesses are 'mov al, byte ptr [eax + 0x6c7c90]')
     code = re.sub(r'\(&\(\(void \*\)(&?G_[0-9A-F]{8})\)\)\[', r'((unsigned char *)\1)[', code)
