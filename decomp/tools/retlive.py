@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Which functions return something in EAX that their callers use: after each direct call, follow the caller's
 code (both ways at branches, up to a limit) and see whether EAX is read before it is overwritten.  A ret of the
-caller counts as a use (it may pass the value on).  The decompiler sometimes types such a function as void
+caller reached with EAX unread passes the value on: it counts as a use when that caller's own result is used (a
+fixpoint), or when the caller may be reached other than by direct calls (its address appears in the image as a
+dword: vftables, callbacks); 0x4AC940, typed undefined4 by its callers' 'call; pop esi; ret' alone, ended in
+'return extraout_EAX' and was rejected.  The decompiler sometimes types such a function as void
 (it saw no value being computed for EAX on the way out), and a replacement written that way would return garbage.
 
 Virtual calls count too (SYMS given): when the code after 'call [reg+off]' (or 'call reg' loaded from
@@ -38,8 +41,9 @@ for a, (size, _) in funcs.items():
 
 
 def eax_used_after(addr, limit=80):
-    """True if EAX may be read at addr (just after a call) before being fully overwritten."""
-    todo, seen, n = [addr], set(), 0
+    """True if EAX may be read at addr (just after a call) before being fully overwritten, 'ret' if it may only
+    reach a ret of the caller unread, else False."""
+    todo, seen, n, ret = [addr], set(), 0, False
     while todo:
         p = todo.pop()
         while True:
@@ -59,7 +63,8 @@ def eax_used_after(addr, limit=80):
                     return True                     # passed on in EAX (LTCG)
                 break                               # the next call sets EAX
             if m.startswith('ret'):
-                return True
+                ret = 'ret'
+                break
             try:
                 rd, wr = i.regs_access()
             except Exception:
@@ -79,7 +84,7 @@ def eax_used_after(addr, limit=80):
                 if t.type == x86.X86_OP_IMM:
                     todo.append(t.imm)
             p = i.address + i.size
-    return False
+    return ret
 
 
 def slot_of(a, i):
@@ -102,15 +107,33 @@ def slot_of(a, i):
     return None
 
 
+starts = sorted(funcs)
+import bisect
+
+
+def func_of(a):
+    k = bisect.bisect_right(starts, a) - 1
+    return starts[k] if k >= 0 and a < starts[k] + funcs[starts[k]][0] else None
+
+
 used = set()
+passes = {}          # function -> callers that return its EAX unread
 slots = set()        # vftable offsets whose callers use EAX
 for a, i in insns.items():
+    if i.mnemonic == 'jmp' and i.operands[0].type == x86.X86_OP_IMM and i.operands[0].imm in funcs \
+            and func_of(a) != i.operands[0].imm:
+        passes.setdefault(i.operands[0].imm, set()).add(func_of(a))     # tail call: its ret is the caller's
+        continue
     if i.mnemonic != 'call':
         continue
     if i.operands[0].type == x86.X86_OP_IMM:
         t = i.operands[0].imm
-        if t in funcs and t not in used and eax_used_after(a + i.size):
-            used.add(t)
+        if t in funcs and t not in used:
+            u = eax_used_after(a + i.size)
+            if u == 'ret':
+                passes.setdefault(t, set()).add(func_of(a))
+            elif u:
+                used.add(t)
     elif len(sys.argv) > 4:
         off = slot_of(a, i)
         if off is not None and 0 <= off < 0x400 and off % 4 == 0 and off not in slots and eax_used_after(a + i.size):
@@ -130,8 +153,42 @@ if len(sys.argv) > 4:
                     used.add(t)
                     nv += 1
     print('virtual calls: %d vftable offsets with EAX used, %d more functions' % (len(slots), nv))
+# functions reached other than by direct calls: their address is a dword somewhere in the image (vftable slots
+# aside: the virtual calls of a slot decided above)
+vtslots = set()
+if len(sys.argv) > 4:
+    for l in open(sys.argv[4], encoding='utf-8'):
+        q = l.split('#')[0].split(None, 2)
+        if len(q) == 3 and q[1] == 'd' and 'vftable' in q[2]:
+            v = int(q[0], 16)
+            try:
+                while pe.u32(v) in funcs:
+                    vtslots.add(v); v += 4
+            except Exception:
+                pass
+refd = set()
+for name, va, vsize, raw, rsize in pe.secs:
+    b = pe.pe.__data__[raw:raw + rsize]
+    for k in range(len(b) - 3):
+        v = int.from_bytes(b[k:k + 4], 'little')
+        if v in funcs and va + k not in vtslots:
+            refd.add(v)
+nret = 0
+while True:
+    more = {t for t, cs in passes.items() if t not in used and any(c is None or c in used or c in refd for c in cs)}
+    if not more:
+        break
+    used |= more
+    nret += len(more)
+print('%d more through callers returning the value on' % nret)
 with open(sys.argv[3], 'w') as f:
     f.write('# functions whose result in EAX some caller uses (tools/retlive.py)\n')
     for a in sorted(used):
         f.write('%08X\n' % a)
 print('%d of %d functions: EAX used by a caller' % (len(used), len(funcs)))
+if os.environ.get('RL_DEBUG'):
+    for t in os.environ['RL_DEBUG'].split(','):
+        t = int(t, 16)
+        for c in passes.get(t, ()):
+            print(hex(t), 'caller', c and hex(c), 'used' if c in used else '', 'refd' if c in refd else '',
+                  [hex(x) for x in passes.get(c, ())])

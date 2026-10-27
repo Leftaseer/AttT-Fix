@@ -286,6 +286,45 @@ def outgoing_mismatch(a, code):
     return None
 
 
+def outgoing_object_dwords(a, off):
+    """dwords of the object a builds in its outgoing arguments at stack0x<off> ('sub esp, 0xc; mov ecx, esp' or
+    'push ecx; mov ecx, esp' with ESP there, then a constructor call): the bytes reserved right before the
+    pointer to them is taken; None unless every such place agrees"""
+    dm = stack_depths(a)
+    if dm is None:
+        return None
+    import capstone
+    from capstone import x86 as cx
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.detail = True
+    try:
+        ins = list(md.disasm(image[0].read(a, fsize.get(a, 0)), a))
+    except Exception:
+        return None
+    sizes = set()
+    for k, i in enumerate(ins):
+        if k == 0 or dm.get(i.address) != off - 0x100000000:
+            continue
+        ops = i.operands
+        if not (i.mnemonic in ('mov', 'lea') and len(ops) == 2 and ops[0].type == cx.X86_OP_REG and
+                (i.op_str.endswith(', esp') or i.op_str.endswith('[esp]'))):
+            continue
+        q = k - 1          # (back over what leaves ESP alone: 'sub esp, 0xc; lea edx, [esp + 0x2c]; mov ecx, esp')
+        while q > 0 and k - q < 4 and ins[q].mnemonic not in ('push', 'pop', 'call', 'sub', 'add') and \
+                cx.X86_REG_ESP not in ins[q].regs_access()[1]:
+            q -= 1
+        prev = ins[q]
+        if prev.mnemonic == 'sub' and prev.op_str.startswith('esp, ') and prev.operands[1].type == cx.X86_OP_IMM:
+            sizes.add(prev.operands[1].imm)
+        elif prev.mnemonic == 'push':
+            sizes.add(4)
+        else:
+            return None
+    if len(sizes) != 1 or min(sizes) % 4:
+        return None
+    return sizes.pop() // 4
+
+
 def load_machine(path):
     for l in open(path):
         if l.startswith('#'):
@@ -809,6 +848,53 @@ def convert(f, protos, skip, imports, impnames):
             code = code[:s_] + t + code[e_:]
         return code
     code = string_at_call(code)
+    # a return address the decompiler took for a dword of the outgoing arguments, passed on (0x574ED0: 0x435D90
+    # copy-constructs a 12-byte object at &stack0xffffffd8, 0x5735B0 gets in_stack_ffffffd8, in_stack_ffffffdc
+    # and 'uVar2 = 0x574efb'): the slot itself, from the depth of the stack at the call and the callee's
+    # parameters
+    def retaddr_at_call(code):
+        rv = {m.group(1) for m in re.finditer(r'(?m)^[ \t]*(\w+) = (?:\([^()]*\))?0x([0-9a-f]{6,8});$', code)
+              if int(m.group(2), 16) in rets_here}
+        if not rv:
+            return code
+        dm = stack_depths(a)
+        if dm is None:
+            return code
+        out = []
+        for callee in sorted({int(x, 16) for x in re.findall(r'\bsub_([0-9A-F]{8})\s*\(', code)}):
+            pr = protos.get(callee)
+            sites = sorted(p for p, t in call_sites.get(a, {}).items() if t == callee and p in dm)
+            calls = [(c.start(), c.end() - 1) for c in re.finditer(r'\bsub_%08X\s*\(' % callee, code)]
+            if not pr or not sites or pr[4] or len(pr[5]) != len(pr[3]):
+                continue
+            for n, (cs, j) in enumerate(calls):
+                e = matching(code, j)
+                if e < 0:
+                    continue
+                args = split_args(code[j + 1:e])
+                if len(args) != len(pr[3]) or not any(x in rv for x in args):
+                    continue
+                if len({dm[p] for p in sites}) == 1:
+                    dep = dm[sites[0]]
+                elif len(calls) == len(sites):
+                    dep = dm[sites[n]]
+                else:
+                    continue
+                new, off = [], 0
+                for x, (t, _), st in zip(args, pr[3], pr[5]):
+                    if st == 'stack' and x in rv:
+                        d = re.search(r'(?m)^[ \t]*([A-Za-z_][\w ]*?\s*\**)\s*\b%s;$' % x, code)
+                        if not d or slot_bytes(t) != 4:
+                            break
+                        x = '*(%s *)&stack0x%08x' % (d.group(1).strip(), (dep + off) & 0xffffffff)
+                    new.append(x)
+                    off += slot_bytes(t) if st == 'stack' else 0
+                else:
+                    out.append((j + 1, e, ','.join(new)))
+        for s_, e_, t in sorted(out, reverse=True):
+            code = code[:s_] + t + code[e_:]
+        return code
+    code = retaddr_at_call(code)
     # a value built in the outgoing arguments through a pointer to them ('push ecx; mov ecx, esp; push ecx; call
     # 0x4FCB40; call 0x511B30': 0x4FCB40 writes the argument of 0x511B30): the call that takes that slot must pass
     # the variable of the slot; the decompiler may pass a stale value instead (0x505330 handed 0x511B30 another
@@ -1047,10 +1133,13 @@ def convert(f, protos, skip, imports, impnames):
             if re.search(r'\b(?:%s)\s+in_stack_%08x\s*;' % ('|'.join(BYVALUE), off), flat):
                 continue                       # one variable of the whole object, passed by value (0x42AF50)
             need = OBJ_DWORDS.get(m.group(1))
+            if need is None:
+                need = outgoing_object_dwords(a, off)
             run = 0
-            for r in re.finditer(r'\bin_stack_%08x\b(?:\s*,\s*in_stack_ff[0-9a-f]{6}\b)*' % off, flat):
+            for r in re.finditer(r'\bin_stack_%08x\b(?:\s*,\s*(?:in_stack_|\*\(\w+ \*+\)&stack0x)ff[0-9a-f]{6}\b)*'
+                                 % off, flat):
                 n = 0
-                for v in re.findall(r'in_stack_(ff[0-9a-f]{6})', r.group(0)):
+                for v in re.findall(r'(?:in_stack_|&stack0x)(ff[0-9a-f]{6})', r.group(0)):
                     if int(v, 16) != off + 4 * n:
                         break
                     n += 1
