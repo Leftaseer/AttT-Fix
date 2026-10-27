@@ -734,6 +734,52 @@ if len(sys.argv) > 6:
             measured[int(q[0], 16)] = int(q[1])
 
 
+# methods of the Direct3D device (the game's global g_d3dDevice, symbols/GAME.sym): what each pops, from the
+# argument lists of IDirect3DDevice9 in the mingw-w64 d3d9.h (all 4 bytes each, this on the stack)
+dev_pops, DEVICE = {}, None
+if len(sys.argv) > 5:
+    for l in open(sys.argv[5], encoding='utf-8'):
+        q = l.split('#')[0].split()
+        if len(q) == 3 and q[1] == 'd' and q[2] == 'g_d3dDevice':
+            DEVICE = int(q[0], 16)
+    import re as _re
+    for hp in ('/usr/i686-w64-mingw32/include/d3d9.h', '/usr/share/mingw-w64/include/d3d9.h'):
+        if os.path.exists(hp):
+            txt = open(hp, errors='replace').read()
+            body = txt[txt.index('DECLARE_INTERFACE_(IDirect3DDevice9,'):]
+            body = body[:body.index('};')]
+            for k, m in enumerate(_re.finditer(r'STDMETHOD_?\((?:[^()]*)\)\s*\((THIS_?)([^)]*)\)', body)):
+                n = 0 if m.group(1) == 'THIS' else m.group(2).count(',') + 1
+                dev_pops[4 * k] = 4 * (n + 1)
+            break
+
+
+def device_call(ins, k):
+    """the slot of a method call on the Direct3D device: 'mov eax, [g_d3dDevice]; mov ecx, [eax]; ...; push eax;
+    call [ecx+0x148]' (the device loaded into the register pushed last, nothing else written to it between)"""
+    if DEVICE is None:
+        return None
+    last = None
+    for j in range(k - 1, max(-1, k - 10), -1):
+        if ins[j].mnemonic == 'push':
+            last = j
+            break
+    if last is None or ins[last].operands[0].type != x86.X86_OP_REG:
+        return None
+    r = ins[last].operands[0].reg
+    for j in range(last - 1, max(-1, last - 14), -1):
+        i = ins[j]
+        if i.mnemonic.startswith(('call', 'j', 'ret')):
+            return None
+        if i.operands and i.operands[0].type == x86.X86_OP_REG and i.operands[0].reg == r:
+            o = i.operands[1] if len(i.operands) > 1 else None
+            if i.mnemonic == 'mov' and o is not None and o.type == x86.X86_OP_MEM and o.mem.base == 0 and \
+                    o.mem.index == 0 and o.mem.disp == DEVICE:
+                return vslot(ins, k)
+            return None
+    return None
+
+
 def com_call(ins, k):
     """a COM method call: the last push before the call is the object whose vftable the call reads ('mov ecx, [eax];
     push eax; call [ecx+0x108]' of Direct3D): this goes on the stack, ECX only holds the vftable"""
@@ -902,6 +948,9 @@ with open(sys.argv[3], 'w') as f:
             com = com_call(ins, k)
             if com:
                 ecx = 0             # stdcall with this on the stack
+                dv = device_call(ins, k)
+                if dv in dev_pops and cl < 0:
+                    fixed[i.address] = dev_pops[dv]
             rows.append((i.address, ecx, cl, pushes, None if com else vslot(ins, k), pushes_since_call(ins, k, preds),
                          pushes_since_call(ins, k, preds, saves)))
             slot = reg_import(ins, k)
