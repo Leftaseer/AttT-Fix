@@ -12,6 +12,7 @@ loading (`tools/gametest_save.sh`); a run stops as soon as the game exits or wri
 |---|---|
 | world (x3) | the village save loads (no loading parchment 40 s after) |
 | battle | the battle save plays 100 s without an engine error |
+| battles | from the village save the hero attacks an army the way the player does (`Actions['Fight With Army']`: the save screen, the save, the battle), the enemy fights some turns, the battle is won (the tactic scene's `VictoryCurrentBattle`), the victory window closes and the world goes on (`ti_after_battles.txt`: a small state machine in Lua run every 5 s) |
 | extras | the walk-on characters of save 212 are there (picture) |
 | message | three gold messages at once go without an error |
 | exit | after the battle save, the game menu's and main menu's exits end the game (exit 0) |
@@ -20,4 +21,4 @@ loading (`tools/gametest_save.sh`); a run stops as soon as the game exits or wri
 | trees | the trees of save 215 are there (picture) |
 | army | the army window shows its text (picture) |
 
-The whole set takes about 15 minutes.
+The whole set takes about 20 minutes.

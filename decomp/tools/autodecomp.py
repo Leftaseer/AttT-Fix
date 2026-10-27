@@ -449,6 +449,34 @@ def convert(f, protos, skip, imports, impnames):
     # a call's return address as a value: the decompiler lost the stack depth and took the pushes of the calls for
     # arguments of a later one (0x475440 'uVar5 = 0x47552f' passed on to 0x475330 with a vector by value)
     rets_here = call_returns(a)
+    # a string passed by value that a callee built through a pointer to the outgoing arguments ('lea; push eax;
+    # call 0x4638C0; call 0x46D380', 0x50C3C0): the decompiler knows only the first dword written and takes the
+    # other six from what was pushed there before, return addresses included; the string is the 28 bytes at the
+    # frame variable whose address went to the callee
+    def whole(m):
+        lines = m.group(0).rstrip('\n').split('\n')
+        fields = dict(re.match(r'\s*\w+\.d(\d) = ([^;]*);', l).groups() for l in lines)
+        v = fields.get('0', '')
+        # (a frame variable, or still the slot below the frame: in_stack_fffff8b4 read, &stack0xfffff8b4 passed)
+        mv = re.fullmatch(r'(?:local|[a-zA-Z]+Stack)_([0-9a-f]+)', v)
+        ms = re.fullmatch(r'in_stack_(ff[0-9a-f]{6})', v)
+        if ms:
+            v, off = 'stack0x' + ms.group(1), 0x100000000 - int(ms.group(1), 16)
+        elif mv:
+            off = int(mv.group(1), 16)
+        if len(fields) != 7 or not (mv or ms) or off < 28 or not re.search(r'&\s*%s\b' % v, code):
+            return m.group(0)
+        return '%s%s = *(_decomp_StrByValue *)&%s;\n' % (re.match(r'\s*', lines[0]).group(0), m.group(1), v)
+    code = re.sub(r'(?m)^[ \t]*(\w+)\.d\d = [^;\n]*;\n(?:[ \t]*\1\.d\d = [^;\n]*;\n){6}', whole, code)
+    for v in set(re.findall(r'(?m)^[ \t]*\w+\s+(in_stack_ff[0-9a-f]{6});$', code)):
+        if len(re.findall(r'\b%s\b' % v, code)) == 1:
+            code = re.sub(r'(?m)^[ \t]*\w+\s+%s;\n' % v, '', code)
+    # the return addresses then left in variables used nowhere else go
+    for m in list(re.finditer(r'(?m)^[ \t]*(\w+) = 0x([0-9a-f]{6,8});\n', code)):
+        v = m.group(1)
+        if int(m.group(2), 16) in rets_here and \
+                len(re.findall(r'\b%s\b' % v, code)) == len(re.findall(r'(?m)^[ \t]*%s = 0x[0-9a-f]+;$' % v, code)) + 1:
+            code = code.replace(m.group(0), '', 1)
     if any(int(x, 16) in rets_here for x in re.findall(r'\b0x([0-9a-f]{6,8})\b', code)):
         if not FORCE[0]:
             return None, 'return address as a value (stack depth lost)'
