@@ -944,6 +944,136 @@ def known_vcall(ins, k):
     return vt_funcs[found][off // 4]
 
 
+# virtual calls on an object kept in a field of this: the field's class is the one the class's methods store there
+# (the result of a constructor: 'call new; mov ecx, eax; call CTOR; mov [esi+0x1bc], eax'), the pop the one every
+# implementation of the slot in that class and the classes derived from it agrees on.  A method's class: its
+# vftables' (RTTI) or its name's (symbols/GAME.sym 'C::m'); the fields of a base class are the derived class's too.
+vt_class, class_bases, fn_named = {}, {}, {}
+if len(sys.argv) > 7:
+    for c in json.load(open(sys.argv[7])):
+        class_bases[c['name']] = [b['name'] for b in c['bases'] if b['pdisp'] == -1 and b['mdisp'] == 0]
+        for v in c['vtables']:
+            if v['offset'] == 0:
+                vt_class[int(v['vt'], 16)] = c['name']
+if len(sys.argv) > 5:
+    for l in open(sys.argv[5], encoding='utf-8'):
+        q = l.split('#')[0].split(None, 2)
+        if len(q) == 3 and q[1] == 'f' and '::' in q[2]:
+            cn = q[2].strip().rsplit('::', 1)[0]
+            if cn in class_bases:
+                fn_named[int(q[0], 16)] = cn
+
+
+def fn_class(f):
+    if f in func_class:
+        return func_class[f]
+    if f in fn_named:
+        return fn_named[f]
+    v = ctor_vt(f)
+    return vt_class.get(v) if v is not None else None
+
+
+def built_by(ins, k, reg):
+    """the class of the object in reg at instruction k when it comes from a constructor just called (the null of
+    'new' failing, 'xor reg, reg' on another path, does not count), None otherwise"""
+    for j in range(k - 1, max(k - 12, -1), -1):
+        x = ins[j]
+        if x.mnemonic == 'call':
+            if reg == 'eax' and x.operands[0].type == x86.X86_OP_IMM:
+                v = ctor_vt(x.operands[0].imm)
+                return vt_class.get(v) if v is not None else None
+            return None
+        if x.mnemonic in ('jmp',) or (x.mnemonic == 'xor' and x.op_str == reg + ', ' + reg):
+            continue
+        if x.operands and x.operands[0].type == x86.X86_OP_REG and x.op_str.split(',')[0] == reg and \
+                x.mnemonic not in ('push', 'cmp', 'test'):
+            if x.mnemonic == 'mov' and x.operands[1].type == x86.X86_OP_REG:
+                reg = x.op_str.split(', ')[1]
+                continue
+            return None
+    return None
+
+
+_fields = None
+
+
+def field_types():
+    """(class, offset) -> class of the object its methods store in that field"""
+    global _fields
+    if _fields is not None:
+        return _fields
+    votes = collections.defaultdict(set)
+    for f, size, _e in funcs:
+        cls = fn_class(f)
+        if cls is None:
+            continue
+        try:
+            ins = list(md.disasm(pe.read(f, size), f))
+        except Exception:
+            continue
+        tregs = this_regs(ins, f)
+        for k, i in enumerate(ins):
+            if i.mnemonic == 'mov' and len(i.operands) == 2 and i.operands[0].type == x86.X86_OP_MEM and \
+                    i.operands[1].type == x86.X86_OP_REG and i.operands[0].mem.base and not i.operands[0].mem.index \
+                    and i.reg_name(i.operands[0].mem.base) in tregs and i.operands[0].mem.disp > 0:
+                t = built_by(ins, k, i.reg_name(i.operands[1].reg))
+                if t is not None:
+                    votes[(cls, i.operands[0].mem.disp)].add(t)
+    _fields = {key: v.pop() for key, v in votes.items() if len(v) == 1}
+    return _fields
+
+
+def field_vcall(ins, k, start):
+    """the pop of a virtual call on an object loaded from a field of this whose class is known"""
+    cls = fn_class(start)
+    if cls is None:
+        return None
+    tregs = this_regs(ins, start)
+    i = ins[k]
+    op = i.operands[0]
+    lo = max(k - 12, 0)
+    def last_write(reg, before):
+        for j in range(before - 1, lo - 1, -1):
+            w = ins[j]
+            if w.mnemonic == 'call' or w.mnemonic.startswith('j'):
+                return None
+            if w.operands and w.operands[0].type == x86.X86_OP_REG and w.op_str.split(',')[0] == reg and \
+                    w.mnemonic not in ('push', 'cmp', 'test'):
+                return j
+        return None
+    if op.type == x86.X86_OP_MEM and op.mem.index == 0 and op.mem.base:
+        vt, off, at = i.reg_name(op.mem.base), op.mem.disp, k
+    elif op.type == x86.X86_OP_REG:
+        j = last_write(i.reg_name(op.reg), k)
+        w = ins[j] if j is not None else None
+        if not w or w.mnemonic != 'mov' or w.operands[1].type != x86.X86_OP_MEM or w.operands[1].mem.index:
+            return None
+        vt, off, at = w.reg_name(w.operands[1].mem.base), w.operands[1].mem.disp, j
+    else:
+        return None
+    j = last_write(vt, at)
+    w = ins[j] if j is not None else None
+    if not w or w.mnemonic != 'mov' or w.operands[1].type != x86.X86_OP_MEM or w.operands[1].mem.index or \
+            w.operands[1].mem.disp != 0:
+        return None
+    obj = w.reg_name(w.operands[1].mem.base)
+    if obj != 'ecx':
+        e = last_write('ecx', k)
+        if e is None or ins[e].mnemonic != 'mov' or ins[e].op_str != 'ecx, ' + obj:
+            return None
+    j = last_write(obj, j)
+    w = ins[j] if j is not None else None
+    if not w or w.mnemonic != 'mov' or w.operands[1].type != x86.X86_OP_MEM or w.operands[1].mem.index or \
+            not w.operands[1].mem.base or w.reg_name(w.operands[1].mem.base) not in tregs:
+        return None
+    fo = w.operands[1].mem.disp
+    fields = field_types()
+    for b in class_bases.get(cls, [cls]):
+        if (b, fo) in fields:
+            return class_slot_pop(fields[(b, fo)], off)
+    return None
+
+
 measured = {}       # call address -> bytes popped, measured (icalltrace.cpp) where the code alone does not tell
 if len(sys.argv) > 6:
     for l in open(sys.argv[6]):
@@ -1202,6 +1332,13 @@ with open(sys.argv[3], 'w') as f:
                     clsfix[r[0]] = t
                     if STATS is not None:
                         STATS['vtable known here'] += 1
+        for r in rows:
+            if cleanup[r[0]] < 0 and r[1] == 1 and r[0] not in fixed and r[0] not in clsfix:
+                t = field_vcall(ins, ins.index(code[r[0]]), start)
+                if t is not None and t // 4 <= max(r[3], r[5] or 0):
+                    clsfix[r[0]] = t
+                    if STATS is not None:
+                        STATS['field of this'] += 1
         known = callee_pops(code, start, [r[0] for r in rows], cleanup, {**fixed, **nopush, **clsfix},
                             {r[0]: 4 * r[6] for r in rows if r[6] is not None})
         for a, ecx, cl, pushes, off, outstanding, _ in rows:
