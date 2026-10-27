@@ -1311,7 +1311,7 @@ def convert(f, protos, skip, imports, impnames):
     except KeyError as e:
         return None, 'unknown symbol %s' % e
     # a small constant the decompiler took for an address ('&((void *)G_00000004)' passed on: 0x431100)
-    body = re.sub(r'&\s*\(\((\w+(?:\s*\*)+)\)\s*G_(0000[0-9A-F]{4})\)', lambda m: '((%s)0x%X)' % (m.group(1), int(m.group(2), 16)), body)
+    body = re.sub(r'&?\s*\(\((\w+(?:\s*\*)+)\)\s*G_(0000[0-9A-F]{4})\)', lambda m: '((%s)0x%X)' % (m.group(1), int(m.group(2), 16)), body)
     for g in re.findall(r'\bG_([0-9A-F]{8})\b', body):
         ad = int(g, 16)
         if not (0x401000 <= ad < 0x1000000):        # (the headers at 400000 are no section)
