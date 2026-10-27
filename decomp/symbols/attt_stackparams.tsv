@@ -1328,7 +1328,7 @@
 004305F0	0	exact		0	
 00430610	1	exact	0	0	
 00430630	0	exact		0	
-00430650	2	exact	0,1	0	
+00430650	1	exact	0	0	
 004306D0	1	exact	0	0	
 00430710	3	exact	0,1,2	0	
 00430780	0	exact		0	
@@ -2315,7 +2315,7 @@
 00453870	3	exact	0,1,2	0	
 004538A0	2	exact	0,1	0	
 004538C0	1	exact	0	0	
-004538E0	2	exact	0,1	0	
+004538E0	1	exact	0	0	
 00453CF0	0	exact		0	
 00453D70	1	exact		0	
 00453D90	1	exact	0	0	
@@ -2324,7 +2324,7 @@
 00453E00	2	exact	0,1	0	
 00453E20	3	exact	0,1,2	0	
 00453E60	2	exact	0,1	0	
-00453E80	1	exact	0	0	0:f
+00453E80	0	exact		0	
 00454030	1	exact	0	0	
 00454070	3	exact	0,1,2	0	
 004540B0	3	exact	0,1,2	0	
@@ -3134,13 +3134,13 @@
 004765B0	1	exact		0	
 004765D0	2	exact	1	0	
 00476620	1	exact	0	0	
-00476650	2	exact		0	
+00476650	2	exact	0	0	
 00476810	3	exact	0,1,2	0	
 004768F0	3	exact	0,1,2	0	
 004769D0	0	exact		0	
 004769F0	0	exact		0	
 00476B10	1	exact		0	
-00476BB0	2	exact	0,1	0	
+00476BB0	2	exact		0	
 00476E20	0	exact		0	
 00476EB0	1	exact	0	0	
 00476F00	2	exact		0	
@@ -3162,13 +3162,13 @@
 004777A0	0	exact		0	
 004777D0	1	exact		0	
 004777F0	3	exact	1,2	0	
-00477A90	2	exact	0,1	0	
+00477A90	2	exact		0	
 00477AA0	4	exact	0,1,2,3	0	
 00477C50	4	exact	0,1,2,3	0	
 00477E00	0	exact		0	
 00478010	1	exact		0	
 00478030	3	exact	1,2	0	
-00478040	7	exact	4,6	0	
+00478040	3	exact	0,2	0	
 00478200	0	exact		0	
 00478390	1	exact		0	
 004783B0	3	exact	1,2	0	
@@ -3181,7 +3181,7 @@
 00478860	0	exact		0	
 004788A0	1	exact		0	
 00478960	1	exact		0	
-004789E0	2	exact	1	0	
+004789E0	2	exact	0,1	0	
 00478DB0	1	exact		0	
 00478E70	2	exact	0,1	0	
 004792A0	2	exact	0,1	0	
@@ -3222,11 +3222,11 @@
 0047A660	0	exact		0	
 0047A760	0	exact		0	
 0047A840	0	exact		0	
-0047A8E0	2	exact		0	
-0047A9A0	2	exact	1	0	
+0047A8E0	1	exact		0	
+0047A9A0	0	exact		0	
 0047AA40	1	exact		0	
 0047AAF0	2	exact	0	0	
-0047ABA0	3	exact	0	0	
+0047ABA0	1	exact		0	
 0047AC40	1	exact		0	
 0047AC50	1	exact		0	
 0047AD60	1	exact		0	
@@ -3624,7 +3624,7 @@
 004887E0	1	exact		0	
 00488800	0	exact		0	
 004888E0	1	exact		0	
-00488A20	4	exact	0,1,2,3	0	
+00488A20	7	exact	2,3,5,6	0	
 00488C60	0	exact		0	
 00488CC0	1	exact		0	
 00488CE0	0	exact		0	
@@ -5042,7 +5042,7 @@
 004AE990	1	exact		0	
 004AEAE0	0	exact		0	
 004AEC50	3	exact	0	0	
-004AEFE0	0	exact		0	
+004AEFE0	2	exact	0,1	0	
 004AF440	1	exact		0	
 004AF460	1	exact		0	
 004AF480	2	exact	0,1	0	
@@ -7719,7 +7719,7 @@
 00513FA0	1	exact	0	0	
 00513FC1	11	exact	6	0	
 00514080	1	exact	0	0	
-00514120	1	exact	0	0	
+00514120	1	exact		0	
 005142A0	4	exact	0,1,2,3	0	
 005142D0	6	exact	1,2	0	
 005142F0	2	exact	0,1	0	
@@ -7745,7 +7745,7 @@
 00515080	3	exact	0,1,2	0	
 005150F0	1	exact		0	
 00515110	1	exact	0	0	
-005151A0	3	exact	0,1,2	0	
+005151A0	4	exact	0,1,2,3	0	
 00516880	0	exact		0	
 005175F0	0	exact		0	
 00517690	0	exact		0	
@@ -8104,7 +8104,7 @@
 00527DE0	0	exact		0	
 00527E80	1	exact		0	
 00527EA0	0	exact		0	
-00527ED0	2	exact	0,1	0	
+00527ED0	0	exact		0	
 005282B0	1	exact	0	0	
 005283F0	0	exact		0	
 00528410	0	exact		0	
@@ -8323,7 +8323,7 @@
 00532F70	1	exact		0	0:f
 00533080	0	exact		0	
 00533270	0	exact		0	
-005332D0	1	exact		0	
+005332D0	1	exact	0	0	
 005333D0	2	exact	0,1	0	
 005334E0	0	exact		0	
 005335F0	0	exact		0	
@@ -8999,7 +8999,7 @@
 00556550	0	exact		0	
 00556610	0	exact		0	
 00556730	3	exact	2	0	
-00556810	3	exact	2	0	
+00556810	0	exact		0	
 00556A00	1	exact	0	0	0:f
 00556A60	1	exact	0	0	
 00556AB0	1	exact		0	
@@ -10367,7 +10367,7 @@
 00593BB0	3	exact	0,1,2	0	
 00593BF0	3	exact	0,1,2	0	
 00593C80	2	exact	0,1	0	
-00593D10	3	exact	0,1,2	0	
+00593D10	2	exact	0,1	0	
 00593DE0	0	exact		0	
 00593E00	3	exact	1,2	0	
 00593EA0	3	exact	1,2	0	1:f,2:f
