@@ -77,7 +77,8 @@ public class ICallOverride extends GhidraScript {
                     // 0x4E0750's 'call edx'); 8 other bytes: EDX:EAX
                     else if ((o.isRegister() && currentProgram.getRegister(o.getAddress(), o.getSize()) != null &&
                               currentProgram.getRegister(o.getAddress(), o.getSize()).getName().startsWith("ST")) ||
-                             (o.getHigh() != null && o.getHigh().getDataType() instanceof AbstractFloatDataType))
+                             (o.getHigh() != null && o.getHigh().getDataType() instanceof AbstractFloatDataType) ||
+                             o.getSize() == 10)     // (an x87 value, ST0: the 'undefined1[10]' of 0x4B8746 'call eax; fadd')
                         s.out = o.getSize() == 4 ? "float" : "double";
                     else if (o.getSize() == 8) s.out = "undefined8";
                     else s.out = "other";
