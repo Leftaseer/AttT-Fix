@@ -110,6 +110,7 @@ for g in attt valk; do
      -postScript ByValueParams.java "$SYMS/${g}_byvalue.tsv" \
      -postScript FpuIntrinsics.java \
      -postScript DecoratedImports.java "$SYMS/import_protos.tsv" "$SYMS/${g}_cxximports.tsv" \
+     -postScript VarargsCalls.java \
      -postScript ThrowNoReturn.java \
      -postScript TailCalls.java \
      -postScript ManualProtos.java "$SYMS/${g}_protos.tsv" \

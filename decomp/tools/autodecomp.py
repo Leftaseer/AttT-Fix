@@ -1085,7 +1085,11 @@ def convert(f, protos, skip, imports, impnames):
                     while q < len(code) and depth:
                         depth += {'(': 1, ')': -1}.get(code[q], 0)
                         q += 1
-                    n = len(split_args(code[cm.end():q - 1]))
+                    # (in dwords: a double or long long passed counts two, ghidra/VarargsCalls.java types them from
+                    # the format)
+                    wide = set(re.findall(r'(?m)^\s*(?:double|longlong|ulonglong|undefined8)\s+(\w+)\s*;', code))
+                    n = sum(2 if re.match(r'\(\s*(?:double|longlong|ulonglong)\s*\)', x) or x in wide or
+                            re.fullmatch(r'GV_\w+_8', x) else 1 for x in split_args(code[cm.end():q - 1]))
                     if seen and n not in seen:
                         if not FORCE[0]:
                             return None, 'varargs call of %s with %d arguments, the machine code passes %s' % (
