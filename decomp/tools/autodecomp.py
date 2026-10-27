@@ -84,6 +84,89 @@ def call_returns(a):
     return {i.address + i.size for i in md.disasm(code, a) if i.mnemonic == 'call'}
 
 
+import_pops = {}    # IAT slot -> bytes the imported function pops (its prototype)
+byvalue_offs = {}   # function -> offsets of its string parameters passed by value (symbols/GAME_byvalue.tsv)
+_depths = {}
+call_sites = {}     # function -> {address of a direct call: callee}
+
+
+def stack_depths(a):
+    """ESP at each instruction of the function at a, as bytes below its return address (negative), from the pops of
+    its callees; None where that is not known everywhere (a pop unknown, paths that disagree, ESP set otherwise)"""
+    if a in _depths:
+        return _depths[a]
+    _depths[a] = None
+    import capstone
+    from capstone import x86 as cx
+    from stackfx import switch_targets
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.detail = True
+    try:
+        code = {i.address: i for i in md.disasm(image[0].read(a, fsize.get(a, 0)), a)}
+    except Exception:
+        return None
+    def u32(x):
+        try:
+            return int.from_bytes(image[0].read(x, 4), 'little')
+        except Exception:
+            return None
+    call_sites[a] = {p: i.operands[0].imm for p, i in code.items()
+                     if i.mnemonic == 'call' and i.operands[0].type == cx.X86_OP_IMM}
+    d, todo = {}, [(a, 0)]
+    while todo:
+        p, dep = todo.pop()
+        while p in code:
+            if p in d:
+                if d[p] != dep:
+                    return None
+                break
+            d[p] = dep
+            i = code[p]
+            m, ops = i.mnemonic, i.operands
+            if m.startswith('ret') or m in ('int3', 'hlt'):
+                break
+            if m == 'push':
+                dep -= 4
+            elif m == 'pop':
+                dep += 4
+            elif m in ('sub', 'add') and ops[0].type == cx.X86_OP_REG and ops[0].reg == cx.X86_REG_ESP:
+                if ops[1].type != cx.X86_OP_IMM:
+                    return None
+                dep += -ops[1].imm if m == 'sub' else ops[1].imm
+            elif m in ('leave', 'pushal', 'popal', 'pushfd', 'popfd') or (ops and ops[0].type == cx.X86_OP_REG and
+                                                                        ops[0].reg == cx.X86_REG_ESP):
+                return None
+            elif m == 'call':
+                op = ops[0]
+                if op.type == cx.X86_OP_IMM:
+                    pop = machine.get(op.imm, (None, None))[1]
+                elif op.type == cx.X86_OP_MEM and not op.mem.base and not op.mem.index:
+                    pop = import_pops.get(op.mem.disp)
+                else:
+                    ic = icalls.get(p)
+                    pop = None if ic is None else 4 * ic[1] if ic[0] in ('__stdcall', '__thiscall', '__fastcall') \
+                        else 0
+                if pop is None:
+                    if op.type == cx.X86_OP_IMM and op.imm in noreturn:
+                        break
+                    return None
+                dep += pop
+            if m == 'jmp':
+                op = ops[0]
+                if op.type == cx.X86_OP_IMM and op.imm in code:
+                    p = op.imm
+                    continue
+                for t in switch_targets(i, u32, a, a + fsize.get(a, 0)):
+                    todo.append((t, dep))
+                break
+            if m.startswith('j') or m.startswith('loop'):
+                if ops[0].type == cx.X86_OP_IMM:
+                    todo.append((ops[0].imm, dep))
+            p = i.address + i.size
+    _depths[a] = d
+    return d
+
+
 def load_machine(path):
     for l in open(path):
         if l.startswith('#'):
@@ -99,6 +182,12 @@ def load_machine(path):
             q = l.rstrip('\n').split('\t')
             if l[0] != '#':
                 import_args[int(q[0], 16)] = (int(q[1]), int(q[3]) if len(q) > 3 else 0)
+    bv = path.replace('_functions.tsv', '_byvalue.tsv')
+    if os.path.exists(bv):
+        for l in open(bv):
+            q = l.rstrip('\n').split('\t')
+            if l[0] != '#' and len(q) > 1 and q[1]:
+                byvalue_offs[int(q[0], 16)] = sorted(int(x) for x in q[1].split(','))
     sp = path.replace('_functions.tsv', '_stackparams.tsv')
     if os.path.exists(sp):
         for l in open(sp):
@@ -468,9 +557,68 @@ def convert(f, protos, skip, imports, impnames):
             return m.group(0)
         return '%s%s = *(_decomp_StrByValue *)&%s;\n' % (re.match(r'\s*', lines[0]).group(0), m.group(1), v)
     code = re.sub(r'(?m)^[ \t]*(\w+)\.d\d = [^;\n]*;\n(?:[ \t]*\1\.d\d = [^;\n]*;\n){6}', whole, code)
-    for v in set(re.findall(r'(?m)^[ \t]*\w+\s+(in_stack_ff[0-9a-f]{6});$', code)):
+    # the others: where the string is, from the depth of the stack at the calls of the callee (a copy-constructed
+    # string the decompiler gave pieces of other values: 0x4662A0 passes floats and pointers as 0x45C740's string)
+    def string_at_call(code):
+        dm = stack_depths(a)
+        if dm is None:
+            return code
+        def calls_of(callee):
+            """(start, end, args) of the calls of callee in the text, in order"""
+            out = []
+            for c in re.finditer(r'\bsub_%08X\s*\(' % callee, code):
+                depth, q = 1, c.end()
+                while q < len(code) and depth:
+                    depth += {'(': 1, ')': -1}.get(code[q], 0)
+                    q += 1
+                out.append((c.start(), q, [x.strip() for x in split_args(code[c.end():q - 1])]))
+            return out
+        out = []
+        for m in re.finditer(r'(?m)^([ \t]*)(\w+)\.d\d = [^;\n]*;\n(?:[ \t]*\2\.d\d = [^;\n]*;\n){6}', code):
+            sv = m.group(2)
+            c = re.compile(r'\bsub_([0-9A-F]{8})\s*\(').search(code, m.end())
+            if not c or ';' in code[m.end():c.start()]:
+                continue
+            callee = int(c.group(1), 16)
+            offs = byvalue_offs.get(callee, [])
+            calls = calls_of(callee)
+            this = next((x for x in calls if x[0] == c.start()), None)
+            if not offs or this is None or sv not in this[2]:
+                continue
+            k = sum(1 for x in this[2][:this[2].index(sv)] if re.fullmatch(r'str_\d+(?:_\d+)?', x))
+            if k >= len(offs):
+                continue
+            sites = sorted(p for p, t in call_sites.get(a, {}).items() if t == callee and p in dm)
+            locs = {dm[p] + offs[k] - 4 for p in sites}
+            if len(locs) != 1:
+                # the calls in the text in the order of the machine code's, checked on the strings already placed
+                if len(calls) != len(sites):
+                    continue
+                ok = True
+                for (cs, ce, args), p in zip(calls, sites):
+                    strs = [x for x in args if re.fullmatch(r'str_\d+(?:_\d+)?', x)]
+                    if len(strs) <= k:
+                        ok = False
+                        break
+                    w = re.search(r'\b%s = \*\(_decomp_StrByValue \*\)&(?:local_([0-9a-f]+)|stack0x([0-9a-f]{8}));'
+                                  % strs[k], code[max(0, cs - 400):cs])
+                    if w:
+                        at = -int(w.group(1), 16) if w.group(1) else int(w.group(2), 16) - 0x100000000
+                        if at != dm[p] + offs[k] - 4:
+                            ok = False
+                            break
+                if not ok:
+                    continue
+                locs = {dm[sites[[x[0] for x in calls].index(c.start())]] + offs[k] - 4}
+            out.append((m.start(), m.end(), '%s%s = *(_decomp_StrByValue *)&stack0x%08x;\n'
+                        % (m.group(1), sv, locs.pop() & 0xffffffff)))
+        for s_, e_, t in reversed(out):
+            code = code[:s_] + t + code[e_:]
+        return code
+    code = string_at_call(code)
+    for v in set(re.findall(r'(?m)^[ \t]*\w[\w ]*?[\s*]+(in_stack_ff[0-9a-f]{6});$', code)):
         if len(re.findall(r'\b%s\b' % v, code)) == 1:
-            code = re.sub(r'(?m)^[ \t]*\w+\s+%s;\n' % v, '', code)
+            code = re.sub(r'(?m)^[ \t]*\w[\w ]*?[\s*]+%s;\n' % v, '', code)
     # the return addresses then left in variables go where every read of the variable follows another store to
     # it in its own block (0x5A9550's 'uVar18 = 0x5a95a9', the variable used again for other values)
     def dead_store(v, at):
@@ -675,6 +823,8 @@ def convert(f, protos, skip, imports, impnames):
             off = int(m.group(2), 16)
             if not re.search(r'\bin_stack_%08x\b' % off, flat):
                 continue                       # not passed on: an object of the frame (0x43A970)
+            if m.group(1) == '_decomp_StrByValue':
+                continue                       # a whole string taken from there (the rules above)
             if re.search(r'\b(?:%s)\s+in_stack_%08x\s*;' % ('|'.join(BYVALUE), off), flat):
                 continue                       # one variable of the whole object, passed by value (0x42AF50)
             need = OBJ_DWORDS.get(m.group(1))
@@ -687,6 +837,9 @@ def convert(f, protos, skip, imports, impnames):
                     n += 1
                 run = max(run, n)
             if need is None or run < need:
+                if os.environ.get('AD_DEBUG'):
+                    print('outgoing %08X off %x type %s need %s run %d:' % (a, off, m.group(1), need, run),
+                          sorted(set(x for x in re.findall(r'[^;{}]*\bin_stack_%08x\b[^;{}]*' % off, flat)))[:3])
                 if not FORCE[0]:
                     return None, 'object built in the outgoing arguments, passed on in part'
                 NOTES.append('object built in the outgoing arguments, passed on in part')
@@ -938,6 +1091,11 @@ def main():
         eax_used.update(int(l, 16) for l in open(rl) if l.strip() and l[0] != '#')
     os.makedirs(a.outdir, exist_ok=True)
     protos, imports = load_protos(a.jsonl + '.protos')
+    for ia in imports:
+        icc, _, _, iplist, iva = protos[ia][:5]
+        skip_ = 1 if icc == '__thiscall' else 2 if icc == '__fastcall' else 0
+        import_pops[ia] = 0 if iva or icc not in ('__stdcall', '__thiscall', '__fastcall') else \
+            sum(slot_bytes(t) for t, _ in iplist[skip_:])
     for fn in a.syms:
         for l in open(fn, encoding='utf-8'):
             if l.startswith('#') or not l.strip():
