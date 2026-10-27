@@ -9,3 +9,4 @@
 005E40D6	stdcall	16	void __stdcall __ArrayUnwind(void *ptr, uint size, int count, void *dtor)	runtime: destroys a partly constructed array
 005E4134	stdcall	16	void __stdcall eh_vector_destructor_iterator(void *ptr, uint size, int count, void *dtor)	runtime: ??_M@YGXPAXIHP6EX0@Z@Z
 005E4197	stdcall	20	void __stdcall eh_vector_constructor_iterator(void *ptr, uint size, int count, void *ctor, void *dtor)	runtime: ??_L@YGXPAXIHP6EX0@Z1@Z
+004205C0	thiscall	4	uint __thiscall vcall_base4_slot1(void *this, uint arg)	thunk "add ecx, 4; jmp [vftable+4]" to slot 1 of the subobject at +4: its 21 callers push one argument and leave it, 22 of the 24 slot-1 functions of the RTTI vftables at +4 pop 4
