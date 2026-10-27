@@ -155,3 +155,7 @@ SLOT CUpdateObject 9 AfterTicks
 005E42B0 f _allrem
 005E43A0 f _alldiv
 005E4080 f _alloca_probe
+005E3ED2 f _onexit
+005E40D6 f __ArrayUnwind
+005E4134 f eh_vector_destructor_iterator
+005E4197 f eh_vector_constructor_iterator

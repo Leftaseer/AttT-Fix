@@ -112,6 +112,7 @@ for g in attt valk; do
      -postScript DecoratedImports.java "$SYMS/import_protos.tsv" "$SYMS/${g}_cxximports.tsv" \
      -postScript ThrowNoReturn.java \
      -postScript TailCalls.java \
+     -postScript ManualProtos.java "$SYMS/${g}_protos.tsv" \
      -postScript KeepRegisters.java "$SYMS/${g}_functions.tsv" \
      -postScript FillClassStructs.java "$O/${g}_sizes.json" "$O/${g}_rtti.json" \
      -postScript ExportDecomp.java "$WORK/decomp/$g.jsonl" > "$WORK/logs/annotate_$g.log" 2>&1

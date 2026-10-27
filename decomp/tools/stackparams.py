@@ -14,7 +14,7 @@ typed it as a byte (0x42AF50 passes its second parameter on as a pointer, typed 
 pointer down to a byte); the arguments callers push; and the slots only x87/SSE float instructions use, as
 'k:f' (a float) or 'k:d' (a double in slots k and k+1): sqrt(x) of 0x406260 has x untyped, and its callers
 then pass the bits of a float as an integer."""
-import sys, os
+import sys, re, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
 import capstone
@@ -311,6 +311,17 @@ with open(sys.argv[3], 'w') as f:
                         changed = True
         if not changed:
             break
+    # prototypes set by hand (symbols/GAME_protos.tsv): their parameter count
+    mp = sys.argv[2].replace('_functions.tsv', '_protos.tsv')
+    if os.path.exists(mp):
+        for l in open(mp):
+            q = l.rstrip('\n').split('\t')
+            if l[0] != '#' and len(q) > 3 and int(q[0], 16) in res:
+                ps = re.search(r'\((.*)\)', q[3]).group(1).strip()
+                k = 0 if ps in ('', 'void') else ps.count(',') + 1
+                k -= q[1] in ('thiscall', 'fastcall')
+                k -= q[1] == 'fastcall' and k > 0
+                res[int(q[0], 16)] = [k, 'exact', list(range(k)), [], 0]
     for a in sorted(funcs):
         n, how, dw, fl, pa = res[a]
         f.write('%08X\t%d\t%s\t%s\t%d\t%s\n' % (a, n, how, ','.join(map(str, dw)), pa, ','.join(fl)))

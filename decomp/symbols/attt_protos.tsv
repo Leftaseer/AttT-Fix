@@ -1,0 +1,11 @@
+# Prototypes set by hand, where the analysis of the machine code cannot find them: address, convention
+# (cdecl/stdcall/thiscall/fastcall), bytes the ret pops, the prototype in C (the decompiler's syntax: its name is
+# the function's name), why.  tools/regparams.py and tools/stackparams.py take the registers, the pop and the
+# parameter count from here, ghidra/ManualProtos.java the prototype.
+# The MSVC runtime's helpers that set up their frame with __SEH_prolog4 (0x5E4910): EBP is the helper's, no input,
+# and the parameters are read through it ('push 0x10; push scopetable; call __SEH_prolog4' at the entry).  Their
+# callers lost the depth of the stack (0x50C3C0 constructs an array of objects with 0x5E4197).
+005E3ED2	cdecl	0	void * __cdecl _onexit(void *func)	runtime: registers an exit function
+005E40D6	stdcall	16	void __stdcall __ArrayUnwind(void *ptr, uint size, int count, void *dtor)	runtime: destroys a partly constructed array
+005E4134	stdcall	16	void __stdcall eh_vector_destructor_iterator(void *ptr, uint size, int count, void *dtor)	runtime: ??_M@YGXPAXIHP6EX0@Z@Z
+005E4197	stdcall	20	void __stdcall eh_vector_constructor_iterator(void *ptr, uint size, int count, void *ctor, void *dtor)	runtime: ??_L@YGXPAXIHP6EX0@Z1@Z

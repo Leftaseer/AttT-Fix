@@ -6,7 +6,7 @@ a tail jump those of its target, so the analysis repeats until nothing changes. 
 conventions (a function that passes EAX on to a callee takes EAX too).
 usage: regparams.py EXE BINFEAT.json OUT.tsv [STACKPARAMS.tsv FUNCTIONS.tsv]   ->  ADDR <tab> regs (e.g. ECX,EAX) <tab> ret-pop-bytes"""
 import sys, json; sys.path.insert(0, __import__('os').path.dirname(__import__('os').path.abspath(__file__))); from pe import PE
-import capstone
+import capstone, os
 from stackfx import switch_targets
 from capstone import x86_const as X
 p = PE(sys.argv[1]); bf = {int(k, 16): v for k, v in json.load(open(sys.argv[2])).items()}
@@ -154,8 +154,19 @@ for rnd in range(8):
     print('pass %d: %d functions changed' % (rnd + 1, changed), file=sys.stderr)
     if not changed:
         break
+# prototypes set by hand (symbols/GAME_protos.tsv next to functions.tsv)
+manual = {}
+if len(sys.argv) > 5:
+    mp = sys.argv[5].replace('_functions.tsv', '_protos.tsv')
+    if os.path.exists(mp):
+        for l in open(mp):
+            q = l.rstrip('\n').split('\t')
+            if l[0] != '#' and len(q) > 2:
+                manual[int(q[0], 16)] = ({'thiscall': ['ECX'], 'fastcall': ['ECX', 'EDX']}.get(q[1], []), int(q[2]))
 with open(sys.argv[3], 'w') as out:
     for start in sorted(res):
         inputs, retpop = res[start]
         names = [n for n, b in BIT.items() if inputs & b]
+        if start in manual:
+            names, retpop = manual[start][0], {manual[start][1]}
         out.write('%08X\t%s\t%s\n' % (start, ','.join(names), ','.join(str(x) for x in sorted(retpop))))

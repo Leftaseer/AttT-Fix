@@ -261,8 +261,10 @@ def pushes_since_call(ins, k, preds, saves=()):
         elif m == 'call':
             # a call on an object on the stack ('mov ecx, esp', 'lea ecx, [esp+N]' before it) may build an argument
             # of this one in place: 0x48BA70 takes a std::string by value, copy-constructed at ESP
+            # (not a local deeper in the frame: 0x4C8CB6 sets a string at [esp+0xbc])
             for b in ins[max(0, j - 4):j]:
-                if (b.mnemonic == 'mov' and b.op_str == 'ecx, esp') or (b.mnemonic == 'lea' and b.op_str.startswith('ecx, [esp')):
+                if (b.mnemonic == 'mov' and b.op_str == 'ecx, esp') or \
+                        (b.mnemonic == 'lea' and b.op_str.startswith('ecx, [esp') and b.operands[1].mem.disp < 0x40):
                     return None
             return n
         elif m in ('pop', 'leave') or m.startswith(('ret', 'j', 'loop')):
@@ -352,23 +354,111 @@ def seh_frame(code, start):
     return bool(k) and k.mnemonic == 'mov' and 'fs:[0]' in k.op_str
 
 
+def seh_state(code, start):
+    """the depth of the exception state slot: the frame on ESP at the entry (-4), or after an aligned EBP frame
+    ('push ebp; mov ebp, esp; and esp, -8; push -1; push HANDLER; mov eax, fs:[0]': -8, 0x4C8B70); else None"""
+    if seh_frame(code, start):
+        return -4
+    p, ins = start, []
+    for _ in range(3):
+        i = code.get(p)
+        if not i:
+            return None
+        ins.append(i)
+        p += i.size
+    if [x.mnemonic for x in ins] == ['push', 'mov', 'and'] and ins[0].op_str == 'ebp' and \
+            ins[1].op_str == 'ebp, esp' and ins[2].op_str.startswith('esp, ') and seh_frame(code, p):
+        return -8
+    return None
+
+
+STATE = [-4]        # the state slot's depth in the function being solved (seh_state)
+CONSTS = {}         # registers holding one constant all through the function being solved (const_regs)
+
+
+def const_regs(code):
+    """EBX/EBP/ESI/EDI that every write in the function sets to the same constant ('or ebp, 0xffffffff' kept for
+    the exception state's -1: 0x4C8B70 writes 'mov [esp+0x344], ebp')"""
+    vals = {}
+    for i in code.values():
+        if not i.operands or i.operands[0].type != x86.X86_OP_REG or i.mnemonic in ('push', 'cmp', 'test'):
+            continue
+        r = i.operands[0].reg
+        if r not in (x86.X86_REG_EBX, x86.X86_REG_EBP, x86.X86_REG_ESI, x86.X86_REG_EDI):
+            continue
+        if i.mnemonic == 'pop' or (i.mnemonic == 'mov' and i.op_str == 'ebp, esp'):    # (restores, the frame)
+            continue
+        if i.mnemonic == 'or' and i.operands[1].type == x86.X86_OP_IMM and i.operands[1].imm & 0xFFFFFFFF == 0xFFFFFFFF:
+            v = 0xFFFFFFFF
+        elif i.mnemonic == 'mov' and i.operands[1].type == x86.X86_OP_IMM:
+            v = i.operands[1].imm & 0xFFFFFFFF
+        elif i.mnemonic == 'xor' and i.operands[1].type == x86.X86_OP_REG and i.operands[1].reg == r:
+            v = 0
+        else:
+            v = None
+        vals.setdefault(r, set()).add(v)
+    return {r: v.pop() for r, v in vals.items() if len(v) == 1 and None not in v}
+
+
+ORDER = []          # the addresses of the function being solved, in order (for reg_const)
+
+
+def reg_const(i):
+    """the constant a callee-saved register holds at i: its last write before i, within 80 instructions, is
+    'or r, -1', 'mov r, imm' or 'xor r, r' (0x4C8B70 keeps the state's -1 in EBP for a while: 'or ebp, 0xffffffff'
+    ... 'mov [esp+0x344], ebp' after two calls)"""
+    import bisect
+    r = i.operands[1].reg
+    if r not in (x86.X86_REG_EBX, x86.X86_REG_EBP, x86.X86_REG_ESI, x86.X86_REG_EDI) or not ORDER:
+        return None
+    k = bisect.bisect_left(ORDER[0], i.address)
+    code = ORDER[1]
+    for j in range(k - 1, max(-1, k - 80), -1):
+        w = code[ORDER[0][j]]
+        if not w.operands or w.operands[0].type != x86.X86_OP_REG or w.operands[0].reg != r or \
+                w.mnemonic in ('push', 'cmp', 'test'):
+            continue
+        if w.mnemonic == 'or' and w.operands[1].type == x86.X86_OP_IMM and w.operands[1].imm & 0xFFFFFFFF == 0xFFFFFFFF:
+            return 0xFFFFFFFF
+        if w.mnemonic == 'mov' and w.operands[1].type == x86.X86_OP_IMM:
+            return w.operands[1].imm & 0xFFFFFFFF
+        if w.mnemonic == 'xor' and w.operands[1].type == x86.X86_OP_REG and w.operands[1].reg == r:
+            return 0
+        return None
+    return None
+
+
+def store_value(i):
+    """the value 'mov [esp+N], x' stores: an immediate or a constant register (CONSTS, reg_const), else None"""
+    o = i.operands[1]
+    if o.type == x86.X86_OP_IMM:
+        return o.imm & 0xFFFFFFFF
+    if o.type == x86.X86_OP_REG and o.reg in CONSTS:
+        return CONSTS[o.reg]
+    if o.type == x86.X86_OP_REG:
+        return reg_const(i)
+    return None
+
+
 def state_store(i):
     """N of 'mov byte/dword ptr [esp+N], imm' with a value an exception state can have, else None"""
     if i.mnemonic != 'mov' or len(i.operands) != 2 or i.operands[0].type != x86.X86_OP_MEM or \
-            i.operands[1].type != x86.X86_OP_IMM:
+            store_value(i) is None:
         return None
     m = i.operands[0].mem
     if m.base != ESP or m.index != 0 or i.operands[0].size not in (1, 4):
         return None
-    v = i.operands[1].imm & 0xFFFFFFFF
+    v = store_value(i)
     if i.operands[0].size == 4 and not (v < 0x100 or v == 0xFFFFFFFF):
         return None
     return m.disp
 
 
-def state_write_depth(code, p, known, limit=60):
+def state_write_depth(code, p, known, limit=60, local=None, passed=None):
     """depth right after a call at p from the first exception-state write on the straight path from it (ESP
-    changes on the way all known), None when there is none before a branch target is left or something unknown"""
+    changes on the way all known), None when there is none before a branch target is left or something unknown.
+    With local (call -> its local guess) the path may go through calls not known yet, taken to pop that; they go
+    into passed"""
     acc = 0
     for _ in range(limit):
         i = code.get(p)
@@ -376,10 +466,13 @@ def state_write_depth(code, p, known, limit=60):
             return None
         n = state_store(i)
         if n is not None:
-            return -4 - n - acc
+            return STATE[0] - n - acc
         if i.mnemonic == 'mov' and i.op_str == 'ebp, esp':
             return None
         e = effect(i, code, known)
+        if e is STOP and local and i.address in local and passed is not None and len(passed) < 3:
+            e = local[i.address]
+            passed.append(i.address)
         if e is STOP:
             return None
         acc += e
@@ -398,9 +491,9 @@ def state_ok(code, d, a):
     result, and the write after it into the same slot no state (0x4CAA48 pops 28, not 20)"""
     i = code[a]
     if i.mnemonic == 'lea' and i.operands[1].mem.base == ESP and i.operands[1].mem.index == 0:
-        return d[a] + i.operands[1].mem.disp != -4
+        return d[a] + i.operands[1].mem.disp != STATE[0]
     n = state_store(i)
-    return n is None or i.operands[0].size != 4 or i.operands[1].imm & 0xFFFFFFFF != 0xFFFFFFFF or d[a] + n == -4
+    return n is None or i.operands[0].size != 4 or store_value(i) != 0xFFFFFFFF or d[a] + n == STATE[0]
 
 
 def deferred_cleanup(code):
@@ -485,7 +578,11 @@ def callee_pops(code, start, calls, cleanup, fixed=None, local=None):
     # built or destroyed ('mov byte/dword ptr [esp+N], state'): the first such write after a call, with only known
     # ESP changes between, tells the depth after the call (0x424330: five virtual calls in a row, the prologue's
     # 'push edi' among the pushes before the first).  Kept only if the whole function then agrees.
-    if seh_frame(code, start):
+    if seh_state(code, start) is not None:
+        STATE[0] = seh_state(code, start)
+        CONSTS.clear()
+        CONSTS.update(const_regs(code))
+        ORDER[:] = [sorted(code), code]
         anch = dict(known)
         for _ in range(8):
             d = depths(code, start, anch)
@@ -493,15 +590,23 @@ def callee_pops(code, start, calls, cleanup, fixed=None, local=None):
             for a in calls:
                 if a in anch or a not in d:
                     continue
-                after = state_write_depth(code, a + code[a].size, anch)
+                passed = []
+                after = state_write_depth(code, a + code[a].size, anch, local=local, passed=passed)
                 if after is None:
                     continue
                 p = after - d[a]
+                # (through calls not known yet only if their local guesses and this one's give the anchor's depth
+                # exactly: 0x4C8D1F's two floats and 0x4C8D34's one argument before the state write after both)
+                if passed and (a not in local or p != local[a]):
+                    continue
                 if 0 <= p <= 64 and p % 4 == 0:
                     anch[a] = p
+                    anch.update({c: local[c] for c in passed})
                     new = True
             if not new:
                 break
+        if DEBUG == start:
+            print('anchors', {'%X' % k: v for k, v in anch.items() if k not in known}, 'known', {'%X' % k: v for k, v in known.items()})
         if len(anch) > len(known):
             bad = []
             d = depths(code, start, anch, bad)

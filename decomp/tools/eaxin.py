@@ -41,6 +41,8 @@ def main():
         print('EAX inputs: %d (%d new)' % (len(have | new), len(new - have)))
     elif sys.argv[1] == 'apply':
         eax = load(sys.argv[2])
+        # (not the prototypes set by hand, symbols/GAME_protos.tsv)
+        eax -= load(sys.argv[4].replace('_functions.tsv', '_protos.tsv'))
         for path, col in ((sys.argv[3], 1), (sys.argv[4], 2)):
             lines = []
             for l in open(path):

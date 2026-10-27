@@ -333,7 +333,8 @@ def add_sym(name, addr):
         ambiguous.add(name)
 rets = {}
 image = [None]      # the PE of the game (exception tables)
-eax_used = set()    # functions whose callers use EAX after the call (tools/retlive.py)
+eax_used = set()        # functions whose callers use EAX after the call (tools/retlive.py)
+eax_handers = set()     # functions that hand their caller's EAX back (symbols/GAME_eaxin.tsv)
 
 
 def catches(handler):
@@ -422,14 +423,19 @@ def convert(f, protos, skip, imports, impnames):
             return None, why
     # a register a callee takes, declared as a local of this function (it is no parameter here): the decompiler
     # lets the callee have this function's own EAX, an uninitialized variable in C (0x547F10 passes 'in_eax' on
-    # to 0x4AC7F0, 0x491F50 to 0x491CF0, which then faulted)
-    # (unless its first use sets it at the top level of the body: then it is an ordinary local the decompiler named
-    # after the callee's parameter, 0x422160 'in_eax = ExceptionList;')
+    # to 0x4AC7F0, 0x491F50 to 0x491CF0, which then faulted).  Mostly it is an ordinary local the decompiler named
+    # after the callee's parameter (0x422160 'in_eax = ExceptionList;', or set in a branch before its use): the
+    # compiler's uninitialized-use errors (cflags below) tell the two apart.  Given unset only to functions that
+    # merely hand EAX back (eaxin.py) in calls whose result goes unused, it is whatever EAX held, garbage the
+    # original passes on and drops: 0 (0x5A9550 to 0x54D350)
     decl, rest = (re.split(r'\n[ \t]*\n', code[code.find('{') + 1:].strip('\n'), 1) + [''])[:2]
-    for m in re.finditer(r'(?m)^\s+(?!return\b)[A-Za-z_][\w ]*?\**\s*\b(in_(?:eax|ecx|edx|ebx|esi|edi))\s*;', decl):
-        first = re.search(r'(?m)^.*\b%s\b.*$' % m.group(1), rest)
-        if not first or not re.match(r'  %s = (?!.*\b%s\b)' % (m.group(1), m.group(1)), first.group(0)):
-            return None, 'register input passed on, not a parameter'
+    for m in re.finditer(r'(?m)^\s+(?!return\b)[A-Za-z_][\w ]*?\**\s*\b(in_eax\w*)\s*;', decl):
+        v = m.group(1)
+        uses = [u for u in re.findall(r'(?m)^.*\b%s\b.*$' % v, rest)]
+        if uses and all(re.match(r'\s*sub_([0-9A-F]{8})\s*\(.*\);\s*$', u) and
+                        int(re.match(r'\s*sub_([0-9A-F]{8})', u).group(1), 16) in eax_handers for u in uses):
+            code = re.sub(r'\b%s\b(?!\s*;)' % v, '0', code)
+            code = re.sub(r'(?m)^\s+[A-Za-z_][\w ]*?\**\s*\b%s\s*;\n' % v, '', code)
     # a call's return address as a value: the decompiler lost the stack depth and took the pushes of the calls for
     # arguments of a later one (0x475440 'uVar5 = 0x47552f' passed on to 0x475330 with a vector by value)
     rets_here = call_returns(a)
@@ -761,6 +767,9 @@ def main():
             q = l.rstrip('\n').split('\t')
             if l[0] != '#' and len(q) == 4:
                 icalls[int(q[0], 16)] = (q[1], int(q[2]), q[3])
+    ex = a.functions.replace('_functions.tsv', '_eaxin.tsv')
+    if os.path.exists(ex):
+        eax_handers.update(int(l.split()[0], 16) for l in open(ex) if l.strip() and l[0] != '#')
     rl = a.functions.replace('_functions.tsv', '_retlive.tsv')
     if os.path.exists(rl):
         eax_used.update(int(l, 16) for l in open(rl) if l.strip() and l[0] != '#')
