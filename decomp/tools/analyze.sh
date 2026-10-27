@@ -106,7 +106,7 @@ for g in attt valk; do
      -postScript ClassThiscall.java "$O/${g}_regparams.tsv" \
      -postScript FloatReturns.java "$SYMS/${g}_x87ret.tsv" \
      -postScript FixStackParams.java "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv" \
-     -postScript SetReturns.java "$SYMS/${g}_retlive.tsv" \
+     -postScript SetReturns.java "$SYMS/${g}_retlive.tsv" "$SYMS/${g}_x87ret.tsv" \
      -postScript ByValueParams.java "$SYMS/${g}_byvalue.tsv" \
      -postScript FpuIntrinsics.java \
      -postScript DecoratedImports.java "$SYMS/import_protos.tsv" "$SYMS/${g}_cxximports.tsv" \

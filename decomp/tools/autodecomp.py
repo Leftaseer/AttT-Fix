@@ -512,6 +512,13 @@ def convert(f, protos, skip, imports, impnames):
     # a bool result handed on: the upper bytes of EAX are what the callee left there (0x420BC0 returns std::operator==
     # of strings), which callers never read (they test AL): zero
     code = re.sub(r'\bCONCAT31\(extraout_var(?:_\d+)?\s*,', 'CONCAT31(0,', code)
+    # (or the upper bytes of a register a callee left, under the bool computed into its low byte: 0x516880's
+    # 'CONCAT31((undefined4)((uint)extraout_EDX >> 8), a == b)', passed as a bool argument)
+    code = re.sub(r'\bCONCAT31\(\s*\(\w+\)\s*\(\s*\(\w+\)\s*extraout_E[A-Z]{2}(?:_\d+)?\s*>>\s*8\s*\)\s*,',
+                  'CONCAT31(0,', code)
+    for v in set(re.findall(r'(?m)^[ \t]*\w+[ \t]+(extraout_E[A-Z]{2}(?:_\d+)?);$', code)):
+        if len(re.findall(r'\b%s\b' % v, code)) == 1:
+            code = re.sub(r'(?m)^[ \t]*\w+[ \t]+%s;\n' % v, '', code)
     xdecl = r'(?m)^[ \t]*\w+[ \t]+extraout_var(?:_\d+)?;\n'
     if not re.search(r'\bextraout_var', re.sub(xdecl, '', code)):
         code = re.sub(xdecl, '', code)
