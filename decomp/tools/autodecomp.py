@@ -89,6 +89,7 @@ def call_returns(a):
 import_pops = {}    # IAT slot -> bytes the imported function pops (its prototype)
 byvalue_offs = {}   # function -> offsets of its string parameters passed by value (symbols/GAME_byvalue.tsv)
 _depths = {}
+unused_params = {}  # addr -> indices of the parameters its decompiled body never names
 call_sites = {}     # function -> {address of a direct call: callee}
 
 
@@ -657,11 +658,40 @@ def convert(f, protos, skip, imports, impnames):
     code = re.sub(r'\bCONCAT31\(extraout_var(?:_\d+)?\s*,', 'CONCAT31(0,', code)
     # (or the upper bytes of a register a callee left, under the bool computed into its low byte: 0x516880's
     # 'CONCAT31((undefined4)((uint)extraout_EDX >> 8), a == b)', passed as a bool argument)
-    code = re.sub(r'\bCONCAT31\(\s*\(\w+\)\s*\(\s*\(\w+\)\s*extraout_E[A-Z]{2}(?:_\d+)?\s*>>\s*8\s*\)\s*,',
+    # (also those of a callee-saved register the caller left, 0x545400 'CONCAT31((undefined4)((uint)unaff_EBX >> 8),
+    # 5)': its byte argument)
+    code = re.sub(r'\bCONCAT31\(\s*\(\w+\)\s*\(\s*\(\w+\)\s*(?:extraout|unaff)_E[A-Z]{2}(?:_\d+)?\s*>>\s*8\s*\)\s*,',
                   'CONCAT31(0,', code)
-    for v in set(re.findall(r'(?m)^[ \t]*\w+[ \t]+(extraout_E[A-Z]{2}(?:_\d+)?);$', code)):
+    for v in set(re.findall(r'(?m)^[ \t]*\w+[ \t]+((?:extraout|unaff)_E[A-Z]{2}(?:_\d+)?);$', code)):
         if len(re.findall(r'\b%s\b' % v, code)) == 1:
             code = re.sub(r'(?m)^[ \t]*\w+[ \t]+%s;\n' % v, '', code)
+    # a local Ghidra declares undefined4 but assigns a pointer and dereferences (0x545400 'local_63c = (int
+    # *)sub_0053EA20(); local_63c[1] = ...'): give the declaration that pointer type (same size)
+    for v in re.findall(r'(?m)^  undefined4 (\w+);$', code):
+        m = re.search(r'\b%s = \((\w+) \*\)' % v, code)
+        if m and re.search(r'(\*%s\b|\b%s\[)' % (v, v), code):
+            code = re.sub(r'(?m)^  undefined4 %s;$' % v, '  %s *%s;' % (m.group(1), v), code)
+    # a register the caller never set, handed as an argument the callee's body never reads (0x580750
+    # 'sub_00580450(this,unaff_EDI)': 0x580450 pops nothing, its param_1 is a phantom): 0
+    if re.search(r'\bunaff_E[A-Z]{2}\b|\bunaff_retaddr\b', code):
+        out = []; last = 0
+        for m in re.finditer(r'\b(?:sub|f)_([0-9A-F]{8})\(', code):
+            un = unused_params.get(int(m.group(1), 16))
+            if not un or m.end() < last:
+                continue
+            j = m.end() - 1; e = matching(code, j)
+            if e < 0:
+                continue
+            args = split_args(code[j + 1:e])
+            new = ['0' if n in un and re.fullmatch(r'\s*(?:\(\w+\s*\**\))?\s*unaff_(?:E[A-Z]{2}|retaddr)\s*', x)
+                   else x for n, x in enumerate(args)]
+            if new != args:
+                out.append((j + 1, e, ','.join(new))); last = e
+        for b, e, t in reversed(out):
+            code = code[:b] + t + code[e:]
+        for v in set(re.findall(r'(?m)^[ \t]*\w+[ \t]+\**(unaff_(?:E[A-Z]{2}|retaddr));$', code)):
+            if len(re.findall(r'\b%s\b' % v, code)) == 1:
+                code = re.sub(r'(?m)^[ \t]*\w+[ \t]+\**%s;\n' % v, '', code)
     xdecl = r'(?m)^[ \t]*\w+[ \t]+extraout_var(?:_\d+)?;\n'
     if not re.search(r'\bextraout_var', re.sub(xdecl, '', code)):
         code = re.sub(xdecl, '', code)
@@ -1404,6 +1434,17 @@ def main():
     if r.returncode:
         sys.stderr.write(r.stderr[:4000]); sys.exit('the types header does not compile')
     funcs = [json.loads(l) for l in open(a.jsonl, encoding='utf-8')]
+    for f in funcs:
+        c = f['code']; i = c.find('{'); h = c[:i]
+        if i < 0 or ')' not in h:
+            continue
+        ps = h[h.rfind('(', 0, h.rfind(')')) + 1:h.rfind(')')]
+        if h.rfind(')') < 0 or re.search(r'\(\s*\*', h[h.rfind('(', 0, h.rfind(')')) - 2:]):
+            continue
+        ps = split_args(ps)
+        names = [re.findall(r'(\w+)(?:\s*\[\d*\])?\s*$', p) for p in ps]
+        unused_params[int(f['a'], 16)] = {n for n, m in enumerate(names)
+                                          if m and m[0] != 'void' and not re.search(r'\b%s\b' % m[0], c[i:])}
     if a.max:
         funcs = funcs[:a.max]
     status = {}
