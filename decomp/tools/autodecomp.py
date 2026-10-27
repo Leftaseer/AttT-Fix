@@ -67,6 +67,7 @@ stack_slots = {}    # addr -> stack slots the machine code uses (tools/stackpara
 fsize = {}          # addr -> bytes of machine code
 SYSTEM_DLLS = {'KERNEL32.DLL', 'USER32.DLL', 'GDI32.DLL', 'ADVAPI32.DLL', 'SHLWAPI.DLL', 'SHELL32.DLL', 'WINMM.DLL',
                'OLE32.DLL', 'VERSION.DLL', 'MSVCR80.DLL', 'MSVCP80.DLL'}
+STRUCT_SIZE = {}    # type name -> its size (the types header's static assertions)
 ONE_BYTE = set()    # classes the demangler made 1-byte placeholders (std::string, its _Size_type_nosscl)
 noreturn = set()    # functions without a ret or a jump out (they throw: 0x493740): no ret pop to know
 # dwords of the objects the decompiler addresses in the outgoing arguments (MSVC 8 std::string: 28 bytes)
@@ -809,6 +810,13 @@ def convert(f, protos, skip, imports, impnames):
         return None, 'varargs'
     if len(params) != len(plist):
         return None, 'parameter count differs from the prototype'
+    # a class passed by value that is no 4-byte slot: the decompiler's guess for a dword it reads a byte of
+    # (0x584190 GUIScene::vf15 'GUIScene param_3'); in C the callee would pop the whole class and wreck the
+    # stack of its callers
+    for t, _n in plist:
+        t = t.strip()
+        if '*' not in t and STRUCT_SIZE.get(t, 0) > 4 and t not in BYVALUE:
+            return None, 'class %s passed by value (%d bytes)' % (t, STRUCT_SIZE[t])
     if ret.startswith('undefined') and not re.search(r'\breturn\s+[^;\s]', re.sub(r'/\*.*?\*/', '', body, flags=re.S)):
         ret = 'void'               # the decompiler guessed a result that the function never sets
     # (a function that only throws never returns: what its callers do with EAX after it is never run, 0x4488D0)
@@ -1267,6 +1275,7 @@ def main():
     pre = os.path.join(a.outdir, 'auto_pre.h')
     types = open(a.types, encoding='utf-8').read()
     ONE_BYTE.update(re.findall(r'_Static_assert\(sizeof\((_Demangler_\w+)\) == 1,', types))
+    STRUCT_SIZE.update((t, int(n)) for t, n in re.findall(r'_Static_assert\(sizeof\((\w+)\) == (\d+),', types))
     # Ghidra's own names for a few base types
     types = types.replace('float10 ', 'double ')
     with open(pre, 'w', encoding='utf-8') as f:
