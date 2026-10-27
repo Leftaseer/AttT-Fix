@@ -766,7 +766,8 @@ def convert(f, protos, skip, imports, impnames):
         return None, 'parameter count differs from the prototype'
     if ret.startswith('undefined') and not re.search(r'\breturn\s+[^;\s]', re.sub(r'/\*.*?\*/', '', body, flags=re.S)):
         ret = 'void'               # the decompiler guessed a result that the function never sets
-    if ret == 'void' and a in eax_used:
+    # (a function that only throws never returns: what its callers do with EAX after it is never run, 0x4488D0)
+    if ret == 'void' and a in eax_used and a not in noreturn:
         if not FORCE[0]:
             return None, 'callers use EAX, the decompiler found no result'
         NOTES.append('callers use EAX, the decompiler found no result')
