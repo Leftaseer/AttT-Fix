@@ -1,8 +1,22 @@
-﻿AttTFix 2.1.1 — technical update for Ascension to the Throne and Ascension to the Throne: Valkyrie
+﻿AttTFix 2.1.2 — technical update for Ascension to the Throne and Ascension to the Throne: Valkyrie
 ==================================================================================================
 
 An unofficial, non-commercial mod for the Steam version of the game. No game files are
 modified: the mod is a dinput8.dll that the game loads by itself (plus an optional dxvk folder).
+
+
+WHAT'S NEW IN 2.1.2
+-------------------
+  * Both games: fixed a crash when travelling to another continent (and possibly when
+    loading a game). The movement smoothing kept the objects of the old continent and
+    read them after the game had freed them. It now forgets them on every load.
+  * F7, F8, F9 and F10 no longer switch anything (smoothing, optimizations, animation
+    trace): these keys are often used for other things, and a setting could go off
+    unnoticed. The same toggles are on Ctrl+1 / Ctrl+2 / Ctrl+4 while the toggle panel
+    is shown (F11).
+  * A crash in a module other than the game (the mod itself, D3DX, the graphics driver)
+    is written to AttTFix.log with the module name and a dump file, like a crash in the
+    game's code.
 
 
 WHAT'S NEW IN 2.1.1
@@ -308,7 +322,6 @@ HOTKEYS
     Ctrl+8 — distant tree transition: original / dissolve / short dissolve
     Ctrl+9 — extended draw distance (props, shadows, trees) / original
     Ctrl+0 — write one frame to AttTFix.log (debugging)
-  F10 / F9 / F7 — same as Ctrl+1 / Ctrl+2 / Ctrl+4.
 
 
 SETTINGS (AttTFix.ini)

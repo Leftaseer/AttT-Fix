@@ -61,7 +61,7 @@ No game files are modified, and `[Mod] Enabled=0` in `AttTFix.ini` switches ever
 
 ## Installation
 
-1. Download `AttTFix-2.1.1.zip` from [Releases](../../releases).
+1. Download `AttTFix-2.1.2.zip` from [Releases](../../releases).
 2. Open the game folder (Steam → right click the game → Manage → Browse local files) and copy `dinput8.dll` there. For Valkyrie it is the `Ascension to the Throne Valkyrie` folder (no launcher there, skip step 4).
 3. Optional, for the DXVK renderer: run `AttTFix_LAA.exe` once in the game folder, copy the `dxvk` folder from the archive there, then pick DXVK in Options → "ATTTFIX".
 4. Optional: back up your `launcher.ini` and replace it with the one from the archive to start without the launcher.
@@ -164,7 +164,7 @@ No game code or assets are included in this repository. DXVK (https://github.com
 
 ### Установка
 
-1. Скачайте `AttTFix-2.1.1.zip` в разделе [Releases](../../releases).
+1. Скачайте `AttTFix-2.1.2.zip` в разделе [Releases](../../releases).
 2. Откройте папку игры (Steam → правой кнопкой по игре → «Управление» → «Просмотреть локальные файлы») и скопируйте туда `dinput8.dll`. Для Валькирии это папка `Ascension to the Throne Valkyrie` (лаунчера там нет, шаг 4 не нужен).
 3. Необязательно, для рендера DXVK: запустите один раз `AttTFix_LAA.exe` в папке игры, скопируйте туда папку `dxvk` из архива и выберите DXVK в «Опциях» → «ATTTFIX».
 4. Необязательно: сохраните свой `launcher.ini` и замените его файлом из архива, чтобы игра запускалась без лаунчера.

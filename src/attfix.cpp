@@ -12,7 +12,7 @@
 #include <dwmapi.h>
 #include <tlhelp32.h>
 #include <vector>
-#define ATTFIX_VERSION "2.1.1"
+#define ATTFIX_VERSION "2.1.2"
 
 // ---------------------------------------------------------------- exe profiles
 // The mod is written against the AttT exe (Steam build 2007-12-11, TimeDateStamp 475EABAF). The add-on
@@ -147,7 +147,7 @@ static int g_profileEvery = 20;
 static int g_showFps = 1;   // F11 overlay: 0 hidden, 1 frame / performance info, 2 + Ctrl+digit toggles
 static volatile bool g_skipHitch = false;   // set on focus changes / device lost
 static void InstallFrameRewrite();
-static void InterpApply(); static void InterpRestore(); static void InterpStats();
+static void InterpApply(); static void InterpRestore(); static void InterpStats(); static void InterpReset(const char* why);
 static void FrameEvent(const char* fmt, ...);
 static int L_SetInput(void* L);
 static void SubclassWindow(HWND h);
@@ -1301,6 +1301,7 @@ static void __fastcall h_Frame(BYTE* e, void* /*edx*/) {
             }
         }
     }
+    if (g_lastFrameStart && (t0 - g_lastFrameStart) * g_tickMs > 250.0) InterpReset("long frame");
     g_lastFrameStart = t0; { static LONGLONG base = 0; if (!base) base = t0; g_frameMs = (t0 - base) * g_tickMs; } g_evLen = 0; g_events[0] = 0; ++g_frameNo; g_curFrame = g_frameNo;
     for (int i = 0; i < S_COUNT; ++i) g_sec[i] = 0;
 
@@ -1351,6 +1352,7 @@ static void __fastcall h_Frame(BYTE* e, void* /*edx*/) {
         snprintf(g_secClass[S_INPUT], 64, "%s", RttiName(input + 4));
         PLOG("scene object changed: %s (obj90=%s obj8c=%s sys=%s input=%s)", g_secClass[S_SCENE], g_secClass[S_OBJ90], g_secClass[S_OBJ8C], g_secClass[S_SYS], g_secClass[S_INPUT]);
         FrameEvent("scene object -> %s", g_secClass[S_SCENE]);
+        InterpReset("scene changed");
     }
 }
 
@@ -1445,15 +1447,12 @@ static void DrawOverlay(void* dev) {
     DrawOverlayText(dev);
 }
 static void OverlayToggles(void* dev) {
-    static bool d9 = false, d10 = false;
-    if (KeyPressed(VK_F9, d9)) { g_animBlend = !g_animBlend; Toast(g_animBlend ? "F9  animation blending: ON" : "F9  animation blending: OFF (original 30 fps)"); }
-    static bool d8 = false;
-    if (KeyPressed(VK_F8, d8)) { if (g_atr) { fclose(g_atr); g_atr = nullptr; } g_atrOn = true; g_atrUntil = g_frameMs + 4000.0; Toast("F8  animation trace: recording all animated models for 4 s"); }
-    // Ctrl+1..9, Ctrl+0 while the full overlay is shown (F10 / F9 / F7 still work as before)
-    static bool d7 = false, c1 = false, c2 = false, c3 = false, c4 = false, c5 = false, c6 = false, c7 = false, c8 = false, c9 = false, c0 = false;
+    // Ctrl+1..9, Ctrl+0 while the full overlay is shown (2.1.2: no more F7-F10 - players use those keys for other
+    // things and would not notice that a smoothing or an optimization went off)
+    static bool c1 = false, c2 = false, c3 = false, c4 = false, c5 = false, c6 = false, c7 = false, c8 = false, c9 = false, c0 = false;
     bool ctrl = g_showFps >= 2 && (GetAsyncKeyState(VK_CONTROL) & 0x8000);
     bool k1 = KeyPressed('1', c1) && ctrl, k2 = KeyPressed('2', c2) && ctrl, k3 = KeyPressed('3', c3) && ctrl, k4 = KeyPressed('4', c4) && ctrl, k5 = KeyPressed('5', c5) && ctrl, k6 = KeyPressed('6', c6) && ctrl, k7 = KeyPressed('7', c7) && ctrl, k8 = KeyPressed('8', c8) && ctrl, k9 = KeyPressed('9', c9) && ctrl, k0 = KeyPressed('0', c0) && ctrl;
-    if (KeyPressed(VK_F10, d10) || k1) { g_interp = !g_interp; Toast(g_interp ? "movement/camera smoothing: ON" : "movement/camera smoothing: OFF (original)"); }
+    if (k1) { g_interp = !g_interp; Toast(g_interp ? "movement/camera smoothing: ON" : "movement/camera smoothing: OFF (original)"); }
     if (k2) { g_animBlend = !g_animBlend; Toast(g_animBlend ? "character animation blending: ON" : "character animation blending: OFF (original 30 fps)"); }
     if (k3) { g_meshSmooth = !g_meshSmooth; Toast(g_meshSmooth ? "object animation smoothing (trees, water, flags): ON" : "object animation smoothing: OFF (original 30 fps)"); }
     if (k8) { g_dissolve = (g_dissolve + 1) % 3; Toast(g_dissolve == 1 ? "distant trees: dissolve (no see-through)" : g_dissolve == 2 ? "distant trees: dissolve, 4x shorter transition" : "distant trees: original transparency"); }
@@ -1465,7 +1464,7 @@ static void OverlayToggles(void* dev) {
                Toast(g_msaaOn ? "MSAA: ON after restart (system d3d9)" : "MSAA: OFF after restart (system d3d9)"); } }
     if (k6) { g_anisoOn = !g_anisoOn; AnisoApply(dev); char t[64]; snprintf(t, sizeof t, "anisotropic filtering: %s", AnisoLevel() ? "ON" : "OFF (original)"); Toast(t); }
     if (k5) { g_partSmooth = !g_partSmooth; Toast(g_partSmooth ? "particle smoothing: ON" : "particle smoothing: OFF (original tick rate)"); }
-    if (KeyPressed(VK_F7, d7) || k4) {
+    if (k4) {
         int on = !(g_optSun || g_optTrees || g_optPoly || g_optFx || g_optSort || g_asyncSnd || g_optSkin); g_optSun = g_optTrees = g_optPoly = g_optFx = g_optSort = on; if (g_sndRun) g_asyncSnd = on; if (o_Skin) SkinToggle(on);
         Toast(on ? "optimizations (sun test, trees, polygon test, effect states, sound, skinning): ON" : "optimizations: OFF (original)");
     }
@@ -1681,6 +1680,7 @@ static void __fastcall h_Render(BYTE* e, void* /*edx*/) {
     ((Clear_t)vt[43])(dev, 0, nullptr, 3, *(DWORD*)(e + 0xA0), 1.0f, 0);
     ((Dev0_t)vt[41])(dev);                                   // BeginScene
     b = Now(); g_sec[S_CLEAR] = (b - a) * g_tickMs; a = b;
+    if (g_lastFrameStart && (a - g_lastFrameStart) * g_tickMs > 250.0) InterpReset("long update");
     InterpApply();
     void* scene = *(void**)(e + 0x5C); ((VM0_t)(*(void***)scene)[6])(scene, nullptr);
     InterpRestore();
@@ -1965,6 +1965,15 @@ static void InterpApply() {
         ++g_iCam;
         static bool once = false; if (!once) { once = true; LOG("smooth: camera %p follows hero %p", cam, hero); }
     }
+}
+// A level load / unload (continent change, loading a game) frees the old objects; heap blocks given back to the
+// system leave the remembered pointers on unmapped memory, and InterpApply reads their vtables: crash in AttTFix
+// (h_Render) at the first frame of the new continent. The table is dropped when the scene object changes or after
+// a frame longer than 250 ms (loads run in one long frame).
+static void InterpReset(const char* why) {
+    static DWORD resets = 0;
+    memset(g_ient, 0, sizeof g_ient); g_nApplied = 0; g_hero = nullptr; g_camSaved = false; g_camObj = nullptr;
+    if (++resets <= 20) LOG("smooth: object table cleared (%s)", why);
 }
 static void InterpRestore() {
     for (int i = 0; i < g_nApplied; ++i) {
@@ -2573,12 +2582,43 @@ static bool GuardNullThis(const char* nameTag, BYTE* target, const BYTE* expect,
 static void LogGuardHits() { for (int i = 0; i < g_nGuards; ++i) if (g_guardHits[i]) LOG("guard %s prevented %ld null-pointer calls", g_guardName[i], g_guardHits[i]); }
 
 // First-chance access violations inside the game's code (the engine's own __except hides them)
-static volatile LONG g_avCount = 0;
+static volatile LONG g_avCount = 0, g_avForeign = 0;
+static HMODULE ModuleOf(DWORD a, char* name, int cb) {      // module containing 'a' ("" if none); name = file name only
+    HMODULE m = nullptr; name[0] = 0;
+    if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)a, &m) || !m) return nullptr;
+    char p[MAX_PATH]; if (!GetModuleFileNameA(m, p, MAX_PATH)) return m;
+    const char* s = strrchr(p, '\\'); snprintf(name, cb, "%s", s ? s + 1 : p);
+    return m;
+}
+// An access violation in another module (d3dx9, the graphics driver, DXVK, ...) called from the game: the engine's
+// __except shows only the address. Logged with the module and offset, return addresses into the game, AttTFix and
+// that module, and the first one gets a dump. System modules are skipped (IsBadReadPtr probes fault there on purpose).
+static void LogForeignAV(EXCEPTION_POINTERS* ep, DWORD a) {
+    char mod[64]; HMODULE m = ModuleOf(a, mod, sizeof mod);
+    if (!_stricmp(mod, "ntdll.dll") || !_stricmp(mod, "kernelbase.dll") || !_stricmp(mod, "kernel32.dll")) return;
+    LONG n = InterlockedIncrement(&g_avForeign);
+    if (n > 5) return;
+    auto er = ep->ExceptionRecord; auto c = ep->ContextRecord;
+    LOG("ACCESS VIOLATION (foreign) #%ld at %08lX = %s+%lX (%s %08lX) EAX=%08lX EBX=%08lX ECX=%08lX EDX=%08lX ESI=%08lX EDI=%08lX EBP=%08lX ESP=%08lX",
+        n, a, mod[0] ? mod : "?", m ? a - (DWORD)m : 0, er->ExceptionInformation[0] ? "write" : "read", (DWORD)er->ExceptionInformation[1],
+        c->Eax, c->Ebx, c->Ecx, c->Edx, c->Esi, c->Edi, c->Ebp, c->Esp);
+    HMODULE self = nullptr; GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)&LogForeignAV, &self);
+    DWORD* sp = (DWORD*)c->Esp; char buf[900]; int len = 0, k = 0;
+    for (int i = 0; i < 4096 && k < 28 && !IsBadReadPtr(sp + i, 4); ++i) {
+        DWORD v = sp[i]; char vm[64]; HMODULE h;
+        if (v >= AD(0x401000) && v < AD(0x607000)) { len += snprintf(buf + len, sizeof buf - len, " %08lX", v); ++k; continue; }
+        if (v < 0x10000 || !(h = ModuleOf(v, vm, sizeof vm)) || (h != m && h != self)) continue;
+        len += snprintf(buf + len, sizeof buf - len, " %s+%lX", h == self ? "AttTFix" : vm, v - (DWORD)h); ++k;
+    }
+    LOG("  stack:%s", k ? buf : " -");
+    FrameEvent("access violation in %s", mod);
+    if (n == 1) WriteDump(ep, "av");
+}
 static LONG CALLBACK VectoredAV(EXCEPTION_POINTERS* ep) {
     auto er = ep->ExceptionRecord;
     if (er->ExceptionCode != 0xC0000005) return EXCEPTION_CONTINUE_SEARCH;
     DWORD a = (DWORD)er->ExceptionAddress;
-    if (a < AD(0x401000) || a >= AD(0x607000)) return EXCEPTION_CONTINUE_SEARCH;
+    if (a < AD(0x401000) || a >= AD(0x607000)) { LogForeignAV(ep, a); return EXCEPTION_CONTINUE_SEARCH; }
     LONG n = InterlockedIncrement(&g_avCount);
     if (n > 20) return EXCEPTION_CONTINUE_SEARCH;
     auto c = ep->ContextRecord;
