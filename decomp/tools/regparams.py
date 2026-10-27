@@ -20,6 +20,7 @@ def regs(i, names):
     return set(FULL[i.reg_name(r)] for r in names if i.reg_name(r) in FULL)
 callee_in = {}       # function -> register input bits (previous pass)
 slots, pops = {}, {}  # stack parameter slots (stackparams.py) and ret pops of the callees, when given
+clobbered = {}       # function -> bits of the volatile registers it changes
 if len(sys.argv) > 5:
     for l in open(sys.argv[4]):
         q = l.rstrip('\n').split('\t')
@@ -27,6 +28,9 @@ if len(sys.argv) > 5:
     for l in open(sys.argv[5]):
         q = l.rstrip('\n').split('\t')
         if l[0] != '#': pops[int(q[0], 16)] = 0 if q[3] == '?' else int(q[3] or 0)
+        # the volatile registers the callee changes (regclobber.py, column 5): _alloca_probe keeps ECX, which its
+        # callers read after it as their this (0x555690)
+        if l[0] != '#' and len(q) > 4: clobbered[int(q[0], 16)] = sum(BIT[x] for x in q[4].split(',') if x in BIT)
 SAVED = {'EBX', 'ESI', 'EDI', 'EBP'}
 
 
@@ -126,7 +130,9 @@ def analyse(start):
                 w |= BIT[x]
                 # a register written after being pushed was saved there, not passed
                 pending = [None if y == x else y for y in pending] if m != 'call' else pending
-            if m == 'call': w |= BIT['EAX'] | BIT['ECX'] | BIT['EDX']
+            if m == 'call':
+                o = i.operands[0]
+                w |= clobbered.get(o.imm, 7) if o.type == X.X86_OP_IMM else 7
             if m in ('ret', 'retf'):
                 retpop.add(i.operands[0].imm if i.operands else 0); break
             if m == 'int3' or m == 'hlt': break
