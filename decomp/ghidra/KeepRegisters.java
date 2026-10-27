@@ -40,6 +40,9 @@ public class KeepRegisters extends GhidraScript {
             if (f == null || f.isThunk()) continue;
             String cc = f.getCallingConventionName();
             String plain = cc.replaceAll("_keep[A-Z]+$", "");
+            // (the decompiler gives only a convention named __thiscall its implicit this: a copy of it would lose the
+            // parameter, unless the storage is the function's own)
+            if (plain.equals("__thiscall") && !f.hasCustomVariableStorage()) { skipped++; continue; }
             String xml = base.get(plain);
             if (xml == null) { skipped++; continue; }
             String name = plain + "_keep" + String.join("", keep);
@@ -62,6 +65,6 @@ public class KeepRegisters extends GhidraScript {
             done++;
         }
         println("functions keeping ECX/EDX given conventions that say so: " + done + ", conventions " + made +
-                ", without a base convention " + skipped);
+                ", without a base convention or a __thiscall without its own storage " + skipped);
     }
 }
