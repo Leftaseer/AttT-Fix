@@ -306,8 +306,11 @@ def main():
             sys.exit('no Valkyrie address for AttT %08X; add it to symbols/attt2valk%s.tsv' % (x, '_data' if data else ''))
         return m[x]
 
-    files = sorted(glob.glob(os.path.join(HERE, 'src', '**', '*.c'), recursive=True) +
-                   glob.glob(os.path.join(HERE, 'src', '**', '*.cpp'), recursive=True))
+    # src/fixed: generated functions fixed by hand (tools/autodecomp.py --draft), built with the generated code
+    fixed_dir = os.path.join(HERE, 'src', 'fixed')
+    files = sorted(f for f in glob.glob(os.path.join(HERE, 'src', '**', '*.c'), recursive=True) +
+                   glob.glob(os.path.join(HERE, 'src', '**', '*.cpp'), recursive=True)
+                   if os.path.dirname(f) != fixed_dir)
     if a.only:
         files = [f for f in files if os.path.basename(f) in a.only.split(',')]
 
@@ -350,6 +353,16 @@ def main():
                 allow = set(int(l.split('\t')[0], 16) for l in open(os.path.join(a.auto, 'functions.tsv'))
                             if l.split('\t')[1] == 'compiled')
             allow -= set(int(l.split()[0], 16) for l in open(a.auto_exclude) if l.strip() and not l.startswith('#'))
+        # the functions fixed by hand replace their generated versions; '/* @conv REGS POP */' in them is the
+        # prototype as convs.tsv would give it
+        fixed = {}
+        for fx in sorted(glob.glob(os.path.join(fixed_dir, 'f_*.c'))) if game == 'attt' else []:
+            fixed[int(os.path.basename(fx)[2:10], 16)] = fx
+        if fixed:
+            if allow is None:
+                allow = set(int(l.split('\t')[0], 16) for l in open(os.path.join(a.auto, 'functions.tsv'))
+                            if l.split('\t')[1] == 'compiled')
+            allow -= set(fixed)
         # x87 arithmetic like the original (its float code is x87; SSE rounds every step to float)
         # (the machine code's semantics, not C's: integers wrap, memory is accessed through any type, and pointers
         # are plain addresses: 0x470150 counts bytes down in a pointer to NULL, a loop clang made endless otherwise)
@@ -385,6 +398,12 @@ def main():
                 src = os.path.join(work, 'sel_' + os.path.basename(fn))
                 open(src, 'w', encoding='utf-8').write(head + ''.join(keep))
             srcs.append((fn, src))
+        for ad, fx in fixed.items():
+            m = re.search(r'/\* @conv (\S+) (\d+) \*/', open(fx, encoding='utf-8').read())
+            if m:
+                size, old, oldpop, clob = funcs.get(ad, (0, [], 0, {'EAX', 'ECX', 'EDX'}))
+                funcs[ad] = (size, [r for r in m.group(1).split(',') if r != '-'], int(m.group(2)), clob)
+            srcs.append((fx, fx))
 
         def scan_compile(fs):
             fn, src = fs

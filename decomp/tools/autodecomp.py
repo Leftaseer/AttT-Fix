@@ -141,7 +141,9 @@ def fit_convention(a, pr):
         return 'unknown calling convention'
     if va:
         return 'varargs with registers'
-    if pop not in (0, stack) or (stack != 4 * (len(storage) - len(regs))):
+    # (a string by value is one parameter of 7 slots: 0x46D380)
+    wide = sum(slot_bytes(t) - 4 for (t, _), s in zip(plist, storage) if s == 'stack' and t in BYVALUE)
+    if pop not in (0, stack) or (stack - wide != 4 * (len(storage) - len(regs))):
         return 'stack parameters do not fit the ret'
     pr[0], pr[1] = '__cdecl', True
     convs[a] = (regs, pop)
@@ -393,13 +395,19 @@ def rethrows(funclet):
     return False
 
 
+FORCE = [False]     # --draft: the soft reasons to reject a function are noted (NOTES) and the text made anyway
+NOTES = []
+
+
 def convert(f, protos, skip, imports, impnames):
     a = int(f['a'], 16)
     if a in skip:
         return None, 'hand-decompiled'
     code = f['code']
     if f.get('floatmix'):
-        return None, 'float and integer bits mixed (%s)' % f['floatmix'].split(' at ')[0]
+        if not FORCE[0]:
+            return None, 'float and integer bits mixed (%s)' % f['floatmix'].split(' at ')[0]
+        NOTES.append('float and integer bits mixed (%s)' % f['floatmix'].split(' at ')[0])
     # a tail jump to an import ('jmp [slot]' ending 0x4206B0): the decompiler warns that it is no switch it can
     # recover and calls the import with its prototype instead, which is what the jump does
     def import_jump(m):
@@ -420,7 +428,9 @@ def convert(f, protos, skip, imports, impnames):
         code = re.sub(xdecl, '', code)
     for pat, why in BLOCK:
         if re.search(pat, code):
-            return None, why
+            if not FORCE[0]:
+                return None, why
+            NOTES.append(why)
     # a register a callee takes, declared as a local of this function (it is no parameter here): the decompiler
     # lets the callee have this function's own EAX, an uninitialized variable in C (0x547F10 passes 'in_eax' on
     # to 0x4AC7F0, 0x491F50 to 0x491CF0, which then faulted).  Mostly it is an ordinary local the decompiler named
@@ -440,7 +450,9 @@ def convert(f, protos, skip, imports, impnames):
     # arguments of a later one (0x475440 'uVar5 = 0x47552f' passed on to 0x475330 with a vector by value)
     rets_here = call_returns(a)
     if any(int(x, 16) in rets_here for x in re.findall(r'\b0x([0-9a-f]{6,8})\b', code)):
-        return None, 'return address as a value (stack depth lost)'
+        if not FORCE[0]:
+            return None, 'return address as a value (stack depth lost)'
+        NOTES.append('return address as a value (stack depth lost)')
     # comments before the definition (the demangled name of an exported function, its own signature with '(void)'
     # that the parameter parsing would take for the definition's), once the warnings among them have been seen
     code = re.sub(r'^(?:\s*/\*.*?\*/)+', '', code, flags=re.S)
@@ -448,10 +460,16 @@ def convert(f, protos, skip, imports, impnames):
     # iterator, calls 0x5E41E4, which tests [ebp-20h]): no C function keeps the original frame in EBP
     for c in f['callees']:
         if 'EBP' in ebp_in.get(int(c, 16), ()):
-            return None, 'callee %s reads the caller\'s EBP' % c
+            if not FORCE[0]:
+                return None, 'callee %s reads the caller\'s EBP' % c
+            NOTES.append('callee %s reads the caller\'s EBP' % c)
+    code0 = code
     code, why = rewrite_icalls(code, f.get('icallfloat'))
     if code is None:
-        return None, why
+        if not FORCE[0]:
+            return None, why
+        NOTES.append(why + ' (left as the decompiler wrote it: (ICALL_<site>*<callee>)(...))')
+        code = code0
     if has_indirect_call(code):
         return None, 'indirect call'
     pr = protos.get(a)
@@ -459,7 +477,9 @@ def convert(f, protos, skip, imports, impnames):
         return None, 'no prototype'
     why = fit_convention(a, pr)
     if why:
-        return None, why
+        if not FORCE[0]:
+            return None, why
+        NOTES.append(why)
     head = proto_text('f_%08X' % a, pr)
     if head is None:
         return None, 'unknown calling convention'
@@ -481,7 +501,9 @@ def convert(f, protos, skip, imports, impnames):
     if ret.startswith('undefined') and not re.search(r'\breturn\s+[^;\s]', re.sub(r'/\*.*?\*/', '', body, flags=re.S)):
         ret = 'void'               # the decompiler guessed a result that the function never sets
     if ret == 'void' and a in eax_used:
-        return None, 'callers use EAX, the decompiler found no result'
+        if not FORCE[0]:
+            return None, 'callers use EAX, the decompiler found no result'
+        NOTES.append('callers use EAX, the decompiler found no result')
     rets[a] = ret
     head = '%s %s f_%08X(%s)' % (def_ret(ret), cc_word(cc, custom), a, ', '.join(params) if params else 'void')
     # namespace prefixes the decompiler printed before calls (templates included)
@@ -499,9 +521,13 @@ def convert(f, protos, skip, imports, impnames):
         hs = re.findall(r'\b(?:pu|pc|p)\w*Stack_\w+\s*=\s*(?:\([\w ]+(?:\s*\*)+\)\s*)?&?\s*'
                         r'(?:&?(?:LAB|FUN)_|\(\([\w ]+(?:\s*\*)+\)G_)([0-9a-fA-F]{8})\b', body)
         if len(hs) != 1:
-            return None, 'exception frame without a known handler'
+            if not FORCE[0]:
+                return None, 'exception frame without a known handler'
+            NOTES.append('exception frame without a known handler')
         if catches(int(hs[0], 16)):
-            return None, 'catches exceptions'
+            if not FORCE[0]:
+                return None, 'catches exceptions'
+            NOTES.append('catches exceptions')
     # the statements on the SEH chain go; a variable given its head and used elsewhere would be left unset (0x491F50
     # passes 'in_eax = ExceptionList' on to 0x491CF0 when a branch does not set it): it reads fs:[0] itself
     # the head of the chain: the global at fs:[0] (G_FFDFF000), the TEB's ExceptionList, or what unaff_FS_OFFSET
@@ -559,7 +585,9 @@ def convert(f, protos, skip, imports, impnames):
                     n += 1
                 run = max(run, n)
             if need is None or run < need:
-                return None, 'object built in the outgoing arguments, passed on in part'
+                if not FORCE[0]:
+                    return None, 'object built in the outgoing arguments, passed on in part'
+                NOTES.append('object built in the outgoing arguments, passed on in part')
         def at(m):
             return 'local_%x' % (0x100000000 - int(m.group(1), 16))
         body = re.sub(r'\bin_stack_(ff[0-9a-f]{6})\b', at, body)
@@ -576,7 +604,9 @@ def convert(f, protos, skip, imports, impnames):
     # of one frame array laid out as the original stack frame (local_1c is at -0x1c from the return address)
     body, frame_names = stack_frame(body)
     if body is None:
-        return None, frame_names
+        if not FORCE[0]:
+            return None, frame_names
+        NOTES.append(frame_names)
     # labels keep their names (the address substitution below is for LAB_ used as a value)
     body = re.sub(r'\bgoto\s+(LAB_[0-9a-fA-F]{8})\b', r'goto L\1', body)
     body = re.sub(r'^(\s*)(LAB_[0-9a-fA-F]{8}):', r'\1L\2:', body, flags=re.M)
@@ -601,7 +631,9 @@ def convert(f, protos, skip, imports, impnames):
     bad_cast = []
     body = re.sub(r'\(undefined([1248])\)\s*(\w+)\b(?!\s*[\[(.])', bits, body)
     if bad_cast:
-        return None, 'float variable cast to a smaller undefined type'
+        if not FORCE[0]:
+            return None, 'float variable cast to a smaller undefined type'
+        NOTES.append('float variable cast to a smaller undefined type')
     # pieces of a variable: v._1_3_ is the 3 bytes at offset 1 of v; a 3-byte store is a 2-byte and a 1-byte one
     body = re.sub(r'(?m)^(\s*)([A-Za-z_]\w*)\._(\d+)_3_ = ([^;\n]+);$',
                   lambda m: '%s{ unsigned int gh3 = (unsigned int)(%s); *(unsigned short *)((char *)&%s + %d) = '
@@ -618,7 +650,9 @@ def convert(f, protos, skip, imports, impnames):
         return '(*(%s *)((char *)&%s + %d))' % (t, var, off)
     body = re.sub(r'\b([A-Za-z_]\w*)\._(\d+)_(\d+)_\b', piece, body)
     if bad:
-        return None, 'piece of a variable'
+        if not FORCE[0]:
+            return None, 'piece of a variable'
+        NOTES.append('piece of a variable')
     # a value stored to a piece keeps its bits when it is a float ('v._4_4_ = fVar2 + fVar2' in 0x572170; 0x587D30
     # 'v._0_4_ = *(float *)(this + 0x5c) + ...' placed the character window's text off screen): the compiler, which
     # knows the type of the expression, picks (ghidra_prelude.h GH_BITS4/GH_BITS8)
@@ -629,7 +663,9 @@ def convert(f, protos, skip, imports, impnames):
     for t_, n_ in [(x.rsplit(' ', 1) + [''])[:2] for x in params]:
         n_ = n_.lstrip('*')
         if t_.strip() == 'void' and re.search(r'(?<![\w)])\*%s\b' % re.escape(n_), body):
-            return None, 'void pointer dereferenced'
+            if not FORCE[0]:
+                return None, 'void pointer dereferenced'
+            NOTES.append('void pointer dereferenced')
     # addresses printed as symbol names
     def addr_ref(m):
         return '((void *)d_%s)' % m.group(2).upper()
@@ -647,7 +683,9 @@ def convert(f, protos, skip, imports, impnames):
     for x in re.findall(r'\(\(void \*\)d_([0-9A-F]{8})\)', body):
         extra.add(x)
     if re.search(r'(?<![\w.>])(DAT_|PTR_|BYTE_|WORD_|DWORD_|UNK_)[0-9a-fA-F]{8}\b', body):
-        return None, 'global of unknown type'
+        if not FORCE[0]:
+            return None, 'global of unknown type'
+        NOTES.append('global of unknown type')
     try:
         body = re.sub(r'&?(?:\b[A-Za-z_][\w<>,]*(?:<[^;{}()]*?>)?::)+(?:vftable(?:_\w+)?|vbtable\w*|`[^`]*\'|\w+_meta_ptr)', sym_ref, body)
     except KeyError as e:
@@ -657,13 +695,19 @@ def convert(f, protos, skip, imports, impnames):
     for g in re.findall(r'\bG_([0-9A-F]{8})\b', body):
         ad = int(g, 16)
         if not (0x401000 <= ad < 0x1000000):        # (the headers at 400000 are no section)
-            return None, 'segment or out-of-image global'
+            if not FORCE[0]:
+                return None, 'segment or out-of-image global'
+            NOTES.append('segment or out-of-image global')
     for x in re.findall(r'\(\(void \*\)d_([0-9A-F]{8})\)', body):
         extra.add(x)
     if '::' in body:
-        return None, 'C++ name left'
+        if not FORCE[0]:
+            return None, 'C++ name left'
+        NOTES.append('C++ name left')
     if any(not (0x401000 <= int(x, 16) < 0x1000000) for x in extra):
-        return None, 'address outside the image'
+        if not FORCE[0]:
+            return None, 'address outside the image'
+        NOTES.append('address outside the image')
 
     decls = []
     for c in f['callees']:
@@ -680,10 +724,14 @@ def convert(f, protos, skip, imports, impnames):
             continue
         cp = protos.get(ca)
         if not cp:
-            return None, 'callee %s without prototype' % c
+            if not FORCE[0]:
+                return None, 'callee %s without prototype' % c
+            NOTES.append('callee %s without prototype' % c)
         if ca in imports:
             if ca not in impnames:
-                return None, 'import %s not in the import table' % c
+                if not FORCE[0]:
+                    return None, 'import %s not in the import table' % c
+                NOTES.append('import %s not in the import table' % c)
             icc, _, iret, iplist, iva = cp[:5]
             if not iva and ca in import_args:
                 ps_ = iplist[1:] if icc == '__thiscall' else iplist[2:] if icc == '__fastcall' else iplist
@@ -697,7 +745,9 @@ def convert(f, protos, skip, imports, impnames):
                 if need != cleaned and dll in SYSTEM_DLLS:
                     need = 0
                 if need > have:
-                    return None, 'import %s takes more arguments than its prototype' % c
+                    if not FORCE[0]:
+                        return None, 'import %s takes more arguments than its prototype' % c
+                    NOTES.append('import %s takes more arguments than its prototype' % c)
             w = cc_word(icc, False) or '__cdecl'
             ps = ', '.join(t for t, n in iplist) if iplist else 'void'
             if iva:
@@ -707,10 +757,14 @@ def convert(f, protos, skip, imports, impnames):
             continue
         why = fit_convention(ca, cp)
         if why:
-            return None, 'callee %s: %s' % (c, why)
+            if not FORCE[0]:
+                return None, 'callee %s: %s' % (c, why)
+            NOTES.append('callee %s: %s' % (c, why))
         t = proto_text('sub_%s' % c, cp)
         if t is None:
-            return None, 'callee %s with unknown calling convention' % c
+            if not FORCE[0]:
+                return None, 'callee %s with unknown calling convention' % c
+            NOTES.append('callee %s with unknown calling convention' % c)
         decls.append('DECOMP_C %s;' % t)
     for g, info in f['globals'].items():
         parts = info.split('|')
@@ -760,6 +814,10 @@ def main():
                     help='addresses left out (e.g. 401000-4205A0, the Lua 5.1 library: build it from its sources)')
     ap.add_argument('--icalls', help='call-site prototypes of indirect calls (ghidra/ICallOverride.java output)')
     ap.add_argument('--functions', required=True, help='symbols/<game>_functions.tsv (machine-code register inputs)')
+    ap.add_argument('--draft', metavar='ADDR,...', help='only write drafts for hand work of these functions into '
+                    '--draft-dir (DIR/f_ADDR.c: the text made also where the function is rejected, the reasons on '
+                    'top), nothing else')
+    ap.add_argument('--draft-dir', default='drafts')
     a = ap.parse_args()
     load_machine(a.functions)
     if a.icalls:
@@ -871,6 +929,29 @@ def main():
     status = {}
     cands = []
     ranges = [tuple(int(x, 16) for x in r.split('-')) for r in a.exclude_range]
+    if a.draft:
+        want = {int(x, 16) for x in a.draft.split(',')}
+        os.makedirs(a.draft_dir, exist_ok=True)
+        FORCE[0] = True
+        for f in funcs:
+            if int(f['a'], 16) not in want:
+                continue
+            NOTES.clear()
+            res, why = convert(f, protos, skip, imports, impnames)
+            out = os.path.join(a.draft_dir, 'f_%s.c' % f['a'])
+            if res is None:
+                print('%s: no draft: %s' % (f['a'], why))
+                continue
+            addr, decls, text = res
+            with open(out, 'w', encoding='utf-8') as o:
+                o.write('/* draft of 0x%08X for hand work (tools/autodecomp.py --draft); the generated code was '
+                        'rejected:\n' % addr + ''.join(' *   %s\n' % n for n in NOTES) + ' */\n')
+                o.write('#include "auto_pre.h"\n')
+                if addr in convs:   # (rebuild/build.py: the registers in parameter order and the pop)
+                    o.write('/* @conv %s %d */\n' % (','.join(convs[addr][0]) or '-', convs[addr][1]))
+                o.write('\n'.join(decls) + '\n' + text)
+            print('%s: %s (%d notes)' % (f['a'], out, len(NOTES)))
+        return
     for f in funcs:
         if any(lo <= int(f['a'], 16) < hi for lo, hi in ranges):
             status[f['a']] = ('rejected', 'excluded range')
