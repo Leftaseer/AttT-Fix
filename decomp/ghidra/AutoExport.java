@@ -135,7 +135,8 @@ public class AutoExport extends GhidraScript {
                 if (mix(pointee(htype(op.getInput(1))), htype(op.getInput(2))) && !fixed.contains(op.getSeqnum() + ":2"))
                     return "store at " + op.getSeqnum().getTarget();
             } else if (c == PcodeOp.LOAD) {
-                if (mix(pointee(htype(op.getInput(1))), htype(out))) return "load at " + op.getSeqnum().getTarget();
+                if (mix(pointee(htype(op.getInput(1))), htype(out)) && !fixed.contains(op.getSeqnum() + ":load"))
+                    return "load at " + op.getSeqnum().getTarget();
             } else if (c == PcodeOp.CALL) {
                 Function t = getFunctionAt(op.getInput(0).getAddress());
                 // a call through an import slot ('call [0x607898]'): the import's prototype (0x4C1760 passed a float
@@ -245,8 +246,8 @@ public class AutoExport extends GhidraScript {
         return e;
     }
     // CAST ops printed as '(T)operand' that change between float and integer bits: open-paren index -> its op
-    Map<Integer, PcodeOp> bitCasts(List<ClangNode> toks) {
-        Map<Integer, PcodeOp> res = new HashMap<>();
+    Map<Integer, List<PcodeOp>> bitCasts(List<ClangNode> toks) {
+        Map<Integer, List<PcodeOp>> res = new HashMap<>();
         for (int i = 0; i < toks.size(); i++) {
             int c = castEnd(toks, i);
             if (c < 0) continue;
@@ -261,8 +262,7 @@ public class AutoExport extends GhidraScript {
             // '(T *)': the type token is T, the stars are tokens of their own
             for (int k = next(toks, i + 1) + 1; k < c; k++)
                 if (txt(toks, k).equals("*") && printed != null) printed = new PointerDataType(printed);
-            PcodeOp found = null;
-            int n = 0;
+            List<PcodeOp> found = new ArrayList<>();
             // the CAST: an op of the operand's tokens (a lone variable carries the op reading it), or the op that
             // reads the result of one of them
             // (a field read 'p->f' shows the PTRSUB in its tokens, not the LOAD: the load of an address computed
@@ -298,10 +298,15 @@ public class AutoExport extends GhidraScript {
                 if (!mix(htype(out), htype(in))) continue;
                 if (printed == null || base(printed).getLength() != base(htype(out)).getLength() ||
                     isFloat(printed) != isFloat(htype(out))) continue;
-                found = op;
-                n++;
+                found.add(op);
             }
-            if (n == 1) res.put(i, found);
+            // (one address read twice, 'x < (float)p[1] || x == (float)p[1]' at 0x50FD69: two loads, a CAST each,
+            // the same tokens for both; alike, they are both the one printed)
+            boolean alike = !found.isEmpty();
+            for (PcodeOp op : found)
+                if (!htype(op.getOutput()).getName().equals(htype(found.get(0).getOutput()).getName()) ||
+                    !htype(op.getInput(0)).getName().equals(htype(found.get(0).getInput(0)).getName())) alike = false;
+            if (found.size() == 1 || alike) res.put(i, found);
         }
         return res;
     }
@@ -316,6 +321,37 @@ public class AutoExport extends GhidraScript {
             elem.merge(a, ctype(((Pointer) pt).getDataType(), used), (x, y) -> x.equals(y) ? x : "");
     }
 
+    // 'lhs = rhs;' whose '=' is op's own token (a STORE of an expression, 0x5204B0 'p[1] = f + (float)p[1];'):
+    // the right side written BITCAST(T, (rhs)), T the type it is stored as; false where that is not the form
+    boolean wrapRhs(List<ClangNode> toks, PcodeOp op, DataType t, Set<DataType> used, Map<Integer, String> prefix,
+                    Map<Integer, String> after) {
+        int eq = -1, n = 0;
+        for (int k = 0; k < toks.size(); k++) {
+            ClangToken tk = (ClangToken) toks.get(k);
+            if (tk instanceof ClangOpToken && tk.getText().equals("=") && tk.getPcodeOp() == op) {
+                eq = k;
+                n++;
+            }
+        }
+        if (n != 1) return false;
+        int s0 = next(toks, eq + 1), e = -1, d = 0;
+        for (int k = s0; k < toks.size(); k++) {
+            String x = txt(toks, k);
+            if (x.equals("(") || x.equals("[")) d++;
+            else if (x.equals(")") || x.equals("]")) d--;
+            else if (x.equals(";") && d == 0) {
+                e = k - 1;
+                break;
+            }
+            if (d < 0) return false;
+        }
+        while (e > s0 && blank((ClangToken) toks.get(e))) e--;
+        if (e < s0 || prefix.containsKey(s0)) return false;
+        prefix.put(s0, "BITCAST(" + ctype(t, used) + ", (");
+        after.put(e, "))" + after.getOrDefault(e, ""));
+        return true;
+    }
+
     String render(DecompileResults r, Function f, Map<Long, String> globals, Map<Long, String> callees,
                   Set<DataType> used, Map<Long, String> strings, Map<String, String> sized, Set<SequenceNumber> bits,
                   Set<String> fixed) {
@@ -323,19 +359,19 @@ public class AutoExport extends GhidraScript {
         List<ClangNode> toks = new ArrayList<>();
         g.flatten(toks);
         StringBuilder sb = new StringBuilder();
-        Map<Integer, PcodeOp> bc = bitCasts(toks);
+        Map<Integer, List<PcodeOp>> bc = bitCasts(toks);
         // symbols printed by name stand for their address; the same global may also be read or written as a value
         // (0x4C4DE0 tests G_006CA4AC and passes its address on): then the address is &G, otherwise G itself is
         // declared as the address
         Set<Long> addrs = new HashSet<>();
         Map<Long, String> elem = new HashMap<>();     // address -> its pointee type, where elements are counted
         Map<Integer, String> before = new HashMap<>(), after = new HashMap<>();
-        for (Map.Entry<Integer, PcodeOp> e : bc.entrySet()) {
+        for (Map.Entry<Integer, List<PcodeOp>> e : bc.entrySet()) {
             int i = e.getKey(), c = castEnd(toks, i), end = unaryEnd(toks, c + 1);
             before.put(i, "BITCAST(");
             before.put(c, ", (");
             after.put(end, after.getOrDefault(end, "") + "))");
-            bits.add(e.getValue().getSeqnum());
+            for (PcodeOp op : e.getValue()) bits.add(op.getSeqnum());
         }
         // implicit conversions the decompiler does not print: a float stored through an integer pointer, copied to an
         // integer variable, returned or passed as one (or the other way round) keeps its bits for the decompiler
@@ -386,11 +422,19 @@ public class AutoExport extends GhidraScript {
                         n++;
                     }
                 }
-                if (n != 1 || before.containsKey(idx)) continue;
-                prefix.put(idx, prefix.getOrDefault(idx, "") + "BITCAST(" + ctype(tt, used) + ", ");
-                after.put(idx, ")" + after.getOrDefault(idx, ""));
-                fixed.add(op.getSeqnum() + ":" + w.getKey());
+                if (n == 1 && !before.containsKey(idx)) {
+                    prefix.put(idx, prefix.getOrDefault(idx, "") + "BITCAST(" + ctype(tt, used) + ", ");
+                    after.put(idx, ")" + after.getOrDefault(idx, ""));
+                    fixed.add(op.getSeqnum() + ":" + w.getKey());
+                } else if ((c == PcodeOp.STORE || c == PcodeOp.COPY) && wrapRhs(toks, op, tt, used, prefix, after))
+                    fixed.add(op.getSeqnum() + ":" + w.getKey());
             }
+            // a float loaded into an integer (or the other way round) as the whole right side: 0x543820
+            // 'local_a3c._12_4_ = *(float *)(iVar20 + 0x70);'
+            if (c == PcodeOp.LOAD && mix(pointee(htype(op.getInput(1))), htype(op.getOutput())) &&
+                    base(htype(op.getOutput())).getLength() == op.getOutput().getSize() &&
+                    wrapRhs(toks, op, htype(op.getOutput()), used, prefix, after))
+                fixed.add(op.getSeqnum() + ":load");
         }
         for (int ti = 0; ti < toks.size(); ti++) {
             if (after.containsKey(ti - 1)) sb.append(after.get(ti - 1));   // the end of a BITCAST operand
@@ -563,10 +607,17 @@ public class AutoExport extends GhidraScript {
     public void run() throws Exception {
         String out = getScriptArgs()[0], typesOut = getScriptArgs()[1];
         int maxSize = getScriptArgs().length > 2 ? Integer.parseInt(getScriptArgs()[2]) : 200000;
+        // (a fourth argument, addresses with commas: only those functions, to look at the output of a few)
+        Set<Long> only = null;
+        if (getScriptArgs().length > 3) {
+            only = new HashSet<>();
+            for (String x : getScriptArgs()[3].split(",")) only.add(Long.parseLong(x, 16));
+        }
         List<Function> funcs = new ArrayList<>();
         for (Function f : currentProgram.getFunctionManager().getFunctions(true))
             if (!f.isExternal() && !f.isThunk() && f.getBody().getNumAddresses() <= maxSize &&
-                !f.getName().startsWith("Unwind@") && !f.getName().startsWith("Catch")) funcs.add(f);
+                !f.getName().startsWith("Unwind@") && !f.getName().startsWith("Catch") &&
+                (only == null || only.contains(f.getEntryPoint().getOffset()))) funcs.add(f);
         Set<DataType> usedAll = Collections.synchronizedSet(new HashSet<>());
         DecompilerCallback<String> cb = new DecompilerCallback<>(currentProgram, new DecompileConfigurer() {
             public void configure(DecompInterface d) {
