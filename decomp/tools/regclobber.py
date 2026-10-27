@@ -36,6 +36,30 @@ for a in sorted(bf):
             n = i.reg_name(r)
             if n in FULL: w.add(FULL[n])
     if ind: w |= ALL
+    # a register saved first thing and restored before the one ret is left as it was (_alloca_probe 0x5E4080:
+    # 'push ecx; lea ecx, [esp+4] ... pop ecx; xchg esp, eax; ...; ret' keeps ECX, which its callers' 'this' is in)
+    ins = list(md.disasm(code, a))
+    rets = [k for k, i in enumerate(ins) if i.mnemonic.startswith('ret')]
+    if ins and ins[0].mnemonic == 'push' and ins[0].op_str in ('eax', 'ecx', 'edx') and len(rets) == 1:
+        reg = ins[0].op_str
+        # (not 'push ecx' making room for a local, written and popped back: no store through ESP, no call before
+        # the pop)
+        def stores_esp(j):
+            # (any access through ESP: capstone does not mark the x87 stores 'fstp [esp]' as writes)
+            return j.mnemonic == 'call' or (j.mnemonic != 'lea' and any(
+                o.type == capstone.x86_const.X86_OP_MEM and o.mem.base == capstone.x86_const.X86_REG_ESP
+                for o in j.operands))
+        for k in range(rets[0] - 1, 0, -1):
+            j = ins[k]
+            if j.mnemonic == 'pop' and j.op_str == reg:
+                if not any(stores_esp(x) for x in ins[1:k]):
+                    w.discard(FULL[reg])
+                break
+            try:
+                if any(FULL.get(j.reg_name(r)) == FULL[reg] for r in j.regs_access()[1]) or j.mnemonic in ('call', 'jmp'):
+                    break
+            except Exception:
+                break
     own[a] = w; calls[a] = cs
 clob = dict(own)
 changed = True
