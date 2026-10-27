@@ -92,6 +92,29 @@ byvalue_offs = {}   # function -> offsets of its string parameters passed by val
 _depths = {}
 unused_params = {}  # addr -> indices of the parameters its decompiled body never names
 call_sites = {}     # function -> {address of a direct call: callee}
+icall_pops = {}     # indirect call -> bytes its callee pops (tools/icalls.py), None where unknown
+
+
+def reg_import_pop(code, p, reg, limit=60):
+    """the pop of 'call reg' where reg was last written by 'mov reg, [IAT slot]' (MSVC keeps an import called
+    more than once in a register: 0x4822A0 'mov ebx, [std::operator+]; ...; call ebx'), straight back; None
+    otherwise"""
+    from capstone import x86 as cx
+    order = sorted(code)
+    k = order.index(p)
+    for q in reversed(order[max(0, k - limit):k]):
+        i = code[q]
+        try:
+            w = i.regs_access()[1]
+        except Exception:
+            return None
+        if reg in w:
+            o = i.operands
+            if i.mnemonic == 'mov' and len(o) == 2 and o[1].type == cx.X86_OP_MEM and not o[1].mem.base and \
+                    not o[1].mem.index:
+                return import_pops.get(o[1].mem.disp)
+            return None
+    return None
 
 
 def stack_depths(a, relative=False):
@@ -123,6 +146,8 @@ def stack_depths(a, relative=False):
         while p in code:
             if p in d:
                 if d[p] != dep:
+                    if os.environ.get('AD_DEBUG'):
+                        print('stack_depths %08X: paths disagree at %08X (%d, %d)' % (a, p, d[p], dep))
                     return None
                 break
             d[p] = dep
@@ -158,9 +183,15 @@ def stack_depths(a, relative=False):
                     ic = icalls.get(p)
                     pop = None if ic is None else 4 * ic[1] if ic[0] in ('__stdcall', '__thiscall', '__fastcall') \
                         else 0
+                    if pop is None and op.type == cx.X86_OP_REG:
+                        pop = reg_import_pop(code, p, op.reg)
+                    if pop is None:
+                        pop = icall_pops.get(p)
                 if pop is None:
                     if op.type == cx.X86_OP_IMM and op.imm in noreturn:
                         break
+                    if os.environ.get('AD_DEBUG'):
+                        print('stack_depths %08X: pop unknown at %08X %s %s' % (a, p, m, i.op_str))
                     return None
                 dep += pop
             if m == 'jmp':
@@ -945,6 +976,8 @@ def convert(f, protos, skip, imports, impnames):
         if not rv:
             return code
         dm = stack_depths(a)
+        if os.environ.get('AD_DEBUG'):
+            print('retaddr %08X: %s, depths %s' % (a, sorted(rv), 'none' if dm is None else len(dm)))
         if dm is None:
             return code
         out = []
@@ -1517,6 +1550,14 @@ def main():
             q = l.rstrip('\n').split('\t')
             if l[0] != '#' and len(q) == 4:
                 icalls[int(q[0], 16)] = (q[1], int(q[2]), q[3])
+        # (the machine-code facts next to it, tools/icalls.py: pops of indirect calls the decompiler made no
+        # CALLIND of, so no override: 'call ebp' of an import kept in EBP, 0x5302E0)
+        facts = os.path.join(os.path.dirname(a.icalls), os.path.basename(a.icalls).replace('_icall_overrides', '_icalls'))
+        if facts != a.icalls and os.path.exists(facts):
+            for l in open(facts):
+                q = l.rstrip('\n').split('\t')
+                if l[0] != '#' and len(q) == 6:
+                    icall_pops[int(q[0], 16)] = 0 if int(q[3]) >= 0 else int(q[5]) if int(q[5]) >= 0 else None
     ex = a.functions.replace('_functions.tsv', '_eaxin.tsv')
     if os.path.exists(ex):
         eax_handers.update(int(l.split()[0], 16) for l in open(ex) if l.strip() and l[0] != '#')
