@@ -168,6 +168,26 @@ def stack_depths(a):
     return d
 
 
+def vararg_counts(a, slot):
+    """the argument counts of the calls of the import slot in the function at a, from the 'add esp, N' after each
+    (calls without one left out)"""
+    import capstone
+    from stackfx import cleanup_after
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    md.detail = True
+    try:
+        code = {i.address: i for i in md.disasm(image[0].read(a, fsize.get(a, 0)), a)}
+    except Exception:
+        return set()
+    out = set()
+    for p, i in code.items():
+        if i.mnemonic == 'call' and i.op_str == 'dword ptr [0x%x]' % slot:
+            n = cleanup_after(code.get, p + i.size)
+            if n > 0:
+                out.add(n // 4)
+    return out
+
+
 def load_machine(path):
     for l in open(path):
         if l.startswith('#'):
@@ -557,8 +577,9 @@ def convert(f, protos, skip, imports, impnames):
         one = '|'.join(sorted(ONE_BYTE, key=len, reverse=True))
         code = re.sub(r'(?m)^(\s*)(?:%s)(\s+\w+\s*;)' % one, r'\1unsigned char\2', code)
         code = re.sub(r'\((?:%s)\)(\s*(?:0x[0-9a-fA-F]+|\d+)\b)' % one, r'(unsigned char)\1', code)
+        code = re.sub(r'\*\s*\((?:%s)\s*\*\)' % one, '*(unsigned char *)', code)
         # bytes read or written through a pointer to one ('bVar1 = pbVar2[0x45];'): through an unsigned char *
-        for v in set(re.findall(r'(?m)^\s*(?:%s)\s*\*\s*(\w+)\s*;' % one, code)):
+        for v in set(re.findall(r'(?m)(?:^\s*|[(,]\s*)(?:%s)\s*\*\s*(\w+)\s*[;,)]' % one, code)):
             code = re.sub(r'(?<![\w.>])%s\[' % v, '((unsigned char *)%s)[' % v, code)
     # ECX or EDX read though the machine code takes none (symbols/GAME_functions.tsv): 'push ecx' making room for
     # a local whose upper bytes stay what ECX held, passed on as an argument ('local_4 = in_ECX & 0xffffff00',
@@ -1054,6 +1075,22 @@ def convert(f, protos, skip, imports, impnames):
                     return None, 'import %s not in the import table' % c
                 NOTES.append('import %s not in the import table' % c)
             icc, _, iret, iplist, iva = cp[:5]
+            # a C function of varargs (sprintf) whose variable arguments the decompiler lost: 0x5111E0 called
+            # 'sprintf(buf, "%s 1. %s")' with the two strings gone and the game faulted.  Each call in the text
+            # must have an argument count the machine code's calls clean up after them ('add esp, N')
+            if iva and icc == '__cdecl':
+                seen = vararg_counts(a, ca)
+                for cm in re.finditer(r'\bsub_%s\s*\(' % c, code):
+                    depth, q = 1, cm.end()
+                    while q < len(code) and depth:
+                        depth += {'(': 1, ')': -1}.get(code[q], 0)
+                        q += 1
+                    n = len(split_args(code[cm.end():q - 1]))
+                    if seen and n not in seen:
+                        if not FORCE[0]:
+                            return None, 'varargs call of %s with %d arguments, the machine code passes %s' % (
+                                c, n, ','.join(map(str, sorted(seen))))
+                        NOTES.append('varargs call of %s with %d arguments' % (c, n))
             if not iva and ca in import_args:
                 ps_ = iplist[1:] if icc == '__thiscall' else iplist[2:] if icc == '__fastcall' else iplist
                 have = sum(slot_bytes(t) for t, _ in ps_)
