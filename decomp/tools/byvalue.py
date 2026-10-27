@@ -43,6 +43,9 @@ def effect(i):
         if ops[1].type != x86.X86_OP_IMM:
             return None
         return -ops[1].imm if m == 'sub' else ops[1].imm
+    if m == 'lea' and ops[0].type == x86.X86_OP_REG and ops[0].reg == x86.X86_REG_ESP and \
+            ops[1].mem.base == x86.X86_REG_ESP and ops[1].mem.index == 0:
+        return ops[1].mem.disp          # 'lea esp, [esp]': an alignment nop (0x4CBA3C)
     if (ops and ops[0].type == x86.X86_OP_REG and ops[0].reg == x86.X86_REG_ESP and m in ('mov', 'lea', 'and')) or \
             m == 'leave':
         return None

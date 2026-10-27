@@ -545,7 +545,7 @@ def convert(f, protos, skip, imports, impnames):
     def whole(m):
         lines = m.group(0).rstrip('\n').split('\n')
         fields = dict(re.match(r'\s*\w+\.d(\d) = ([^;]*);', l).groups() for l in lines)
-        v = re.sub(r'^\((?:u?int|undefined4)\)', '', fields.get('0', ''))
+        v = re.sub(r'\._0_4_$', '', re.sub(r'^\((?:u?int|undefined4)\)', '', fields.get('0', '')))
         # (a frame variable, or still the slot below the frame: in_stack_fffff8b4 read, &stack0xfffff8b4 passed)
         mv = re.fullmatch(r'(?:local|[a-zA-Z]+Stack)_([0-9a-f]+)', v)
         ms = re.fullmatch(r'in_stack_(ff[0-9a-f]{6})', v)
@@ -616,9 +616,9 @@ def convert(f, protos, skip, imports, impnames):
             code = code[:s_] + t + code[e_:]
         return code
     code = string_at_call(code)
-    for v in set(re.findall(r'(?m)^[ \t]*\w[\w ]*?[\s*]+(in_stack_ff[0-9a-f]{6});$', code)):
+    for v in set(re.findall(r'(?m)^[ \t]*\w[\w ]*?[\s*]+(in_stack_ff[0-9a-f]{6})\s*(?:\[\d+\])?;$', code)):
         if len(re.findall(r'\b%s\b' % v, code)) == 1:
-            code = re.sub(r'(?m)^[ \t]*\w[\w ]*?[\s*]+%s;\n' % v, '', code)
+            code = re.sub(r'(?m)^[ \t]*\w[\w ]*?[\s*]+%s\s*(?:\[\d+\])?;\n' % v, '', code)
     # the return addresses then left in variables go where every read of the variable follows another store to
     # it in its own block (0x5A9550's 'uVar18 = 0x5a95a9', the variable used again for other values)
     def dead_store(v, at):
