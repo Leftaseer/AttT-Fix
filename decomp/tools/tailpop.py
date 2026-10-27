@@ -69,20 +69,38 @@ for a, size in sizes.items():
         continue
     t = set()
     try:
-        moves_esp = False
+        moves_esp, dep = False, 0
         for i in md.disasm(pe.read(a, size), a):
             if i.mnemonic == 'jmp' and i.operands[0].type == x86.X86_OP_IMM:
                 d = i.operands[0].imm
                 if d in sizes and not (a <= d < a + size):
                     t.add(d)
             # a jump on to an import after a few instructions ('mov [ecx], vftable; jmp [~exception]', 0x420600),
-            # nothing pushed or popped before it
+            # ESP back where it was ('push esi; ...; call; pop esi; jmp [~basic_string]', 0x468300: straight code,
+            # the pops of its calls known)
             elif i.mnemonic == 'jmp' and i.operands[0].type == x86.X86_OP_MEM and i.operands[0].mem.base == 0 and \
-                    i.operands[0].mem.index == 0 and i.operands[0].mem.disp in imp_pop and not moves_esp:
+                    i.operands[0].mem.index == 0 and i.operands[0].mem.disp in imp_pop and not moves_esp and dep == 0:
                 known[('imp', i.operands[0].mem.disp)] = imp_pop[i.operands[0].mem.disp]
                 t.add(('imp', i.operands[0].mem.disp))
-            if i.mnemonic in ('push', 'pop', 'call', 'leave') or 'esp' in i.op_str.split(',')[0]:
-                moves_esp = True
+            m, ops = i.mnemonic, i.operands
+            if m == 'push':
+                dep -= 4
+            elif m == 'pop':
+                dep += 4
+            elif m == 'call':
+                op = ops[0]
+                cp = known.get(op.imm) if op.type == x86.X86_OP_IMM else \
+                    imp_pop.get(op.mem.disp) if op.type == x86.X86_OP_MEM and op.mem.base == 0 and op.mem.index == 0 \
+                    else None
+                if cp is None:
+                    moves_esp = True
+                else:
+                    dep += cp
+            elif m in ('add', 'sub') and i.op_str.startswith('esp, ') and ops[1].type == x86.X86_OP_IMM:
+                dep += ops[1].imm if m == 'add' else -ops[1].imm
+            elif m.startswith('j') and m != 'jmp' or m.startswith('ret') or m == 'leave' or \
+                    ops and ops[0].type == x86.X86_OP_REG and ops[0].reg == x86.X86_REG_ESP:
+                moves_esp = True        # (a store to [esp + 4] leaves ESP alone: 0x53A9B0 replaces its argument)
     except Exception:
         pass
     if t:
