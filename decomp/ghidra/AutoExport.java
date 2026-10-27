@@ -96,6 +96,8 @@ public class AutoExport extends GhidraScript {
         }
         return isFloat(a) != isFloat(b) && base(a).getLength() == base(b).getLength() && !(base(a) instanceof Pointer && false);
     }
+    // the plain name of a convention KeepRegisters.java copied with registers a function leaves alone
+    static String ccName(Function f) { return f.getCallingConventionName().replaceAll("_keep[A-Z]+$", ""); }
     Function callTarget(PcodeOp op) {
         Function t = getFunctionAt(op.getInput(0).getAddress());
         if (t == null)
@@ -148,7 +150,8 @@ public class AutoExport extends GhidraScript {
                         if (isFloat(htype(op.getInput(k)))) return "argument of an unknown callee at " + op.getSeqnum().getTarget();
                     continue;
                 }
-                if (out != null && mix(t.getReturnType(), htype(out))) return "call result at " + op.getSeqnum().getTarget();
+                if (out != null && mix(t.getReturnType(), htype(out)) && !fixed.contains(op.getSeqnum() + ":out"))
+                    return "call result at " + op.getSeqnum().getTarget();
                 Parameter[] ps = t.getParameters();
                 for (int k = 1; k < op.getNumInputs() && k - 1 < ps.length; k++)
                     if (mix(ps[k - 1].getDataType(), htype(op.getInput(k))) && !fixed.contains(op.getSeqnum() + ":" + k))
@@ -351,6 +354,24 @@ public class AutoExport extends GhidraScript {
                 if (t != null) {
                     Parameter[] ps = t.getParameters();
                     for (int k = 1; k < op.getNumInputs() && k - 1 < ps.length; k++) want.put(k, ps[k - 1].getDataType());
+                    // its result: the whole call 'name(args)' (0x4662A0 keeps the float of 0x57AD40 in an integer)
+                    Varnode o = op.getOutput();
+                    DataType ot = htype(o);
+                    if (o != null && ot != null && mix(ot, t.getReturnType()) && base(ot).getLength() == o.getSize()) {
+                        int fn = -1, n = 0;
+                        for (int k = 0; k < toks.size(); k++)
+                            if (toks.get(k) instanceof ClangFuncNameToken && ((ClangToken) toks.get(k)).getPcodeOp() == op) {
+                                fn = k;
+                                n++;
+                            }
+                        int open = n == 1 ? next(toks, fn + 1) : -1;
+                        int close = open >= 0 && txt(toks, open).equals("(") ? matching(toks, open, "(", ")") : -1;
+                        if (close > 0 && !before.containsKey(fn)) {
+                            prefix.put(fn, prefix.getOrDefault(fn, "") + "BITCAST(" + ctype(ot, used) + ", ");
+                            after.put(close, ")" + after.getOrDefault(close, ""));
+                            fixed.add(op.getSeqnum() + ":out");
+                        }
+                    }
                 }
             }
             for (Map.Entry<Integer, DataType> w : want.entrySet()) {
@@ -563,11 +584,12 @@ public class AutoExport extends GhidraScript {
                 Set<String> fixed = new HashSet<>();
                 try { code = render(r, f, globals, callees, used, strings, sized, bits, fixed); }
                 catch (Exception e) { return null; }
+                code = code.replaceAll("\\b(__\\w+?)_keep[A-Z]+\\b", "$1");
                 usedAll.addAll(used);
                 StringBuilder sb = new StringBuilder();
                 sb.append("{\"a\":\"").append(String.format("%08X", f.getEntryPoint().getOffset())).append("\"");
                 sb.append(",\"size\":").append(f.getBody().getNumAddresses());
-                sb.append(",\"cc\":").append(js(f.getCallingConventionName()));
+                sb.append(",\"cc\":").append(js(ccName(f)));
                 sb.append(",\"custom\":").append(f.hasCustomVariableStorage());
                 String fm = null;
                 Map<String, String> icallFloats = new TreeMap<>();
@@ -618,7 +640,7 @@ public class AutoExport extends GhidraScript {
                 if (f.isExternal()) continue;
                 StringBuilder sb = new StringBuilder();
                 sb.append(String.format("%08X\t", f.getEntryPoint().getOffset()));
-                sb.append(f.getCallingConventionName()).append('\t').append(f.hasCustomVariableStorage()).append('\t');
+                sb.append(ccName(f)).append('\t').append(f.hasCustomVariableStorage()).append('\t');
                 sb.append(ctype(f.getReturnType(), used)).append('\t');
                 Parameter[] ps = f.getParameters();
                 for (int i = 0; i < ps.length; i++) {
@@ -637,7 +659,7 @@ public class AutoExport extends GhidraScript {
                     if (!r.getFromAddress().isMemoryAddress() || getInstructionAt(r.getFromAddress()) != null) continue;
                     StringBuilder sb = new StringBuilder();
                     sb.append(String.format("%08X\t", r.getFromAddress().getOffset()));
-                    sb.append(ef.getCallingConventionName()).append("\tfalse\t").append(ctype(ef.getReturnType(), used)).append('\t');
+                    sb.append(ccName(ef)).append("\tfalse\t").append(ctype(ef.getReturnType(), used)).append('\t');
                     Parameter[] ps = ef.getParameters();
                     for (int i = 0; i < ps.length; i++) {
                         if (i > 0) sb.append(',');
