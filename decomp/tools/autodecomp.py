@@ -704,6 +704,22 @@ def convert(f, protos, skip, imports, impnames):
     for v in set(re.findall(r'(?m)^[ \t]*\w+[ \t]+((?:extraout|unaff)_E[A-Z]{2}(?:_\d+)?);$', code)):
         if len(re.findall(r'\b%s\b' % v, code)) == 1:
             code = re.sub(r'(?m)^[ \t]*\w+[ \t]+%s;\n' % v, '', code)
+    # the whole stack slot of a parameter narrower than a dword ('_param_3 = 0', a loop counter in the slot of
+    # 0x486010's undefined1 param_3): the parameter declared as the dword, its narrow uses cast
+    for n in sorted(set(re.findall(r'\b_param_(\d+)\b', code))):
+        i = code.find('{')
+        hd = re.search(r'([(,]\s*)([A-Za-z_]\w*)(\s+)param_%s(\s*[,)])' % n, code[:i])
+        if not hd or hd.group(2) in WIDE or hd.group(2) in BYVALUE or \
+                re.search(r'\b_param_%s\s*=\s*CONCAT' % n, code) or re.search(r'(?<![.>\w])param_%s\s*=[^=]' % n, code[i:]):
+            continue
+        t = hd.group(2)
+        body = re.sub(r'(?<![.>\w])param_%s\b' % n, '((%s)param_%s)' % (t, n), code[i:])
+        body = re.sub(r'\b_param_%s\b' % n, 'param_%s' % n, body)
+        code = code[:hd.start()] + '%s%s%sparam_%s%s' % (hd.group(1), 'uint', hd.group(3), n, hd.group(4)) + \
+            code[hd.end():i] + body
+    # a global without a type subscripted ('(&((void *)G_006C7C90))[param_1]', 0x579BA0): the decompiler's
+    # undefined1 elements, bytes (all such accesses are 'mov al, byte ptr [eax + 0x6c7c90]')
+    code = re.sub(r'\(&\(\(void \*\)(&?G_[0-9A-F]{8})\)\)\[', r'((unsigned char *)\1)[', code)
     # a local Ghidra declares undefined4 but assigns a pointer and dereferences (0x545400 'local_63c = (int
     # *)sub_0053EA20(); local_63c[1] = ...'): give the declaration that pointer type (same size)
     for v in re.findall(r'(?m)^  undefined4 (\w+);$', code):
@@ -1162,6 +1178,11 @@ def convert(f, protos, skip, imports, impnames):
     # take liberties with
     body = re.sub(r'^(\s*(?:undefined\d|u?int|uint|float|char|byte|short|ushort|[\w ]+\*+)\s*in_stack_ff\w+);',
                   r'\1 = 0;', body, flags=re.M)
+    # (so is an EAX the decompiler declared but never set, what a callee left: 0x547F10 hands 0x4AC7F0, which
+    # passes EAX through, the EAX of 0x473110's float result)
+    for v in re.findall(r'(?m)^\s*(?:undefined4|u?int|uint|[\w ]+\*+)\s*(in_eax(?:_\d+)?);$', body):
+        if not re.search(r'\b%s\s*=[^=]' % v, body):
+            body = re.sub(r'(?m)^(\s*(?:undefined4|u?int|uint|[\w ]+\*+)\s*%s);$' % v, r'\1 = 0;', body)
     # stack variables at their original offsets: the decompiler splits buffers and structures into scalars that the
     # original kept side by side (and walks across them with pointers), so all named stack variables become views
     # of one frame array laid out as the original stack frame (local_1c is at -0x1c from the return address)
@@ -1246,10 +1267,13 @@ def convert(f, protos, skip, imports, impnames):
             raise KeyError(q)
         extra.add('%08X' % ad)
         return '((void *)d_%08X)' % ad
-    body = re.sub(r'&?\b(LAB|PTR_LAB|PTR_FUN|PTR_DAT|PTR_s|FUN|s_\w+?|u_\w+?)_([0-9a-fA-F]{8})\b', addr_ref, body)
+    # (a table of string pointers: '(&PTR_s_giant.tga_006c3dc0)[iVar2]', 0x53B2E0)
+    body = re.sub(r'\(&PTR_s_[\w.]*?_([0-9a-fA-F]{8})\)\[', lambda m: '((char **)d_%s)[' % m.group(1).upper(), body)
+    # (names of strings keep their dots: 's_luac.out_006c1fac', 0x4B42C0)
+    body = re.sub(r'&?\b(LAB|PTR_LAB|PTR_FUN|PTR_DAT|PTR_s|FUN|s_[\w.]+?|u_[\w.]+?)_([0-9a-fA-F]{8})\b', addr_ref, body)
     # the address of untyped data is just an address
     body = re.sub(r'&(?:DAT|UNK)_([0-9a-fA-F]{8})\b(?!\s*[\[.])', lambda m: '((void *)d_%s)' % m.group(1).upper(), body)
-    for x in re.findall(r'\(\(void \*\)d_([0-9A-F]{8})\)', body):
+    for x in re.findall(r'\(\((?:void \*|char \*\*)\)d_([0-9A-F]{8})\)', body):
         extra.add(x)
     if re.search(r'(?<![\w.>])(DAT_|PTR_|BYTE_|WORD_|DWORD_|UNK_)[0-9a-fA-F]{8}\b', body):
         if not FORCE[0]:
