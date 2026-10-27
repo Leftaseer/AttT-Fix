@@ -87,8 +87,11 @@ def analyse(start):
                 pr = FULL.get(i.reg_name(o.reg)) if o.type == X.X86_OP_REG else None
                 # pushes that open the function are saves, or 'push ecx' making room; EAX and EDX are never saved
                 # (0x46FD90 yy_fatal_error pushes the message it gets in EAX for fprintf)
+                # (an opening 'push ecx' whose slot a direct call of known stack parameters takes is ECX passed on:
+                # 0x47DFD0 'push ecx; push 0x60ae90; call 0x47DCE0' hands the callee its ECX)
                 pending.append(pr if pr and not w & BIT[pr] and (not entry_run or pr in ('EAX', 'EDX')) and
-                               pr not in clobbers else None)
+                               pr not in clobbers else 'ECX0' if pr == 'ECX' and entry_run and not w & BIT['ECX']
+                               else None)
                 r = set() if o.type == X.X86_OP_REG else r
             elif m == 'pop':
                 if pending: pending.pop()
@@ -109,7 +112,10 @@ def analyse(start):
                 # an indirect call takes the pushes since the last test or branch (saves come before those)
                 k = slots.get(o.imm, len(pending) - bound) if o.type == X.X86_OP_IMM else len(pending) - bound
                 for x in pending[len(pending) - k:] if k else []:
-                    if x and (o.type == X.X86_OP_IMM or x in ('EAX', 'ECX', 'EDX')):
+                    if x == 'ECX0':
+                        if o.type == X.X86_OP_IMM and o.imm in slots:
+                            r.add('ECX')
+                    elif x and (o.type == X.X86_OP_IMM or x in ('EAX', 'ECX', 'EDX')):
                         r.add(x)      # before an indirect call a pushed EBX/ESI/EDI/EBP is far more often a save
                 if o.type == X.X86_OP_IMM and pops.get(o.imm):
                     pending = pending[:max(0, len(pending) - pops[o.imm] // 4)]

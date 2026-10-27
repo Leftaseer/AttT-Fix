@@ -581,20 +581,6 @@ def convert(f, protos, skip, imports, impnames):
         # bytes read or written through a pointer to one ('bVar1 = pbVar2[0x45];'): through an unsigned char *
         for v in set(re.findall(r'(?m)(?:^\s*|[(,]\s*)(?:%s)\s*\*\s*(\w+)\s*[;,)]' % one, code)):
             code = re.sub(r'(?<![\w.>])%s\[' % v, '((unsigned char *)%s)[' % v, code)
-    # ECX or EDX read though the machine code takes none (symbols/GAME_functions.tsv): 'push ecx' making room for
-    # a local whose upper bytes stay what ECX held, passed on as an argument ('local_4 = in_ECX & 0xffffff00',
-    # 0x4CB160 to 0x4CAF40): garbage of the original, 0
-    for r in ('ECX', 'EDX'):
-        v = 'in_' + r
-        rest_ = code[code.find('{') + 1:]
-        if r in machine.get(a, ({r}, None))[0] or not re.search(r'\b%s\b' % v, rest_):
-            continue
-        uses = [u for u in re.findall(r'(?m)^.*\b%s\b.*$' % v, rest_)
-                if not re.match(r'\s*[A-Za-z_][\w ]*?\**\s*\b%s\s*;\s*$' % v, u)]
-        if all(re.match(r'\s*\w+ = %s & 0xffffff00;\s*$' % v, u) or
-               re.search(r'\bsub_[0-9A-F]{8}\s*\([^;]*\b%s\b' % v, u) for u in uses):
-            code = re.sub(r'(?m)^\s+[A-Za-z_][\w ]*?\**\s*\b%s\s*;\n' % v, '', code)
-            code = re.sub(r'\b%s\b' % v, '0', code)
     for pat, why in BLOCK:
         if re.search(pat, code):
             if not FORCE[0]:
