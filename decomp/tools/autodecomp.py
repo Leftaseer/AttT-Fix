@@ -428,6 +428,26 @@ eax_used = set()        # functions whose callers use EAX after the call (tools/
 eax_handers = set()     # functions that hand their caller's EAX back (symbols/GAME_eaxin.tsv)
 
 
+def prologue_handler(a):
+    """the SEH handler the prologue registers: 'push -1; push HANDLER; mov eax, fs:[0]' (or 'push fs:[0]'), None
+    if the function does not begin so"""
+    import capstone
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+    try:
+        ins = list(md.disasm(image[0].read(a, 48), a))[:12]
+    except Exception:
+        return None
+    last = None
+    for i in ins:
+        if 'fs:[0]' in i.op_str and (i.mnemonic == 'push' or (i.mnemonic == 'mov' and i.op_str.startswith('eax'))):
+            return last
+        if i.mnemonic == 'push' and i.op_str.startswith('0x') and int(i.op_str, 16) >= 0x401000:
+            last = int(i.op_str, 16)
+        elif i.mnemonic in ('call', 'ret', 'jmp') or i.mnemonic.startswith('j'):
+            return None
+    return None
+
+
 def catches(handler):
     """True unless handler is the frame handler stub of a C++ function without try blocks (only destructors to
     run): 'mov eax, FuncInfo; jmp __CxxFrameHandler3', possibly after a GS cookie check.  Dropping the
@@ -792,7 +812,13 @@ def convert(f, protos, skip, imports, impnames):
         if len(set(hs)) > 1:
             hs = [h for h in hs if re.search(r'Stack_(?:8|c)$', h[0])] or hs
         hs = sorted(set(h[1] for h in hs))
+        # (the prologue's own push of the handler, where the text shows several pointers or none: 0x49FE20 keeps it
+        # at -0x10 after an aligned frame, 0x4B4700 shows no variable for it)
+        if len(hs) != 1 and prologue_handler(a) is not None:
+            hs = ['%08X' % prologue_handler(a)]
         if len(hs) != 1:
+            if os.environ.get('AD_DEBUG'):
+                print('handler %08X' % a, hs, re.findall(r'.*Stack_\w+\s*=\s*[^;]*G_[0-9A-F]{8}.*', body)[:4])
             if not FORCE[0]:
                 return None, 'exception frame without a known handler'
             NOTES.append('exception frame without a known handler')
