@@ -262,6 +262,173 @@ class Harness:
     def crt_CIcos(self): self._x87_unary(math.cos)
     def crt_CIsqrt(self): self._x87_unary(math.sqrt)
 
+    # --- D3DX9 math (__stdcall; matrices row-major, row vectors: v * M) and timers: both runs of a test call
+    # the same Python, so only determinism matters; the math is D3DX's all the same
+    def _fl(self, i):
+        return struct.unpack('<f', struct.pack('<I', self._arg(i)))[0]
+    def _rf(self, p, n):
+        return list(struct.unpack('<%df' % n, self.uc.mem_read(p, 4 * n)))
+    def _wf(self, p, v):
+        self.uc.mem_write(p, struct.pack('<%df' % len(v), *[float(x) for x in v]))
+    def _rm(self, p):
+        f = self._rf(p, 16)
+        return [f[0:4], f[4:8], f[8:12], f[12:16]]
+    def _wm(self, p, m):
+        self._wf(p, [x for r in m for x in r])
+    @staticmethod
+    def _mul(a, b):
+        return [[sum(a[i][k] * b[k][j] for k in range(4)) for j in range(4)] for i in range(4)]
+    @staticmethod
+    def _vm(v, m):
+        return [sum(v[k] * m[k][j] for k in range(4)) for j in range(4)]
+    @staticmethod
+    def _ident():
+        return [[1.0 if i == j else 0.0 for j in range(4)] for i in range(4)]
+    def _d3dx(self, nargs, fn):
+        try:
+            fn()
+        except (UcError, ZeroDivisionError, ValueError, OverflowError):
+            self.uc.emu_stop(); self.fault = 'bad D3DX arguments'; return
+        self._ret(self._arg(0), 4 * nargs)
+
+    def crt_D3DXMatrixMultiply(self):
+        self._d3dx(3, lambda: self._wm(self._arg(0), self._mul(self._rm(self._arg(1)), self._rm(self._arg(2)))))
+    def crt_D3DXMatrixTranspose(self):
+        self._d3dx(2, lambda: self._wm(self._arg(0), [list(r) for r in zip(*self._rm(self._arg(1)))]))
+    def _set_m(self, nargs, make):
+        self._d3dx(nargs, lambda: self._wm(self._arg(0), make()))
+    def crt_D3DXMatrixTranslation(self):
+        def mk():
+            m = self._ident(); m[3][:3] = [self._fl(1), self._fl(2), self._fl(3)]; return m
+        self._set_m(4, mk)
+    def crt_D3DXMatrixScaling(self):
+        def mk():
+            m = self._ident(); m[0][0], m[1][1], m[2][2] = self._fl(1), self._fl(2), self._fl(3); return m
+        self._set_m(4, mk)
+    def _rot(self, axis, a):
+        c, s_ = math.cos(a), math.sin(a)
+        m = self._ident()
+        i, j = {'x': (1, 2), 'y': (2, 0), 'z': (0, 1)}[axis]
+        m[i][i], m[i][j], m[j][i], m[j][j] = c, s_, -s_, c
+        return m
+    def crt_D3DXMatrixRotationX(self): self._set_m(2, lambda: self._rot('x', self._fl(1)))
+    def crt_D3DXMatrixRotationY(self): self._set_m(2, lambda: self._rot('y', self._fl(1)))
+    def crt_D3DXMatrixRotationZ(self): self._set_m(2, lambda: self._rot('z', self._fl(1)))
+    def crt_D3DXMatrixRotationYawPitchRoll(self):
+        self._set_m(4, lambda: self._mul(self._mul(self._rot('z', self._fl(3)), self._rot('x', self._fl(2))),
+                                         self._rot('y', self._fl(1))))
+    def crt_D3DXMatrixRotationAxis(self):
+        def mk():
+            x, y, z = self._rf(self._arg(1), 3); a = self._fl(2)
+            n = math.sqrt(x * x + y * y + z * z) or 1.0
+            x, y, z = x / n, y / n, z / n
+            c, s_ = math.cos(a), math.sin(a); t = 1 - c
+            return [[t * x * x + c, t * x * y + s_ * z, t * x * z - s_ * y, 0],
+                    [t * x * y - s_ * z, t * y * y + c, t * y * z + s_ * x, 0],
+                    [t * x * z + s_ * y, t * y * z - s_ * x, t * z * z + c, 0], [0, 0, 0, 1]]
+        self._set_m(3, mk)
+    @staticmethod
+    def _norm(v):
+        n = math.sqrt(sum(x * x for x in v))
+        return [x / n for x in v] if n else [0.0] * len(v)
+    @staticmethod
+    def _cross(a, b):
+        return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+    def crt_D3DXMatrixLookAtLH(self):
+        def mk():
+            eye, at, up = (self._rf(self._arg(i), 3) for i in (1, 2, 3))
+            z = self._norm([at[i] - eye[i] for i in range(3)])
+            x = self._norm(self._cross(up, z)); y = self._cross(z, x)
+            d = lambda a: -sum(a[i] * eye[i] for i in range(3))
+            return [[x[0], y[0], z[0], 0], [x[1], y[1], z[1], 0], [x[2], y[2], z[2], 0], [d(x), d(y), d(z), 1]]
+        self._set_m(4, mk)
+    def crt_D3DXMatrixOrthoLH(self):
+        def mk():
+            w, h, zn, zf = (self._fl(i) for i in (1, 2, 3, 4))
+            return [[2 / w, 0, 0, 0], [0, 2 / h, 0, 0], [0, 0, 1 / (zf - zn), 0], [0, 0, zn / (zn - zf), 1]]
+        self._set_m(5, mk)
+    def crt_D3DXMatrixOrthoOffCenterLH(self):
+        def mk():
+            l, r, b, t, zn, zf = (self._fl(i) for i in range(1, 7))
+            return [[2 / (r - l), 0, 0, 0], [0, 2 / (t - b), 0, 0], [0, 0, 1 / (zf - zn), 0],
+                    [(l + r) / (l - r), (t + b) / (b - t), zn / (zn - zf), 1]]
+        self._set_m(7, mk)
+    def crt_D3DXMatrixPerspectiveFovLH(self):
+        def mk():
+            fov, asp, zn, zf = (self._fl(i) for i in (1, 2, 3, 4))
+            ys = 1 / math.tan(fov / 2); xs = ys / asp
+            return [[xs, 0, 0, 0], [0, ys, 0, 0], [0, 0, zf / (zf - zn), 1], [0, 0, -zn * zf / (zf - zn), 0]]
+        self._set_m(5, mk)
+    def crt_D3DXMatrixInverse(self):
+        def go():
+            m = self._rm(self._arg(2))
+            a = [r[:] + [1.0 if i == j else 0.0 for j in range(4)] for i, r in enumerate(m)]
+            det = 1.0
+            for c in range(4):
+                p = max(range(c, 4), key=lambda r: abs(a[r][c]))
+                if abs(a[p][c]) < 1e-30:
+                    raise ZeroDivisionError
+                if p != c:
+                    a[c], a[p] = a[p], a[c]; det = -det
+                det *= a[c][c]
+                pv = a[c][c]; a[c] = [x / pv for x in a[c]]
+                for r in range(4):
+                    if r != c:
+                        f = a[r][c]; a[r] = [a[r][k] - f * a[c][k] for k in range(8)]
+            self._wm(self._arg(0), [r[4:] for r in a])
+            if self._arg(1):
+                self._wf(self._arg(1), [det])
+        self._d3dx(3, go)
+    def crt_D3DXVec3Normalize(self):
+        self._d3dx(2, lambda: self._wf(self._arg(0), self._norm(self._rf(self._arg(1), 3))))
+    def crt_D3DXVec2Normalize(self):
+        self._d3dx(2, lambda: self._wf(self._arg(0), self._norm(self._rf(self._arg(1), 2))))
+    def _tc(self, v, m, n):
+        r = self._vm(v + [0.0] * (3 - len(v)) + [1.0], m)
+        return [r[i] / r[3] for i in range(n)]
+    def crt_D3DXVec3TransformCoord(self):
+        self._d3dx(3, lambda: self._wf(self._arg(0), self._tc(self._rf(self._arg(1), 3), self._rm(self._arg(2)), 3)))
+    def crt_D3DXVec3TransformNormal(self):
+        self._d3dx(3, lambda: self._wf(self._arg(0), self._vm(self._rf(self._arg(1), 3) + [0.0], self._rm(self._arg(2)))[:3]))
+    def crt_D3DXVec2Transform(self):
+        self._d3dx(3, lambda: self._wf(self._arg(0), self._vm(self._rf(self._arg(1), 2) + [0.0, 1.0], self._rm(self._arg(2)))))
+    def crt_D3DXVec2TransformCoord(self):
+        self._d3dx(3, lambda: self._wf(self._arg(0), self._tc(self._rf(self._arg(1), 2), self._rm(self._arg(2)), 2)))
+    def _arr(self, normal):
+        out, os_, v, vs, m, n = (self._arg(i) for i in range(6))
+        mm = self._rm(m)
+        for k in range(min(n, 4096)):
+            x = self._rf(v + k * vs, 3)
+            r = self._vm(x + [0.0], mm)[:3] if normal else self._tc(x, mm, 3)
+            self._wf(out + k * os_, r)
+    def crt_D3DXVec3TransformCoordArray(self): self._d3dx(6, lambda: self._arr(False))
+    def crt_D3DXVec3TransformNormalArray(self): self._d3dx(6, lambda: self._arr(True))
+    def crt_D3DXPlaneFromPoints(self):
+        def go():
+            a, b, c = (self._rf(self._arg(i), 3) for i in (1, 2, 3))
+            n = self._norm(self._cross([b[i] - a[i] for i in range(3)], [c[i] - a[i] for i in range(3)]))
+            self._wf(self._arg(0), n + [-sum(n[i] * a[i] for i in range(3))])
+        self._d3dx(4, go)
+    def crt_D3DXVec3Project(self):
+        def go():
+            v = self._rf(self._arg(1), 3)
+            vp = struct.unpack('<IIIIff', self.uc.mem_read(self._arg(2), 24)) if self._arg(2) else (0, 0, 1, 1, 0.0, 1.0)
+            m = self._ident()
+            for i in (5, 4, 3):
+                if self._arg(i):
+                    m = self._mul(self._rm(self._arg(i)), m)
+            r = self._tc(v, m, 3)
+            self._wf(self._arg(0), [vp[0] + (1 + r[0]) * vp[2] / 2, vp[1] + (1 - r[1]) * vp[3] / 2,
+                                     vp[4] + r[2] * (vp[5] - vp[4])])
+        self._d3dx(6, go)
+
+    def crt_QueryPerformanceFrequency(self):
+        self.uc.mem_write(self._arg(0), struct.pack('<Q', 3579545)); self._ret(1, 4)
+    def crt_QueryPerformanceCounter(self):
+        self.uc.mem_write(self._arg(0), struct.pack('<Q', 123456789012)); self._ret(1, 4)
+    def crt_GetTickCount(self): self._ret(1234567)
+    def crt_timeGetTime(self): self._ret(1234567)
+
 
     # operator new/delete, more of the C runtime
     def crt_free_like(self):
