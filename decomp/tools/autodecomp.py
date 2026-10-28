@@ -821,6 +821,13 @@ def convert(f, protos, skip, imports, impnames):
     # injection decomp_ftol_int keeps EAX only): the float truncated to 64 bits, EDX:EAX as _ftol leaves them
     if 'decomp_ftol_int' in code:
         code = re.sub(r'\bCONCAT44\(extraout_EDX(?:_\d+)?,\(int\)(\w+)\)', r'(ulonglong)(longlong)\1', code)
+        # (also where the decompiler kept an older EDX for the high half: 0x593340 'return CONCAT44(iVar1,
+        # (int)(...))', EDX as _ftol leaves it is the high dword of the conversion)
+        for m in reversed(list(re.finditer(r'\breturn CONCAT44\(', code))):
+            e = matching(code, m.end() - 1)
+            args = split_args(code[m.end():e]) if e > 0 else []
+            if len(args) == 2 and args[1].startswith('(int)') and re.match(r'\s*;', code[e + 1:]):
+                code = code[:m.start()] + 'return (ulonglong)(longlong)(%s)' % args[1][5:] + code[e + 1:]
         for v in set(re.findall(r'(?m)^[ \t]*\w+[ \t]+(extraout_EDX(?:_\d+)?);$', code)):
             if len(re.findall(r'\b%s\b' % v, code)) == 1:
                 code = re.sub(r'(?m)^[ \t]*\w+[ \t]+%s;\n' % v, '', code)

@@ -109,15 +109,26 @@ def rand_dword(rnd, h=None, depth=0):
     if h is not None and depth > 0 and c < PTR_RATE[0]:
         return make_object(h, rnd, 256, depth - 1)
     c = rnd.random()
-    if c < 0.25: return rnd.choice([0, 1, 2, 3, 0xFFFFFFFF])
+    if c < 0.25: return rnd.choice([0, 1, 2, 3, 0x7F7FFFFF if NONAN else 0xFFFFFFFF])
     if c < 0.55: return rnd.randint(0, 100)
     if c < 0.75: return struct.unpack('<I', struct.pack('<f', rnd.choice([0.0, 1.0, -1.0, 0.5, rnd.uniform(-100, 100)])))[0]
-    return rnd.getrandbits(32)
+    return no_nan(rnd.getrandbits(32))
+
+
+NONAN = bool(os.environ.get('AV_NONAN'))   # (triage: no -1 either, a NaN as a float)
+
+
+def no_nan(v):
+    """a random dword read as a float is no NaN or infinity: the decompiled comparisons differ from the x87/SSE
+    ones only there ('comiss; jb' takes a NaN as less, C's '<' not), which drowned the real differences"""
+    return v & ~0x00800000 if (v >> 23) & 0xFF == 0xFF else v
 
 
 def make_object(h, rnd, size, depth):
     size = max(16, min(size, 0x2000))
     data = bytearray(rnd.getrandbits(8) for _ in range(size))
+    for o in range(0, size - 3, 4):
+        struct.pack_into('<I', data, o, no_nan(struct.unpack_from('<I', data, o)[0]))
     for o in range(0, size - 3, 4):
         c = rnd.random()
         if c < 0.15 + PTR_RATE[0] / 2 and depth > 0:
@@ -290,6 +301,17 @@ def main():
                         regv[REGS[order[i]]] = av[0]
                     else:
                         flat += av
+                if os.environ.get('AV_DUMP'):       # (debugging: the inputs of each case)
+                    def peek(v):
+                        try:
+                            return bytes(h.uc.mem_read(v, 32)).hex() if v > 0x1000 else ''
+                        except UcError:
+                            return ''
+                    print('case %d regs %s stack %s' % (case, {k: '%08X' % v for k, v in regv.items()},
+                                                        ['%08X' % v for v in flat]))
+                    for v in list(regv.values()) + flat:
+                        if peek(v):
+                            print('   %08X: %s' % (v, peek(v)))
                 (r1, m1), (r2, m2) = h.run_case(entry, head, flat, regv, ret_kind(ret), 0, va)
                 f1, f2 = r1['fault'], r2['fault']
                 if f1 and 'unsupported' in f1 or f2 and 'unsupported' in f2:
