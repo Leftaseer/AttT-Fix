@@ -34,11 +34,30 @@ class Unsupported(Exception):
 
 
 _S = '?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@'
+_OP = '??$'
+_T = '?$char_traits@D@std@@V?$allocator@D@1@@std@@'
+_B = '?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@'
 STRING_ALIAS = {
     '??0' + _S + 'QAE@XZ': 'str_ctor', '??0' + _S + 'QAE@PBD@Z': 'str_ctor_cstr', '??0' + _S + 'QAE@ABV01@@Z': 'str_ctor_copy',
     '??1' + _S + 'QAE@XZ': 'str_dtor', '??4' + _S + 'QAEAAV01@ABV01@@Z': 'str_assign',
-    '??4' + _S + 'QAEAAV01@PBD@Z': 'str_assign_cstr', '?c_str@' + _S[2:] + 'QBEPBDXZ': 'str_cstr',
-    '?size@' + _S[2:] + 'QBEIXZ': 'str_size', '?length@' + _S[2:] + 'QBEIXZ': 'str_size',
+    '??4' + _S + 'QAEAAV01@PBD@Z': 'str_assign_cstr', '?c_str@' + _S + 'QBEPBDXZ': 'str_cstr',
+    '?data@' + _S + 'QBEPBDXZ': 'str_cstr',
+    '?size@' + _S + 'QBEIXZ': 'str_size', '?length@' + _S + 'QBEIXZ': 'str_size',
+    '?substr@' + _S + 'QBE?AV12@II@Z': 'str_substr', '?find@' + _S + 'QBEIDI@Z': 'str_find_char',
+    # (free operators, __cdecl: a result string through a hidden pointer first)
+    _OP + '?HDU' + _T + 'YA?AV' + _B + 'ABV10@PBD@Z': 'str_plus_cstr',
+    _OP + '?HDU' + _T + 'YA?AV' + _B + 'PBDABV10@@Z': 'str_cstr_plus',
+    _OP + '?HDU' + _T + 'YA?AV' + _B + 'ABV10@0@Z': 'str_plus_str',
+    _OP + '?HDU' + _T + 'YA?AV' + _B + 'ABV10@D@Z': 'str_plus_char',
+    _OP + '?MDU' + _T + 'YA_NABV' + _B + '0@Z': 'str_less',
+    _OP + '?8DU' + _T + 'YA_NABV' + _B + 'PBD@Z': 'str_eq_cstr',
+    _OP + '?8DU' + _T + 'YA_NABV' + _B + '0@Z': 'str_eq_str',
+    _OP + '?9DU' + _T + 'YA_NABV' + _B + 'PBD@Z': 'str_ne_cstr',
+    _OP + '?9DU' + _T + 'YA_NABV' + _B + '0@Z': 'str_ne_str',
+    '?end@' + _S + 'QBE?AV?$_String_const_iterator@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ': 'str_end',
+    '?begin@' + _S + 'QBE?AV?$_String_const_iterator@DU?$char_traits@D@std@@V?$allocator@D@2@@2@XZ': 'str_begin',
+    '??0exception@std@@QAE@XZ': 'exc_ctor', '??0exception@std@@QAE@ABQBD@Z': 'exc_ctor_cstr',
+    '??0exception@std@@QAE@ABV01@@Z': 'exc_ctor_copy', '??1exception@std@@UAE@XZ': 'exc_dtor',
 }
 
 
@@ -210,6 +229,77 @@ class Harness:
                      else struct.unpack('<I', self.uc.mem_read(t + 4, 4))[0], 0, ret_this=False)
     def crt_str_size(self):
         self._str_op(lambda t: struct.unpack('<I', self.uc.mem_read(t + 20, 4))[0], 0, ret_this=False)
+
+    def crt_str_substr(self):
+        def go(t):
+            ret, pos, n = self._arg(0), self._arg(1), self._arg(2)
+            b = self._str_get(t)
+            self._str_set(ret, b[pos:pos + n] if pos <= len(b) else b'')
+            return ret
+        self._str_op(go, 12, ret_this=False)
+    # (an iterator of VC8's checked library: the string, the character pointer; through a hidden pointer)
+    def _str_iter(self, end):
+        def go(t):
+            res = struct.unpack('<I', self.uc.mem_read(t + 24, 4))[0]
+            data = (t + 4) if res < 16 else struct.unpack('<I', self.uc.mem_read(t + 4, 4))[0]
+            size = struct.unpack('<I', self.uc.mem_read(t + 20, 4))[0]
+            self.uc.mem_write(self._arg(0), struct.pack('<II', t, (data + (size if end else 0)) & 0xFFFFFFFF))
+            return self._arg(0)
+        self._str_op(go, 4, ret_this=False)
+    def crt_str_end(self): self._str_iter(True)
+    def crt_str_begin(self): self._str_iter(False)
+    def crt_CxxThrowException(self):
+        # a throw ends the run (the same way for both versions: compared as both faulted)
+        self.uc.emu_stop(); self.fault = 'threw'
+    def crt_str_find_char(self):
+        def go(t):
+            c, pos = self._arg(0) & 0xFF, self._arg(1)
+            i = self._str_get(t).find(bytes([c]), pos)
+            return 0xFFFFFFFF if i < 0 else i
+        self._str_op(go, 8, ret_this=False)
+    def _str_free(self, fn):
+        try:
+            r = fn()
+        except (ValueError, UcError):
+            self.uc.emu_stop(); self.fault = 'bad std::string'; return
+        self._ret(r)
+    def crt_str_plus_cstr(self):
+        self._str_free(lambda: (self._str_set(self._arg(0), self._str_get(self._arg(1)) + self._cstr(self._arg(2))),
+                                self._arg(0))[1])
+    def crt_str_plus_str(self):
+        self._str_free(lambda: (self._str_set(self._arg(0), self._str_get(self._arg(1)) + self._str_get(self._arg(2))),
+                                self._arg(0))[1])
+    def crt_str_cstr_plus(self):
+        self._str_free(lambda: (self._str_set(self._arg(0), self._cstr(self._arg(1)) + self._str_get(self._arg(2))),
+                                self._arg(0))[1])
+    def crt_str_plus_char(self):
+        self._str_free(lambda: (self._str_set(self._arg(0), self._str_get(self._arg(1)) + bytes([self._arg(2) & 0xFF])),
+                                self._arg(0))[1])
+    def crt_str_ne_cstr(self):
+        self._str_free(lambda: int(self._str_get(self._arg(0)) != self._cstr(self._arg(1))))
+    def crt_str_less(self):
+        self._str_free(lambda: int(self._str_get(self._arg(0)) < self._str_get(self._arg(1))))
+    def crt_str_eq_cstr(self):
+        self._str_free(lambda: int(self._str_get(self._arg(0)) == self._cstr(self._arg(1))))
+    def crt_str_eq_str(self):
+        self._str_free(lambda: int(self._str_get(self._arg(0)) == self._str_get(self._arg(1))))
+    def crt_str_ne_str(self):
+        self._str_free(lambda: int(self._str_get(self._arg(0)) != self._str_get(self._arg(1))))
+
+    # std::exception of MSVCR80: vftable, what, whether to free it (12 bytes); the vftable a fixed fake value
+    EXC_VT = IMPBASE + 0xF000
+    def _exc(self, what, pop):
+        t = self._ecx()
+        self.uc.mem_write(t, struct.pack('<III', self.EXC_VT, what, 1 if what else 0))
+        self._ret(t, pop)
+    def crt_exc_ctor(self): self._exc(0, 0)
+    def crt_exc_ctor_cstr(self):
+        p = struct.unpack('<I', self.uc.mem_read(self._arg(0), 4))[0]
+        self._exc(self.alloc(len(self._cstr(p)) + 1, self._cstr(p) + b'\0') if p else 0, 4)
+    def crt_exc_ctor_copy(self):
+        w = struct.unpack('<I', self.uc.mem_read(self._arg(0) + 4, 4))[0]
+        self._exc(self.alloc(len(self._cstr(w)) + 1, self._cstr(w) + b'\0') if w else 0, 4)
+    def crt_exc_dtor(self): self._ret(self._ecx(), 0)
 
     def crt_strcspn(self):
         a, b = self._cstr(self._arg(0)), set(self._cstr(self._arg(1)))
