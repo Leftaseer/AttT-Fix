@@ -853,6 +853,29 @@ def convert(f, protos, skip, imports, impnames):
                 code = code[:s_] + '%s = ' % v + code[s_:]
             for v in put:
                 code = re.sub(r'\b%s\b' % v, v.replace('extraout_ST0', 'fST0_ret'), code)
+    # EAX a float function left behind, returned (0x4AC940 'return extraout_EAX;' after the terrain height of
+    # 0x473110, which it stores with fstp): no value this function computes, the junk of the callee's last integer
+    # operation; the function returns nothing (a caller passing EAX on carries junk either way)
+    junk_eax = False
+    evs = set(re.findall(r'\bextraout_EAX(?:_\d+)?\b', code))
+    if evs:
+        edecl = re.compile(r'(?m)^[ \t]*(?!return\b)\w+[ \t]+(extraout_EAX(?:_\d+)?);\n')
+        eax_rets = list(re.finditer(r'\breturn (extraout_EAX(?:_\d+)?);', code))
+        ok = len(eax_rets) + len(edecl.findall(code)) == sum(len(re.findall(r'\b%s\b' % v, code)) for v in evs)
+        for m in eax_rets if ok else []:
+            calls = list(re.finditer(r'\bsub_([0-9A-F]{8})\(', code[:m.start()]))
+            pr = protos.get(int(calls[-1].group(1), 16)) if calls else None
+            if not pr or pr[2] not in ('float', 'double', 'float10') or \
+                    re.search(r'[{}]', code[code.index(';', calls[-1].start()):m.start()].rstrip().rstrip('}')):
+                ok = False
+        head = code[:code.find('{')]
+        hm = re.search(r'(?m)^([A-Za-z_][\w ]*?)\s*(\b__(?:cdecl|stdcall|thiscall|fastcall)\s+)?(?:\w+::)*f_[0-9A-F]{8}\(',
+                       head)
+        if ok and eax_rets and hm:
+            code = edecl.sub('', code)
+            code = re.sub(r'\breturn extraout_EAX(?:_\d+)?;', 'return;', code)
+            code = code[:hm.start(1)] + 'void' + code[hm.end(1):]
+            junk_eax = True
     # the 64-bit result of _ftol handed on whole (0x44A4D0 'return CONCAT44(extraout_EDX,(int)fVar1)': the
     # injection decomp_ftol_int keeps EAX only): the float truncated to 64 bits, EDX:EAX as _ftol leaves them
     if 'decomp_ftol_int' in code:
@@ -1223,7 +1246,7 @@ def convert(f, protos, skip, imports, impnames):
     if ret.startswith('undefined') and not re.search(r'\breturn\s+[^;\s]', re.sub(r'/\*.*?\*/', '', body, flags=re.S)):
         ret = 'void'               # the decompiler guessed a result that the function never sets
     # (a function that only throws never returns: what its callers do with EAX after it is never run, 0x4488D0)
-    if ret == 'void' and a in eax_used and a not in never_returns:
+    if ret == 'void' and a in eax_used and a not in never_returns and not junk_eax:
         if not FORCE[0]:
             return None, 'callers use EAX, the decompiler found no result'
         NOTES.append('callers use EAX, the decompiler found no result')
