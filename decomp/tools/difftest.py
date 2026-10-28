@@ -519,6 +519,11 @@ class Harness:
     def crt_GetTickCount(self): self._ret(1234567)
     def crt_timeGetTime(self): self._ret(1234567)
     def crt_GetKeyState(self): self._ret(0, 4)          # (no key down)
+    def crt_lstrlenW(self):
+        a, n = self._arg(0), 0
+        while a and self.uc.mem_read(a + 2 * n, 2) != b'\0\0':
+            n += 1
+        self._ret(n, 4)
     def crt_GetAsyncKeyState(self): self._ret(0, 4)
 
 
