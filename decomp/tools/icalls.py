@@ -1256,7 +1256,8 @@ sizes = {a: s_ for a, s_, _e in funcs}
 infer_direct_pops()
 with open(sys.argv[3], 'w') as f:
     f.write('# call address\tfunction\tecx set (1/0)\tadd esp after (-1: none)\tpushes right before'
-            '\tbytes the callee pops (ESP balance, -1: unknown)\n')
+            '\tbytes the callee pops (ESP balance, -1: unknown)\targument dwords pushed since the call before (-1: unknown)'
+            '\tESP after the call irrelevant to the decompiled code (1/0)\n')
     n = solved = byvt = ntail = bym = byimp = bynone = bycls = 0
     tails = []
     for start, size, ecx_in in funcs:
@@ -1343,9 +1344,23 @@ with open(sys.argv[3], 'w') as f:
                         STATS['field of this'] += 1
         known = callee_pops(code, start, [r[0] for r in rows], cleanup, {**fixed, **nopush, **clsfix},
                             {r[0]: 4 * r[6] for r in rows if r[6] is not None})
+        # columns 7 and 8: the argument dwords pushed since the call before (-1 unknown), and whether ESP after
+        # the call matters to the decompiled code (0: an EBP frame, or nothing ESP-relative after it): where it
+        # does not, a call that restores ESP is right whatever the callee pops (ghidra/ICallOverride.java,
+        # gh_call_any of rebuild/rt_support.c)
+        ebp_frame = any(x.mnemonic == 'mov' and x.op_str == 'ebp, esp' for x in ins[:8])
+        def esp_safe(a):
+            if ebp_frame:
+                return 1
+            for x in ins:
+                if x.address > a and not x.mnemonic.startswith(('push', 'pop')) and any(
+                        o.type == x86.X86_OP_MEM and o.mem.base == ESP and o.mem.disp != 0 for o in x.operands):
+                    return 0
+            return 1
+        extra = {r[0]: '\t%d\t%d' % (-1 if r[6] is None else r[6], esp_safe(r[0])) for r in rows}
         for a, ecx, cl, pushes, off, outstanding, _ in rows:
             if a in fixed:
-                f.write('%08X\t%08X\t%d\t%d\t%d\t%d\n' % (a, start, ecx, cl, pushes, fixed[a] if cl < 0 else 0))
+                f.write('%08X\t%08X\t%d\t%d\t%d\t%d%s\n' % (a, start, ecx, cl, pushes, fixed[a] if cl < 0 else 0, extra[a]))
                 n += 1
                 byimp += 1
                 continue
@@ -1368,7 +1383,7 @@ with open(sys.argv[3], 'w') as f:
                 bym += 1
             if a in nopush:
                 bynone += 1
-            f.write('%08X\t%08X\t%d\t%d\t%d\t%d\n' % (a, start, ecx, cl, pushes, pop))
+            f.write('%08X\t%08X\t%d\t%d\t%d\t%d%s\n' % (a, start, ecx, cl, pushes, pop, extra[a]))
             n += 1
 print('%d indirect calls (%d of them tail jumps), the pop of %d callee-pop ones from the ESP balance, %d from the '
       'vftables (%d offsets agree), %d from the class of this, %d measured, %d imports called through a register, %d '

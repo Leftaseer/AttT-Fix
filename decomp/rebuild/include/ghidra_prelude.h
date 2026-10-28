@@ -126,6 +126,9 @@ static inline unsigned int gh_u4(unsigned int x) { return x; }
 static inline unsigned long long gh_d2u8(double x) { unsigned long long r; __builtin_memcpy(&r, &x, 8); return r; }
 static inline unsigned long long gh_u8(unsigned long long x) { return x; }
 #define GH_BITS4(x) _Generic((x), float: gh_f2u4, double: gh_d2u4, long double: gh_d2u4, default: gh_u4)(x)
+/* an indirect call whose callee pop is unknown, ESP restored after it (rt_support.c; tools/autodecomp.py) */
+unsigned long long __cdecl gh_call_any(void *fn, void *ecx, unsigned int n, const unsigned int *args);
+double __cdecl gh_call_any_f(void *fn, void *ecx, unsigned int n, const unsigned int *args);
 #define GH_BITS8(x) _Generic((x), float: gh_d2u8, double: gh_d2u8, long double: gh_d2u8, default: gh_u8)(x)
 #define FLOOR(x) __builtin_floor(x)
 #define CEIL(x) __builtin_ceil(x)

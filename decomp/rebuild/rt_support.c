@@ -36,3 +36,14 @@ __asm__(".globl __aulldiv\n__aulldiv:\n\tjmp _rt_aulldiv@16\n"
 FPU1(_CIsin) FPU1(_CIcos) FPU1(_CItan) FPU1(_CIsqrt) FPU1(_CIatan) FPU1(_CIasin) FPU1(_CIacos)
 FPU1(_CIexp) FPU1(_CIlog) FPU1(_CIlog10) FPU1(_CIsinh) FPU1(_CIcosh) FPU1(_CItanh)
 FPU2(_CIpow) FPU2(_CIatan2) FPU2(_CIfmod)
+
+/* gh_call_any(fn, ecx, n, args): an indirect call whose callee pop the machine code does not tell (tools/icalls.py
+ * found the decompiled code independent of ESP after it): the n dwords of args pushed, ECX set, the call made,
+ * then ESP restored whatever the callee popped.  EDX:EAX and ST0 come back as the callee left them (gh_call_any_f
+ * is the same code declared returning a double).  tools/autodecomp.py writes the calls. */
+__asm__(".globl _gh_call_any\n.globl _gh_call_any_f\n_gh_call_any:\n_gh_call_any_f:\n"
+        "\tpushl %ebp\n\tmovl %esp, %ebp\n\tpushl %esi\n\tpushl %edi\n"
+        "\tmovl 16(%ebp), %ecx\n\tmovl 20(%ebp), %esi\n"
+        "1:\ttestl %ecx, %ecx\n\tjz 2f\n\tdecl %ecx\n\tpushl (%esi,%ecx,4)\n\tjmp 1b\n"
+        "2:\tmovl 12(%ebp), %ecx\n\tcalll *8(%ebp)\n"
+        "\tleal -8(%ebp), %esp\n\tpopl %edi\n\tpopl %esi\n\tpopl %ebp\n\tret\n");

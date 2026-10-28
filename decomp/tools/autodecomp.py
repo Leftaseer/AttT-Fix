@@ -182,8 +182,8 @@ def stack_depths(a, relative=False):
                     pop = import_pops.get(op.mem.disp)
                 else:
                     ic = icalls.get(p)
-                    pop = None if ic is None else 4 * ic[1] if ic[0] in ('__stdcall', '__thiscall', '__fastcall') \
-                        else 0
+                    pop = None if ic is None or len(ic) > 3 else 4 * ic[1] if ic[0] in ('__stdcall', '__thiscall',
+                                                                                    '__fastcall') else 0
                     if pop is None and op.type == cx.X86_OP_REG:
                         pop = reg_import_pop(code, p, op.reg)
                     if pop is None:
@@ -504,7 +504,8 @@ def rewrite_icalls(code, floats=None):
         a = int(m.group(1), 16)
         if a not in icalls:
             return None, 'indirect call without a prototype'
-        cc, nstack, ret = icalls[a]
+        cc, nstack, ret = icalls[a][:3]
+        anyp = len(icalls[a]) > 3
         close = matching(code, m.start())
         k = close + 1
         while k < len(code) and code[k] in ' \n':
@@ -527,6 +528,15 @@ def rewrite_icalls(code, floats=None):
         alone = re.search(r'[;{}]\s*$', code[:m.start()]) and re.match(r'\s*;', code[end + 1:])
         if ret == 'void' and not alone:
             ret = 'undefined4'
+        if anyp:
+            # (its pop unknown: through gh_call_any, which restores ESP; the arguments as dwords)
+            this = args[0] if cc == '__thiscall' else '0'
+            rest = args[1:] if cc == '__thiscall' else args
+            arr = '(const unsigned int[]){%s}' % ', '.join('GH_BITS4(%s)' % x for x in rest) if rest else '0'
+            fn = 'gh_call_any_f' if ret in ('float', 'double') else 'gh_call_any'
+            code = code[:m.start()] + '((%s)%s((void *)(%s), (void *)(%s), %d, %s))' % (
+                ret, fn, callee, this, len(rest), arr) + code[end + 1:]
+            continue
         code = code[:m.start()] + '((%s (%s *)(%s))(%s))(%s)' % (
             ret, cc, ', '.join(params) or 'void', callee, ', '.join(args)) + code[end + 1:]
     return code, None
@@ -1618,15 +1628,15 @@ def main():
     if a.icalls:
         for l in open(a.icalls):
             q = l.rstrip('\n').split('\t')
-            if l[0] != '#' and len(q) == 4:
-                icalls[int(q[0], 16)] = (q[1], int(q[2]), q[3])
+            if l[0] != '#' and len(q) in (4, 5):
+                icalls[int(q[0], 16)] = (q[1], int(q[2]), q[3]) + (('any',) if len(q) == 5 and q[4] == 'any' else ())
         # (the machine-code facts next to it, tools/icalls.py: pops of indirect calls the decompiler made no
         # CALLIND of, so no override: 'call ebp' of an import kept in EBP, 0x5302E0)
         facts = os.path.join(os.path.dirname(a.icalls), os.path.basename(a.icalls).replace('_icall_overrides', '_icalls'))
         if facts != a.icalls and os.path.exists(facts):
             for l in open(facts):
                 q = l.rstrip('\n').split('\t')
-                if l[0] != '#' and len(q) == 6:
+                if l[0] != "#" and len(q) >= 6:
                     icall_pops[int(q[0], 16)] = 0 if int(q[3]) >= 0 else int(q[5]) if int(q[5]) >= 0 else None
     ex = a.functions.replace('_functions.tsv', '_eaxin.tsv')
     if os.path.exists(ex):

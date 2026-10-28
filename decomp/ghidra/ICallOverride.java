@@ -21,7 +21,7 @@ import java.io.*;
 import java.util.*;
 
 public class ICallOverride extends GhidraScript {
-    static class Fact { int ecx, cleanup, pushes, pop; }
+    static class Fact { int ecx, cleanup, pushes, pop, args = -1, espsafe = 0; }
     static class Site { long call; int nstack; Set<String> regs = new TreeSet<>(); String out; }
 
     @Override
@@ -36,6 +36,7 @@ public class ICallOverride extends GhidraScript {
                 Fact f = new Fact();
                 f.ecx = Integer.parseInt(q[2]); f.cleanup = Integer.parseInt(q[3]); f.pushes = Integer.parseInt(q[4]);
                 f.pop = q.length > 5 ? Integer.parseInt(q[5]) : -1;
+                if (q.length > 7) { f.args = Integer.parseInt(q[6]); f.espsafe = Integer.parseInt(q[7]); }
                 long a = Long.parseLong(q[0], 16);
                 facts.put(a, f);
                 Function fn = getFunctionContaining(toAddr(a));
@@ -100,14 +101,19 @@ public class ICallOverride extends GhidraScript {
                     Fact f = facts.get(s.call);
                     String why = null, cc;
                     int nstack = 0;
+                    boolean any = false;
                     if (f == null) why = "no machine-code facts";
                     else if (s.out.equals("other")) why = "float or wide result";
                     // the stack arguments come from the machine code: the decompiler's count for a call it has no
                     // prototype of is a guess (it takes the pushes of a later call's arguments as well)
                     else if (f.cleanup >= 0) nstack = f.cleanup / 4;
                     else if (f.pop >= 0) nstack = f.pop / 4;
+                    // the pop unknown, but nothing after the call depends on ESP and the arguments are the dwords
+                    // pushed since the call before: called through gh_call_any, which restores ESP ('any')
+                    else if (f.espsafe == 1 && f.args >= 0) { nstack = f.args; any = true; }
                     else why = "stack arguments unknown";
                     cc = f == null || f.cleanup >= 0 ? "__cdecl" : f.ecx == 1 ? "__thiscall" : "__stdcall";
+                    if (any) cc = f.ecx == 1 ? "__thiscall" : "__stdcall";
                     s.nstack = nstack;
                     if (why == null) {
                         if (why == null) {
@@ -126,7 +132,7 @@ public class ICallOverride extends GhidraScript {
                             def.setCallingConvention(cc);
                             try {
                                 HighFunctionDBUtil.writeOverride(fn, ca, def);
-                                w.printf("%08X\t%s\t%d\t%s%n", s.call, cc, s.nstack, s.out);
+                                w.printf("%08X\t%s\t%d\t%s%s%n", s.call, cc, s.nstack, s.out, any ? "\tany" : "");
                                 written++;
                                 continue;
                             } catch (Exception e) { why = "override failed: " + e.getMessage(); }
