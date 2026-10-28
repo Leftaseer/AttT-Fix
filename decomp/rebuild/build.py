@@ -27,6 +27,16 @@ GAMES = {0x475EABAF: 'attt', 0x4883FB4F: 'valk'}
 REG_ORDER = ['ECX', 'EAX', 'EDX', 'EBX', 'ESI', 'EDI']
 
 
+
+_msvcp80 = []
+
+
+def msvcp80_exports():
+    """the names MSVCP80.dll exports (msvcp80_exports.txt)"""
+    if not _msvcp80:
+        _msvcp80.append(set(l.strip() for l in open(os.path.join(HERE, 'msvcp80_exports.txt')) if not l.startswith('#')))
+    return _msvcp80[0]
+
 def run(cmd, **kw):
     t0 = time.time()
     r = subprocess.run(cmd, capture_output=True, text=True, **kw)
@@ -608,6 +618,8 @@ def main():
             have[n] = have[base]
             continue
         dll = extra_map.get(n) or extra_map.get(base or '') or ('MSVCP80.dll' if 'std@@' in n else None)
+        if dll == 'MSVCP80.dll' and n not in msvcp80_exports():
+            sys.exit('new code imports %s, which MSVCP80.dll does not export (a typo in the decorated name?)' % n)
         if not dll:
             sys.exit('new code imports %s: add "%s <dll>" to rebuild/imports_extra.txt' % (n, n))
         if base and base not in have:      # 'name@N == name' refers to an export 'name' of the .def: add it too
