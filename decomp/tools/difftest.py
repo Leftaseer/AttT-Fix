@@ -518,6 +518,8 @@ class Harness:
         self.uc.mem_write(self._arg(0), struct.pack('<Q', 123456789012)); self._ret(1, 4)
     def crt_GetTickCount(self): self._ret(1234567)
     def crt_timeGetTime(self): self._ret(1234567)
+    def crt_GetKeyState(self): self._ret(0, 4)          # (no key down)
+    def crt_GetAsyncKeyState(self): self._ret(0, 4)
 
 
     # operator new/delete, more of the C runtime
