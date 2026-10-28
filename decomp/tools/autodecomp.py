@@ -1311,6 +1311,27 @@ def convert(f, protos, skip, imports, impnames):
         if not FORCE[0]:
             return None, frame_names
         NOTES.append(frame_names)
+    # the stack parameters of a function that hands out the address of one: views of the incoming argument area,
+    # like the frame's variables (0x48F9D0 passes &param_1 to 0x48B330, which writes an 8-byte iterator over
+    # param_1 and param_2; as separate C objects clang kept param_2 a constant and the list walk went wrong)
+    pnames = [re.findall(r'\w+', p)[-1] for p in params]
+    stackp = [k for k, st in enumerate(pr[5]) if st == 'stack'] if len(pr[5]) == len(params) else []
+    if stackp and any(re.search(r'&\s*\(?\s*%s\b' % pnames[k], body) for k in stackp):
+        if custom or cc not in ('__cdecl', '__stdcall', '__thiscall'):
+            # (a convention of its own goes through glue that lays the arguments out anew)
+            if not FORCE[0]:
+                return None, 'address of a stack parameter in a function of a custom convention'
+            NOTES.append('address of a stack parameter in a function of a custom convention')
+        off, defs = 0, []
+        for k in stackp:
+            t = params[k][:params[k].rfind(pnames[k])].strip()
+            defs.append('#define %s (*(%s *)(gh_args + %d))' % (pnames[k], t, off))
+            params[k] = '%s gh_arg%d' % (t, k)
+            off += slot_bytes(t)
+        head = '%s %s f_%08X(%s)' % (def_ret(ret), cc_word(cc, custom), a, ', '.join(params))
+        body = body.replace('{\n', '{\n%s\n  unsigned char *gh_args = (unsigned char *)__builtin_frame_address(0) + 8;\n'
+                            % '\n'.join(defs), 1)
+        frame_names = list(frame_names) + [pnames[k] for k in stackp]
     # labels keep their names (the address substitution below is for LAB_ used as a value)
     body = re.sub(r'\bgoto\s+(LAB_[0-9a-fA-F]{8})\b', r'goto L\1', body)
     body = re.sub(r'^(\s*)(LAB_[0-9a-fA-F]{8}):', r'\1L\2:', body, flags=re.M)

@@ -310,7 +310,7 @@ def main():
                     if r1[kx] != r2[kx]:
                         diff.append(kx)
                 if rk == 'eax' and r1['eax'] != r2['eax']: diff.append('eax %08X %08X' % (r1['eax'], r2['eax']))
-                if rk == 'eax:edx' and (r1['eax'], r1['edx']) != (r2['eax'], r2['edx']): diff.append('eax:edx')
+                if rk == 'eax:edx' and (r1['eax'], r1['edx']) != (r2['eax'], r2['edx']): diff.append('eax:edx %08X:%08X %08X:%08X' % (r1['edx'], r1['eax'], r2['edx'], r2['eax']))
                 if rk == 'al' and (r1['eax'] & 0xFF) != (r2['eax'] & 0xFF): diff.append('al')
                 if rk == 'ax' and (r1['eax'] & 0xFFFF) != (r2['eax'] & 0xFFFF): diff.append('ax')
                 if rk == 'st0' and r1['st0'] != r2['st0'] and not (r1['st0'] != r1['st0'] and r2['st0'] != r2['st0']):
