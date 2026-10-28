@@ -1360,11 +1360,14 @@ def convert(f, protos, skip, imports, impnames):
     pnames = [re.findall(r'\w+', p)[-1] for p in params]
     stackp = [k for k, st in enumerate(pr[5]) if st == 'stack'] if len(pr[5]) == len(params) else []
     if stackp and any(re.search(r'&\s*\(?\s*%s\b' % pnames[k], body) for k in stackp):
-        if custom or cc not in ('__cdecl', '__stdcall', '__thiscall'):
-            # (a convention of its own goes through glue that lays the arguments out anew)
+        if not custom and cc not in ('__cdecl', '__stdcall', '__thiscall'):
             if not FORCE[0]:
                 return None, 'address of a stack parameter in a function of a custom convention'
             NOTES.append('address of a stack parameter in a function of a custom convention')
+        if custom:
+            # (a convention of its own: build.py's adapter pushes the register arguments before copies of the
+            # stack ones and calls the C function as __cdecl, all of them its stack arguments in order)
+            stackp = list(range(len(params)))
         off, defs = 0, []
         for k in stackp:
             t = params[k][:params[k].rfind(pnames[k])].strip()
