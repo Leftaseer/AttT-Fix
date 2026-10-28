@@ -71,6 +71,7 @@ STRUCT_SIZE = {}    # type name -> its size (the types header's static assertion
 TRUNCATED = {}     # structure -> offset of the pad array its declaration ends in (members cut short)
 ONE_BYTE = set()    # classes the demangler made 1-byte placeholders (std::string, its _Size_type_nosscl)
 noreturn = set()    # functions without a ret or a jump out (they throw: 0x493740): no ret pop to know
+never_returns = set()   # the same whatever pop they were given (0x4488D0, a vftable slot's, throws)
 # dwords of the objects the decompiler addresses in the outgoing arguments (MSVC 8 std::string: 28 bytes)
 OBJ_DWORDS = {'_Demangler_std_basic_string_char_struct_std__char_traits_char__class_std__allocator_char___': 7,
               'float': 1, 'undefined4': 1, 'int': 1, 'uint': 1, 'undefined8': 2, 'double': 2, 'longlong': 2}
@@ -1164,7 +1165,7 @@ def convert(f, protos, skip, imports, impnames):
     if ret.startswith('undefined') and not re.search(r'\breturn\s+[^;\s]', re.sub(r'/\*.*?\*/', '', body, flags=re.S)):
         ret = 'void'               # the decompiler guessed a result that the function never sets
     # (a function that only throws never returns: what its callers do with EAX after it is never run, 0x4488D0)
-    if ret == 'void' and a in eax_used and a not in noreturn:
+    if ret == 'void' and a in eax_used and a not in never_returns:
         if not FORCE[0]:
             return None, 'callers use EAX, the decompiler found no result'
         NOTES.append('callers use EAX, the decompiler found no result')
@@ -1610,7 +1611,7 @@ def main():
         except Exception:
             pass
     for fa, (_, pop) in machine.items():
-        if pop is not None or not fsize.get(fa):
+        if not fsize.get(fa):
             continue
         try:
             ins = list(md.disasm(pe.read(fa, fsize[fa]), fa))
@@ -1619,7 +1620,9 @@ def main():
         if ins and sum(i.size for i in ins) == fsize[fa] and not any(
                 i.mnemonic.startswith('ret') or (i.mnemonic == 'jmp' and not (
                     i.operands[0].type == cx.X86_OP_IMM and fa <= i.operands[0].imm < fa + fsize[fa])) for i in ins):
-            noreturn.add(fa)
+            never_returns.add(fa)
+            if pop is None:
+                noreturn.add(fa)
     for fa in machine:
         try:
             b = pe.read(fa, 6)
