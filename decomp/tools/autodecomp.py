@@ -316,6 +316,29 @@ def outgoing_mismatch(a, code):
         if calls and not any(len(x) > cregs + ck and any(re.search(r'\b%s\b' % n, x[cregs + ck]) for n in names)
                              for x in calls):
             return 'argument of %08X built in the outgoing arguments, passed as another value' % cc
+        # the object's other dwords too, as many as were reserved for it ('sub esp, 0xc; mov ecx, esp; call
+        # 0x575300; ... call 0x574ED0' of 0x575400: the decompiler passed its first two dwords and a stale
+        # pointer for the third, and 0x574ED0 threw CGameException when Raphael cast a triple fireball)
+        # (the 'sub esp, N' that left ESP at the slot, wherever it is: 0x575400 reserves before a branch)
+        subs = {x.operands[1].imm for x in ins if x.mnemonic == 'sub' and x.op_str.startswith('esp, ') and
+                x.operands[1].type == cx.X86_OP_IMM and x.address in dm and dm[x.address] - x.operands[1].imm == slot}
+        nd = subs.pop() // 4 if len(subs) == 1 else 1
+        for x in calls:
+            for d in range(1, nd):
+                if len(x) <= cregs + ck + d:
+                    break
+                want = set(names)
+                for n in names:
+                    m = re.fullmatch(r'(local|\w*Stack)_([0-9a-f]+)', n)
+                    if m and int(m.group(2), 16) > 4 * d:
+                        want.add(r'(?:local|\w*Stack)_%x' % (int(m.group(2), 16) - 4 * d))
+                    m = re.fullmatch(r'(?:stack0x|in_stack_)(ff[0-9a-f]{6})', n)
+                    if m:
+                        want.update(['(?:stack0x|in_stack_)%08x' % (int(m.group(1), 16) + 4 * d)])
+                if not any(re.search(r'\b%s\b' % w, x[cregs + ck + d]) for w in want):
+                    if os.environ.get('AD_DEBUG'):
+                        print('outgoing %08X: dword %d of the object for %08X is %s' % (a, d, cc, x[cregs + ck + d]))
+                    return 'object built in the outgoing arguments for %08X, a dword passed as another value' % cc
     return None
 
 
