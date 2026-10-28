@@ -343,6 +343,7 @@ def main():
         return obj
     objs = pmap(compile_src, files)
     native = set()          # DECOMP addresses that are already addresses of this game (auto-decompiled code)
+    raw_fixed = set()       # src/fixed functions marked '/* @raw */': naked code taking the original's place as is
     custom_auto = {}        # auto functions written as cdecl with the register parameters first
     if a.auto:
         allow = None
@@ -399,6 +400,8 @@ def main():
                 open(src, 'w', encoding='utf-8').write(head + ''.join(keep))
             srcs.append((fn, src))
         for ad, fx in fixed.items():
+            if '/* @raw */' in open(fx, encoding='utf-8').read():
+                raw_fixed.add(ad)       # (a naked function: original callers jump straight to it, no adapter)
             m = re.search(r'/\* @conv (\S+) (\d+) \*/', open(fx, encoding='utf-8').read())
             if m:
                 size, old, oldpop, clob = funcs.get(ad, (0, [], 0, {'EAX', 'ECX', 'EDX'}))
@@ -459,6 +462,9 @@ def main():
             sys.exit('%s: %s: the Valkyrie match of %08X is only "%s"; check it and mark it "manual" in '
                      'symbols/attt2valk.tsv, or exclude the function with #if DECOMP_GAME_ATTT'
                      % (fn, name, addr, fhow.get(addr)))
+        if ga in raw_fixed:
+            repl.append((ga, sym))
+            continue
         size, regs, retpop, clob = funcs.get(ga, (0, [], 0, {'EAX', 'ECX', 'EDX'}))
         if addr in STACK_ONLY:
             regs = []
