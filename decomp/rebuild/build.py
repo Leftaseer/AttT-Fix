@@ -483,6 +483,10 @@ def main():
             nstack = nparams
             direct = (conv == 'stdcall' and not regs and retpop == 4 * nstack) or \
                      (conv == 'fastcall' and set(regs) <= {'ECX', 'EDX'} and retpop == 4 * max(0, nstack - 2))
+        if fn.startswith(fixed_dir) and conv in ('thiscall', 'stdcall') and retpop != 4 * nstack:
+            # (the adapter counts parameters: one passing a structure by value would be taken as one dword)
+            sys.exit('%s: %s pops %d bytes but has %d stack parameters; write every stack parameter as a dword'
+                     % (fn, name, retpop, nstack))
         if direct and not preserve:
             repl.append((ga, sym))
             continue
