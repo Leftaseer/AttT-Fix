@@ -12,7 +12,7 @@ DECOMP_C void __thiscall sub_004EE630(void *g, float t, void *unit);
 DECOMP_C unsigned int __cdecl sub_004EE240(void *g, void *eax, int a);
 DECOMP_C void *__thiscall sub_004F5AE0(void *self, void *key);
 DECOMP_C void __thiscall sub_004F1A20(void *self, void *g);
-DECOMP_C void __thiscall sub_004F24C0(void *map, void *key, char *node);
+DECOMP_C void __thiscall sub_004F24C0(void *map, char **out, char *node);   /* erase: out = the next node */
 DECOMP_C void (__thiscall *imp_00607334)(void *, const void *) __asm__("__imp_??0?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV01@@Z");
 DECOMP_C void (__thiscall *imp_00607330)(void *) __asm__("__imp_??1?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@XZ");
 DECOMP_C int (__cdecl *imp_00607210)(const void *, const void *) __asm__("__imp_??$?8DU?$char_traits@D@std@@V?$allocator@D@1@@std@@YA_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@0@0@Z");
@@ -32,7 +32,7 @@ unsigned char __thiscall f_004F5BF0(void *this, void *unit)
 {
     char *s = (char *)this;
     char *node, *g;
-    char **head, **e;
+    char **head, **e, *next;
     sub_004EDF50(s + 0x54, &node, &unit);
     if (node == *(char **)(s + 0x5c)) {
         unsigned int name[7];
@@ -58,7 +58,7 @@ unsigned char __thiscall f_004F5BF0(void *this, void *unit)
         return 1;
     if (!(char)sub_004EE240(g, e, 0))
         sub_004F1A20(sub_004F5AE0(s + 0x7c, &unit), g);
-    sub_004F24C0(s + 0x54, &unit, node);
+    sub_004F24C0(s + 0x54, &next, node);   /* the original passes the arg slot and reads the unit kept in ESI */
     sub_004F4100(this, unit);
     return 1;
 }
