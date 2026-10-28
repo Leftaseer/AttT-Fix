@@ -762,10 +762,11 @@ def convert(f, protos, skip, imports, impnames):
                               lambda m: '((unsigned char *)%s)[%d]' % (t, int(m.group(1)) * STRUCT_SIZE[v] +
                                                                      int(m.group(2), 16))
                               if int(m.group(2), 16) >= TRUNCATED[v] else m.group(0), code)
-    # a LARGE_INTEGER as a number ('(longlong)local_8', 0x4E41C0): its QuadPart
+    # a LARGE_INTEGER as a number ('(longlong)local_8', 0x4E41C0): its 8 bytes as one (not QuadPart, a LONGLONG
+    # the types header has as double: the timer's frequency read as a double made the menu flicker)
     for v in re.findall(r'(?m)^[ \t]+_winnt_h_LARGE_INTEGER\s+(\w+);$', code):
         code = re.sub(r'\((?:u?longlong|ulonglong|float10|double)\)%s\b(?!\.)' % v,
-                      lambda m: m.group(0).replace(v, v + '.QuadPart'), code)
+                      lambda m: m.group(0).replace(v, '*(longlong *)&' + v), code)
     # a switch on a pointer (0x54C6C0's 'switch(param_1)' of an undefined4 *, 0x5952A0's of an HWND): on its value
     for m in set(re.findall(r'\bswitch\((\w+)\)', code)):
         if re.search(r'(?:\*\s*|\b_WinDef_h_H[A-Z]+\s+)%s\s*[;,)]' % m, code[:code.find(')', code.find('{'))]) or \
@@ -829,12 +830,26 @@ def convert(f, protos, skip, imports, impnames):
         m = re.search(r'\b%s = \((\w+) \*\)' % v, code)
         if m and re.search(r'(\*%s\b|\b%s\[)' % (v, v), code):
             code = re.sub(r'(?m)^  undefined4 %s;$' % v, '  %s *%s;' % (m.group(1), v), code)
-    # a register the caller never set, handed as an argument the callee's body never reads (0x580750
-    # 'sub_00580450(this,unaff_EDI)': 0x580450 pops nothing, its param_1 is a phantom): 0
+    # a register the caller never set, handed as an argument the callee never reads: 0.  Never read by the
+    # machine code, not only by the decompiled body (0x42DEE0 'sub_0042DC20(..., unaff_EDI)': the decompiler
+    # had the call's two vectors a dword off, lost EDI, the x of the second, and the Furies' spears were not drawn):
+    # the parameter's dword at or past every stack slot the callee touches (tools/stackparams.py, exact ones)
     if re.search(r'\bunaff_E[A-Z]{2}\b|\bunaff_retaddr\b', code):
         out = []; last = 0
         for m in re.finditer(r'\b(?:sub|f)_([0-9A-F]{8})\(', code):
-            un = unused_params.get(int(m.group(1), 16))
+            ca = int(m.group(1), 16)
+            un = set(unused_params.get(ca, ()))
+            cp = protos.get(ca)
+            if un and cp and len(cp[5]) == len(cp[3]) and ca in stack_slots:
+                off, keep = 0, set()
+                for n, ((t, _), st) in enumerate(zip(cp[3], cp[5])):
+                    if st == 'stack':
+                        if n in un and off // 4 >= stack_slots[ca]:
+                            keep.add(n)
+                        off += slot_bytes(t)
+                un = keep
+            else:
+                un = set()
             if not un or m.end() < last:
                 continue
             j = m.end() - 1; e = matching(code, j)
