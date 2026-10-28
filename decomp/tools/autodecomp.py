@@ -258,10 +258,13 @@ def outgoing_mismatch(a, code):
             out.append(split_args(code[cm.end():q - 1]))
         return out
     for k, i in enumerate(ins):
-        if not (i.mnemonic == 'mov' and i.op_str.endswith(', esp') and
+        # ('lea reg, [esp + d]' as well: an object further up the outgoing arguments)
+        lea = i.mnemonic == 'lea' and len(i.operands) == 2 and i.operands[1].mem.base == cx.X86_REG_ESP and \
+            not i.operands[1].mem.index and i.operands[1].mem.disp >= 0
+        if not ((i.mnemonic == 'mov' and i.op_str.endswith(', esp') or lea) and
                 i.op_str.split(',')[0] in ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi')) or i.address not in dm:
             continue
-        reg, slot = i.op_str.split(',')[0], dm[i.address]
+        reg, slot = i.op_str.split(',')[0], dm[i.address] + (i.operands[1].mem.disp if lea else 0)
         builder = consumer = None
         pushes = 0
         for j in ins[k + 1:k + 24]:
