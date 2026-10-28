@@ -1,7 +1,7 @@
 /* 0x004AE3E0: draws the meshes in the list at +0x2428 (when +0x242C, its size, is not 0): stage 0 gets the texture
  * of +0x2430 (vf28); each visible mesh (vf5C) sets the render states of +0x2434 by its flags (+0x248: 1 0x00435760,
  * 2 0x004357F0), its own texture at stage 1 (+0x244), D3DRS_TEXTUREFACTOR (+0x234), and per part (+0x208, 12 bytes
- * each, +0x20C of them) the vertex declaration 0x006CA2DC, the world transform (+0x140) and an indexed triangle list
+ * each, +0x20C of them) the index buffer 0x006CA2DC, the world transform (+0x140) and an indexed triangle list
  * (base vertex, vertex count, triangle count). The iterator and the end are the original's function statics */
 /* @conv ECX 0 */
 #include "auto_pre.h"
