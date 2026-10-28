@@ -26,6 +26,8 @@ unsigned long long __stdcall rt_aullrem(unsigned long long n, unsigned long long
 }
 __asm__(".globl __aulldiv\n__aulldiv:\n\tjmp _rt_aulldiv@16\n"
         ".globl __aullrem\n__aullrem:\n\tjmp _rt_aullrem@16\n");
+/* _chkstk for frames over a page (EAX the size; it probes and lowers ESP itself): the original's (0x5E4080) */
+__asm__(".globl __chkstk\n__chkstk:\n\tjmp _d_005E4080\n");
 
 /* The x87 intrinsics of the MSVC runtime take their arguments on the FPU stack (two: the first in ST1) and return
  * in ST0; generated code calls them through these (tools/autodecomp.py, ghidra/FpuIntrinsics.java). */
