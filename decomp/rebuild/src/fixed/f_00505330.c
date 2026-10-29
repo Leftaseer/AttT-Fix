@@ -19,7 +19,7 @@ DECOMP_C int __thiscall sub_004220A0(void *self);
 DECOMP_C void *__cdecl sub_0057B080(void *self, unsigned int ebx, void *out, const char *key);
 DECOMP_C void __thiscall sub_0051D460(void *self, unsigned int c);
 DECOMP_C float __thiscall sub_0057AC90(void *self, int i);
-DECOMP_C unsigned int *__thiscall sub_004FCB40(void *self, unsigned int *out, const int *pos);
+DECOMP_C void __thiscall sub_004FCB40(void *self, unsigned int *out, const int *pos);   /* fills out only */
 DECOMP_C void __thiscall sub_00511B30(void *self, unsigned int cell);
 DECOMP_C void __cdecl sub_00402A70(void *L, int idx);               /* lua_settop */
 DECOMP_C void __thiscall sub_00427820(void *self);
@@ -77,7 +77,8 @@ void __thiscall f_00505330(void *this)
             xy[0] = (int)(long long)sub_0057AC90(&pos, 1);
             xy[1] = (int)(long long)sub_0057AC90(&pos, 2);
             c = (*(char ***)(ARMY(i) + 0x58))[j];
-            sub_00511B30(c, *sub_004FCB40(&base, &cell, xy));
+            sub_004FCB40(&base, &cell, xy);
+            sub_00511B30(c, cell);
             sub_004220A0(&pos);
             c = (*(char ***)(ARMY(i) + 0x58))[j];
             *(unsigned int *)(c + 0x78) = *(unsigned int *)d_00608974;
