@@ -13,7 +13,7 @@ DECOMP_C void *__thiscall sub_0043BBC0(void *self);
 DECOMP_C V2_4419A0 *__thiscall sub_004205A0(V2_4419A0 *self, float x, float y);
 DECOMP_C void __thiscall sub_0047F760(void *self, void *pt);
 DECOMP_C void __thiscall sub_004412E0(void *self, int x0, int z0, int x1, int z1);
-DECOMP_C unsigned char __thiscall sub_00480200(void *self);
+DECOMP_C unsigned char __cdecl sub_00480200(void *self, unsigned int eax);
 DECOMP_C char **__cdecl sub_004C2F40(void);
 DECOMP_C char **__stdcall sub_005AD6C0(char **next, char **prev, void *val);
 DECOMP_C void __thiscall sub_004E0EF0(void *list, unsigned int n);
@@ -60,7 +60,7 @@ void __thiscall f_004419A0(void *this, float *pts, unsigned int n)
         z1 = (int)(long long)((gz - (p[5] + oz)) / K);
         sub_004412E0(this, x0, z0, x1, z1);
     }
-    if (sub_00480200(path)) {
+    if (sub_00480200(path, 0)) {
         char **l, **head, **nn;
         *(void **)(s + 0xc) = path;
         l = sub_005E3EAE(0xc);

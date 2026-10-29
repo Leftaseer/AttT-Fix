@@ -11,11 +11,11 @@
 DECOMP_C char *__cdecl sub_0042F160(void);
 DECOMP_C void *__cdecl sub_004396C0(void);
 DECOMP_C int __thiscall sub_00436F30(void *self);
-DECOMP_C void __thiscall sub_00436F00(void *self);
+DECOMP_C int __cdecl sub_00436F00(void *self, unsigned int eax);
 DECOMP_C char *__cdecl sub_00424E70(void);
 DECOMP_C void *__thiscall sub_0043F840(void *self);
-DECOMP_C void __thiscall sub_0043BAD0(void *self, void *pos);
-DECOMP_C void __thiscall sub_0043F430(void *self);
+DECOMP_C unsigned int __thiscall sub_0043BAD0(void *self, void *pos);
+DECOMP_C int __cdecl sub_0043F430(void *self, unsigned int eax);
 DECOMP_C unsigned char __thiscall sub_004ED050(void *self);
 DECOMP_C void __thiscall sub_004BB120(void *self);
 DECOMP_C void __thiscall sub_0043E8F0(void *self, int u, int v, int hu, int hv);
@@ -87,7 +87,7 @@ int __thiscall f_0043EAE0(char *this)
         void *path = sub_004396C0();
         int r = sub_00436F30(path);
         if ((char)r)
-            sub_00436F00(path);
+            r = sub_00436F00(path, r);
         return r;
     }
     if (!*(void **)(this + 0x80))
@@ -95,8 +95,7 @@ int __thiscall f_0043EAE0(char *this)
 
     cam = sub_00424E70();
     view = *(char **)(this + 0x80);
-    sub_0043BAD0(sub_0043F840(view), cam + 0x44);
-    sub_0043F430(view);
+    sub_0043F430(view, sub_0043BAD0(sub_0043F840(view), cam + 0x44));
     __builtin_memcpy(c, cam + 0x44, 12);
     {
         float ax = c[0], az = c[2];

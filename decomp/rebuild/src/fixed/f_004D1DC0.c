@@ -10,7 +10,7 @@
 #include "auto_pre.h"
 typedef struct { unsigned int w[7]; } Str_4D1DC0;                 /* std::string */
 typedef struct { unsigned int w[0x30 / 4]; } Tmp_4D1DC0;
-DECOMP_C void __thiscall sub_004AB7A0(void *self, float dt);
+DECOMP_C void __cdecl sub_004AB7A0(void *self, unsigned int eax, float dt);
 DECOMP_C void *__cdecl sub_00421680(void);
 DECOMP_C void __thiscall sub_00443460(void *self, void *name);
 DECOMP_C void __thiscall sub_004D1450(void *self);
@@ -81,7 +81,7 @@ int __thiscall f_004D1DC0(char *this, float dt)
         __asm__("movl %%fs:0, %0" : "=r"(chain));
         return chain;
     }
-    sub_004AB7A0(this, dt);
+    sub_004AB7A0(this, 0, dt);
     cursor_4D1DC0(d_00607C00);
     switch (*(unsigned int *)(this + 0x7c)) {
     case 0:
