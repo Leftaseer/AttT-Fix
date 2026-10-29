@@ -2,7 +2,7 @@
  * lua_next, the value read by 0x0045C850, the iterator closed by 0x0045C920) the unit (entry[1]) and animation
  * (entry[2]) name pick Unit[unit].Animation[animation] (0x0045C740, 0x004648E0, 0x00464970, 0x004491F0, a fresh
  * reference kept); a table of tables (0x0057C5B0 type 5 at [1]) adds each of its tables, anything else is added
- * itself (0x00537080). The model's (+0x200, its +0x14's vf EC) 0x60-byte box is kept at +0x264 and the model reset
+ * itself (0x00537080). The model's (+0x200, vf EC of the object its +0x14 points to) 0x60-byte box is kept at +0x264 and the model reset
  * (0x004CAFE0(1)) */
 /* @conv ECX 0 */
 #include "auto_pre.h"
@@ -108,7 +108,7 @@ void __thiscall f_00537B70(void *this)
         next_537B70(it);
     }
     sub_0045C920(it);
-    o = *(char **)(*(char **)(s + 0x200) + 0x14);
+    o = **(char ***)(*(char **)(s + 0x200) + 0x14);
     __builtin_memcpy(s + 0x264, ((box_537B70)(*(void ***)o)[0xec / 4])(o), 0x60);
     sub_004CAFE0(*(void **)(s + 0x200), 1);
     sub_004220A0(&anim);
