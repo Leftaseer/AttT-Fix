@@ -93,13 +93,10 @@ DECOMP_C void __thiscall sub_00427820(void *self);
 DECOMP_C void __thiscall sub_004378D0(void *self);
 DECOMP_C void *__thiscall sub_00527960(void *self);
 DECOMP_C void __cdecl sub_0053A700(void);
-DECOMP_C void __cdecl sub_0053E4A0(void);
-DECOMP_C void __cdecl sub_0053B9E0(void);
-DECOMP_C void __cdecl sub_0053A9B0(void);
 DECOMP_C char d_0061AE24[], d_006CAA08[], d_006CAA10[], d_006CAA18[], d_0061597C[], d_00615A1C[], d_00614EB0[],
     d_0061B12C[], d_0060AB6C[], d_0060ACA4[], d_00612788[], d_0061B124[], d_0061B11C[], d_0061B114[], d_00612AE0[],
     d_0061323C[], d_00608A70[], d_0061B0F4[], d_0061B0EC[], d_0061B0E4[], d_0061B0DC[], d_006C88D4[], d_0061B0D4[],
-    d_008D122C[], d_0060B97C[], d_00607CC4[], d_006BF0C8[], d_006C0900[], d_0061B0CC[], d_0061B0B4[], d_0061B090[],
+    d_008D122C[], d_0060B97C[], d_00607CC4[], d_0053E4A0[], d_0053B9E0[], d_0053A9B0[], d_006BF0C8[], d_006C0900[], d_0061B0CC[], d_0061B0B4[], d_0061B090[],
     d_0061B084[], d_0061B078[], d_0060979C[], d_0061B070[], d_0060B914[], d_00611BBC[], d_00615328[], d_0060C598[],
     d_006CAA34[], d_0060AD08[], d_0061414C[], d_0060FF88[], d_0061B068[], d_006CA9BC[], d_008D1304[], d_0061B064[],
     d_0060ADC0[], d_0060AD00[], d_0060ADB0[], d_0060ADA0[], d_0060AD94[], d_0060ADB8[], d_0068AE10[], d_006C88D8[];
@@ -123,8 +120,9 @@ typedef void (__thiscall *vfpi_543820)(void *self, void *p, int a);
 #define EDITOR (*(char *)(*(char **)d_006C88D8 + 0x40))
 #define LVL(this) (*(char **)((this) + 0x7c))
 
-/* a callback node (0x18) chained in front of *head */
-static void hook_543820(char *this, char *head, void (*fn)(void))
+/* a callback node (0x18) chained in front of *head; fn is the original's entry of a thiscall member (the d_ name:
+ * a sub_ name declared in another convention would be a shim) */
+static void hook_543820(char *this, char *head, char *fn)
 {
     unsigned int *n = (unsigned int *)sub_005E3EAE(0x18);
     if (n) {
@@ -512,9 +510,9 @@ void __thiscall f_00543820(void *self, void *loader, int hero)
     struct { void *t; const char *k; } ref;
     char *o;
     *(void **)(this + 0xb8) = list_543820();
-    hook_543820(this, d_006CAA08, sub_0053E4A0);
-    hook_543820(this, d_006CAA10, sub_0053B9E0);
-    hook_543820(this, d_006CAA18, sub_0053A9B0);
+    hook_543820(this, d_006CAA08, d_0053E4A0);
+    hook_543820(this, d_006CAA10, d_0053B9E0);
+    hook_543820(this, d_006CAA18, d_0053A9B0);
     *(char **)(this + 0x8c) = sub_00427990();
     rl = 0;
     i = 0;
