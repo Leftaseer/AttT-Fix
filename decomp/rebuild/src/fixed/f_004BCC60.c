@@ -6,7 +6,7 @@
  * count (+0xE8); the 100-byte material records (+0xC8) become 0x6C-byte parts at +4 (0x00475330): their first 0x44
  * bytes, texture name (+0x44), first index (+0x60 -> +0x64) and texture (0x54 bytes, 0x004DF920 by name, +0x60), each
  * part's triangle count (+0x68) running to the next one's first index; the records are then cleared (0x004B9CF0 and
- * their names destroyed) and 0x006CA484's +4 grows to the most bones (+0x48, 24-byte entries) */
+ * their names destroyed) and 0x006CA484's +4 grows to the most bones (+0x48, 12-byte entries) */
 /* @conv ECX 4 */
 #include "auto_pre.h"
 typedef struct { unsigned int w[0x6c / 4]; } Part_4BCC60;
@@ -71,6 +71,7 @@ void __thiscall f_004BCC60(void *this, void *stream)
     *(unsigned int *)(s + 0xe8) = (unsigned int)N(0x38, 2) / 3;
     {
         Part_4BCC60 proto;
+        __builtin_memset(&proto, 0, sizeof proto);       /* the original leaves stack contents here */
         imp_006071E0((char *)&proto + 0x44);
         sub_00475330(s + 4, N(0xc8, 100), proto);
     }
@@ -100,7 +101,7 @@ void __thiscall f_004BCC60(void *this, void *stream)
             imp_00607330(q + 0x44);
         *(char **)(s + 0xcc) = ne;
     }
-    n = N(0x48, 24);
+    n = N(0x48, 12);
     if (n > *(unsigned int *)(*(char **)d_006CA484 + 4))
         *(unsigned int *)(*(char **)d_006CA484 + 4) = n;
 }
