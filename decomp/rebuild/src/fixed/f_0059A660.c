@@ -1,8 +1,8 @@
-/* 0x0059A660: CDXUTDialog::DrawText (text, element, rect, shadow, count): nothing for a fully transparent font colour
- * (element +0x68 alpha); the rect moves by the dialog's position (+0x174 / +0x178) and, with a caption (+0x71), its
+/* 0x0059A660: CDXUTDialog::DrawText for a narrow string (text, element, rect, shadow, count): nothing for a fully
+ * transparent font colour (element +0x68 alpha); the rect moves by the dialog's position (+0x174 / +0x178) and, with a caption (+0x71), its
  * height (+0x184); the manager's (0x00599A20) sprite (+4) gets the identity transform (vf14) and the element's font
  * (+4, through the dialog's font list +0x1A8 and the manager's cache +0x14; none without a manager) draws (its ID3DXFont
- * +0x104, DrawTextW vf38) with the element's format (+8): first a black shadow one pixel off in the colour's alpha,
+ * +0x104, DrawTextA vf38) with the element's format (+8): first a black shadow one pixel off in the colour's alpha,
  * then the text in the colour (+0x5C..+0x68 r, g, b, a as D3DXCOLOR's DWORD). Returns the failing HRESULT or S_OK */
 /* @conv ECX 20 */
 #include "auto_pre.h"
