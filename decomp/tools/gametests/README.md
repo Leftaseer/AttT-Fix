@@ -20,5 +20,6 @@ loading (`tools/gametest_save.sh`); a run stops as soon as the game exits or wri
 | long | 2 minutes from the start without an engine error |
 | trees | the trees of save 215 are there (picture) |
 | army | the army window shows its text (picture) |
+| spellbook | the spell book (`GUIScene.WorldLevel:OnSpellBook`) looks as it does with the original's set-up 0x4C8B70 (picture `ref_spellbook.png`) |
 
 The whole set takes about 20 minutes.
