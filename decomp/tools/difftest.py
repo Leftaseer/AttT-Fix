@@ -619,8 +619,13 @@ class Harness:
         return struct.unpack('<d', self.uc.mem_read(sp + 4 + 8 * i, 8))[0]
     def _ret_double(self, v):
         self._ret(None, 0, v)
-    def crt_floor(self): self._ret_double(math.floor(self._cdbl(0)))
-    def crt_ceil(self): self._ret_double(math.ceil(self._cdbl(0)))
+    def crt_floor(self):
+        v = self._cdbl(0)
+        self._ret_double(v if math.isnan(v) or math.isinf(v) else math.floor(v))
+
+    def crt_ceil(self):
+        v = self._cdbl(0)
+        self._ret_double(v if math.isnan(v) or math.isinf(v) else math.ceil(v))
     def crt_sqrt(self): self._ret_double(math.sqrt(self._cdbl(0)) if self._cdbl(0) >= 0 else float('nan'))
     def crt_pow(self):
         try: v = math.pow(self._cdbl(0), self._cdbl(1))
