@@ -33,7 +33,7 @@ void __thiscall f_004CB6D0(void *this, void *tbl, unsigned int t0, unsigned int 
 {
     char *s = (char *)this, *e;
     Str_4CB6D0 *tex = (Str_4CB6D0 *)((unsigned char *)__builtin_frame_address(0) + 0xc);   /* args 2-8 in place */
-    unsigned int base = 0, desc[7];
+    unsigned int base = 0, desc[0x2c / 4];   /* the description: its name string and 4 more fields */
     int *obj = 0, kind, pick;
     struct { int *anim; unsigned int w; } entry;
     if (*(char **)(s + 0x14) && (*(char **)(s + 0x18) - *(char **)(s + 0x14)) >> 3)
