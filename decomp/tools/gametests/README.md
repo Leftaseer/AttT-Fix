@@ -23,3 +23,12 @@ loading (`tools/gametest_save.sh`); a run stops as soon as the game exits or wri
 | spellbook | the spell book (`GUIScene.WorldLevel:OnSpellBook`) looks as it does with the original's set-up 0x4C8B70 (picture `ref_spellbook.png`) |
 
 The whole set takes about 20 minutes.
+
+## Coverage
+
+`run_cov.sh attt_vNN` runs the same scenarios (vis aside) on a coverage build (`build.py --coverage`, with test
+input and the debug log): every function of the new code marks itself the first time it runs and each run of the
+game leaves `decomp_coverage_*.bin` next to it. The files are gathered in `out/cov_attt_vNN/` and
+`tools/coverage.py` reports how many of the replaced functions ran (hand-written in `src/fixed`, generated, engine)
+and lists them in `out/cov_attt_vNN_run.tsv` / `_notrun.tsv`. Any other play with that build (a player's own game
+too) adds its files the same way: `coverage.py BUILD.map *.bin`.

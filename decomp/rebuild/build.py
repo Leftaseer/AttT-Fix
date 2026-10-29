@@ -291,6 +291,8 @@ def main():
     ap.add_argument('--auto', help='folder made by tools/autodecomp.py for this game (addresses of the game itself)')
     ap.add_argument('-D', dest='defines', action='append', default=[], help='preprocessor define for the sources '
                     '(e.g. -D DECOMP_DEBUG_LOG: engine errors go to OutputDebugString)')
+    ap.add_argument('--coverage', action='store_true', help='the new code marks each function it runs '
+                    '(coverage.c, decomp_coverage.bin next to the exe; tools/coverage.py reads it)')
     ap.add_argument('--auto-list', help='only these auto-decompiled functions (file with one address per line)')
     ap.add_argument('--auto-exclude', help='not these auto-decompiled functions (e.g. bad.txt of tools/autobisect.py)')
     a = ap.parse_args()
@@ -335,6 +337,9 @@ def main():
     # compile
     lua_dir = os.path.join(HERE, 'src', 'lua51')
 
+    # coverage builds: every function of the new code (not Lua's, not the runtime support) calls the hook first
+    cov = ['-finstrument-function-entry-bare'] if a.coverage else []
+
     def compile_src(fn):
         obj = os.path.join(work, os.path.relpath(fn, os.path.join(HERE, 'src')).replace(os.sep, '_') + '.obj')
         if os.path.dirname(fn) == lua_dir:
@@ -349,7 +354,7 @@ def main():
                                          '-c', fn, '-o', obj], fn, obj)
             return obj
         extra = ['-std=c++17', '-fno-exceptions', '-fno-rtti'] if fn.endswith('.cpp') else ['-std=c11']
-        cached_run(['clang'] + cflags + extra + ['-c', fn, '-o', obj], fn, obj)
+        cached_run(['clang'] + cflags + extra + cov + ['-c', fn, '-o', obj], fn, obj)
         return obj
     objs = pmap(compile_src, files)
     native = set()          # DECOMP addresses that are already addresses of this game (auto-decompiled code)
@@ -421,7 +426,7 @@ def main():
         def scan_compile(fs):
             fn, src = fs
             obj = os.path.join(work, 'auto_' + os.path.basename(fn) + '.obj')
-            cached_run(['clang'] + aflags + ['-c', src, '-o', obj], src, obj)
+            cached_run(['clang'] + aflags + cov + ['-c', src, '-o', obj], src, obj)
             return cached_run(['clang'] + aflags + ['-DDECOMP_SCAN', '-E', '-P', src], src), obj
         for (fn, src), (pre, obj) in zip(srcs, pmap(scan_compile, srcs)):
             for m in re.finditer(r'^/\* @func ([0-9A-F]{8}) custom \*/$', open(src, encoding='utf-8').read(), flags=re.M):
@@ -440,6 +445,10 @@ def main():
     rt = os.path.join(work, 'rt_support.obj')
     run(['clang'] + cflags + ['-c', os.path.join(HERE, 'rt_support.c'), '-o', rt])
     objs.append(rt)
+    if a.coverage:
+        co = os.path.join(work, 'coverage.obj')
+        run(['clang'] + cflags + ['-c', os.path.join(HERE, 'coverage.c'), '-o', co])
+        objs.append(co)
     if a.toggle:
         to = os.path.join(work, 'toggle.obj')
         run(['clang'] + cflags + ['-c', os.path.join(HERE, 'toggle.c'), '-o', to])
