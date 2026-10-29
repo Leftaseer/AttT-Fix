@@ -11,7 +11,7 @@
 /* @func 00596F10 custom */
 #include "auto_pre.h"
 DECOMP_C unsigned int __cdecl sub_00592DA0(unsigned int eax, void *control);
-DECOMP_C int __stdcall sub_00592E40(void);
+DECOMP_C int __cdecl sub_00592E40(void);
 DECOMP_C void __thiscall sub_005951F0(void *self, int delta);
 DECOMP_C char d_006C889C[];
 DECOMP_C void *(__stdcall *imp_00607640)(void *) __asm__("__imp__SetCapture@4");

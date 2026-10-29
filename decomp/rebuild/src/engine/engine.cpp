@@ -82,7 +82,7 @@ bool CEngine::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
  * list of CInput and the button event listeners), the down this turn and the up the next; "MS lua CODE" runs a
  * Lua chunk in the game's script machine (e.g. loading a save game from the main menu).  Called by the main
  * loop before every CEngine::Step (the menus do not go through CEngine::Frame). */
-ORIG_THISCALL(0044A3F0, void, (void *listeners, void *info));     /* sends an event to its listeners */
+ORIG_FN(0044A3F0, void, (void *listeners, unsigned int eax, void *info));  /* sends an event to its listeners */
 ORIG_DATA(006C9014);    /* listeners of the left button going down */
 ORIG_DATA(006C901C);    /* ... going up */
 ORIG_DATA(0060AC14);    /* nEvent::NullInfo::vftable */
@@ -94,7 +94,7 @@ ORIG_DATA(006C88D4);    /* the script machine (its lua_State is used by every Do
 static void TestMove(float dx, float dy)
 {
     struct { void *vftable; float dx, dy, dz; } move = { d_0060C798, dx, dy, 0.0f };
-    ORIG_CALL(0044A3F0)(d_006C9054, &move);
+    ORIG_CALL(0044A3F0)(d_006C9054, 0, &move);
 }
 
 /* Lua of the test input runs at the end of a frame, where the GUI's own event handlers run: a scene switch
@@ -240,7 +240,7 @@ void TestInput(CInput *input)
     if (upNext && input->mouseButtons) {
         upNext = false;
         input->mouseButtons[input->mouseButtonCount++] = 1;
-        ORIG_CALL(0044A3F0)(d_006C901C, &info);
+        ORIG_CALL(0044A3F0)(d_006C901C, 0, &info);
     }
     for (;;) {
         static bool afterLoad;
@@ -269,7 +269,7 @@ void TestInput(CInput *input)
             TestMove(-10000.0f, -10000.0f);      /* to the corner, then to X,Y */
             TestMove((float)x, (float)y);
             input->mouseButtons[input->mouseButtonCount++] = 0;
-            ORIG_CALL(0044A3F0)(d_006C9014, &info);
+            ORIG_CALL(0044A3F0)(d_006C9014, 0, &info);
             upNext = true;
             return;
         } else if (strstr(line, " pos")) {
