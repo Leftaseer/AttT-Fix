@@ -101,6 +101,8 @@ static void TestMove(float dx, float dy)
  * between frames leaves the engine without a scene for the next one */
 static char g_testLua[2048];
 static int g_testDik;           /* "MS dik N": a DirectInput key put among the next frame's key events (CEngine::Frame) */
+static int g_testHoldDik;       /* "MS hold N MS2": that key held down (its keyboard state) for MS2 milliseconds */
+static DWORD g_testHoldUntil;
 static int g_testLuaWait;       /* main loop turns it has waited: the menus do not run CEngine::Frame */
 
 /* Lua functions for the test input: DecompLog(...) writes its string and number arguments as a line in
@@ -286,6 +288,10 @@ void TestInput(CInput *input)
         } else if (sscanf(line, "%u key %d", &ms, &x) == 2) {
             PostMessageA(g_hWnd, WM_KEYDOWN, x, 1);
             PostMessageA(g_hWnd, WM_KEYUP, x, 0xC0000001);
+        } else if (sscanf(line, "%u hold %d %d", &ms, &x, &y) == 3) {
+            OutputDebugStringA(line);
+            g_testDik = g_testHoldDik = x;
+            g_testHoldUntil = GetTickCount() + (DWORD)y;
         } else if (sscanf(line, "%u dik %d", &ms, &x) == 2) {
             OutputDebugStringA(line);
             g_testDik = x;              /* (the game reads keys through DirectInput: posted messages miss it) */
@@ -313,6 +319,12 @@ void CEngine::Frame()
             input->keyCount++;
         }
         g_testDik = 0;
+    }
+    if (g_testHoldDik) {
+        if ((int)(GetTickCount() - g_testHoldUntil) < 0)
+            input->keyState[g_testHoldDik & 0xff] = 0x80;
+        else
+            g_testHoldDik = 0;
     }
 #endif
     for (unsigned i = 0; i < input->keyCount; i++) {
