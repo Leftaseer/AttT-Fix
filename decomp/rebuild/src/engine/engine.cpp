@@ -100,6 +100,7 @@ static void TestMove(float dx, float dy)
 /* Lua of the test input runs at the end of a frame, where the GUI's own event handlers run: a scene switch
  * between frames leaves the engine without a scene for the next one */
 static char g_testLua[2048];
+static int g_testDik;           /* "MS dik N": a DirectInput key put among the next frame's key events (CEngine::Frame) */
 static int g_testLuaWait;       /* main loop turns it has waited: the menus do not run CEngine::Frame */
 
 /* Lua functions for the test input: DecompLog(...) writes its string and number arguments as a line in
@@ -285,6 +286,9 @@ void TestInput(CInput *input)
         } else if (sscanf(line, "%u key %d", &ms, &x) == 2) {
             PostMessageA(g_hWnd, WM_KEYDOWN, x, 1);
             PostMessageA(g_hWnd, WM_KEYUP, x, 0xC0000001);
+        } else if (sscanf(line, "%u dik %d", &ms, &x) == 2) {
+            OutputDebugStringA(line);
+            g_testDik = x;              /* (the game reads keys through DirectInput: posted messages miss it) */
         }
     }
 }
@@ -301,6 +305,16 @@ void CEngine::Frame()
     ++frameCount;
     g_updateRoot->Update(dt);
     input->updater->Update(dt);
+#ifdef DECOMP_TEST_INPUT
+    if (g_testDik) {                         /* one more event of this frame (the buffer holds 0x40) */
+        if (input->keyCount < 0x40) {
+            input->keys[input->keyCount].dik = (unsigned char)g_testDik;
+            input->keys[input->keyCount].pressed = 1;
+            input->keyCount++;
+        }
+        g_testDik = 0;
+    }
+#endif
     for (unsigned i = 0; i < input->keyCount; i++) {
         const CInputKey &k = input->keys[i];
         if (!k.pressed || k.dik == 0x3D /* DIK_F3 */)

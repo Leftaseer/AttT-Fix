@@ -1084,7 +1084,15 @@ def convert(f, protos, skip, imports, impnames):
                     continue
                 new, off = [], 0
                 for x, (t, _), st in zip(args, pr[3], pr[5]):
-                    if st == 'stack' and x in rv:
+                    # (only while the variable still holds the return address: the decompiler reuses one for
+                    # other values, 0x4EAAA0's uVar9 = 1 for 0x42A010)
+                    last = None
+                    if x in rv:
+                        for m_ in re.finditer(r'(?m)^[ \t]*%s = ([^;\n]*);$' % re.escape(x), code[:cs]):
+                            last = m_.group(1)
+                    if st == 'stack' and x in rv and last is not None and \
+                            re.fullmatch(r'(?:\([^()]*\))?0x([0-9a-f]{6,8})', last) and \
+                            int(re.fullmatch(r'(?:\([^()]*\))?0x([0-9a-f]{6,8})', last).group(1), 16) in rets_here:
                         d = re.search(r'(?m)^[ \t]*([A-Za-z_][\w ]*?\s*\**)\s*\b%s;$' % x, code)
                         if not d or slot_bytes(t) != 4:
                             break
