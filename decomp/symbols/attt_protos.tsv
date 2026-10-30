@@ -10,3 +10,10 @@
 005E4134	stdcall	16	void __stdcall eh_vector_destructor_iterator(void *ptr, uint size, int count, void *dtor)	runtime: ??_M@YGXPAXIHP6EX0@Z@Z
 005E4197	stdcall	20	void __stdcall eh_vector_constructor_iterator(void *ptr, uint size, int count, void *ctor, void *dtor)	runtime: ??_L@YGXPAXIHP6EX0@Z1@Z
 004205C0	thiscall	4	uint __thiscall vcall_base4_slot1(void *this, uint arg)	thunk "add ecx, 4; jmp [vftable+4]" to slot 1 of the subobject at +4: its 21 callers push one argument and leave it, 22 of the 24 slot-1 functions of the RTTI vftables at +4 pop 4
+# Wrong conventions found by the misplaced collisions of a player's save 243 (hand files and generated callers
+# disagreed: the callers passed an EAX the walkers never read, shifting their arguments):
+00450700	thiscall	4	void * __thiscall FUN_00450700(void *this, void *result)	copies the string in ECX to result (a 'push ecx' reserving a local hid the ECX input)
+0047FEF0	cdecl	0	bool __cdecl FUN_0047FEF0(int *it, float x, float y, float eps)	polygon edge walk: EAX overwritten before it is read
+0047FF90	cdecl	0	bool __cdecl FUN_0047FF90(int *it, void *p, float eps)	polygon edge walk: EAX overwritten before it is read
+00480A30	cdecl	0	bool __cdecl FUN_00480A30(int *it, void *p)	polygon edge walk: EAX overwritten before it is read
+00480200	thiscall	0	bool __thiscall FUN_00480200(void *this)	polygon convexity: EAX overwritten before it is read

@@ -53,4 +53,24 @@ for f in files:
         elif c == '__cdecl' and pop and not regs:
             print('%s: sub_%08X is __cdecl but pops %d bytes' % (os.path.basename(f), a, pop))
             bad += 1
+# a hand file's own convention ('/* @conv REGS POP */') against the one the generated code calls it with: a register
+# of convs.tsv the hand file does not take, or another pop, shifts the arguments of every generated caller (the
+# polygon walkers 0x47FEF0... took no EAX, their generated callers passed one: walls without collisions); a register
+# only the hand file reads is one those callers leave unset (a warning: 0x450700 reads the string in ECX)
+for f in files:
+    m_ = re.match(r'f_([0-9A-F]{8})\.c$', os.path.basename(f))
+    if not m_ or os.path.dirname(f) != fixed:
+        continue
+    a = int(m_.group(1), 16)
+    c = re.search(r'/\* @conv (\S+) (\d+) \*/', open(f, encoding='utf-8', errors='replace').read())
+    if not c or a not in conv:
+        continue
+    regs, pop = [r for r in c.group(1).split(',') if r != '-'], int(c.group(2))
+    if pop != conv[a][1] or any(r not in regs for r in conv[a][0]):
+        print('%s: @conv %s %d, but the generated code calls it with %s %d' % (os.path.basename(f), ','.join(regs) or '-',
+              pop, ','.join(conv[a][0]) or '-', conv[a][1]))
+        bad += 1
+    elif any(r not in conv[a][0] for r in regs):
+        print('warning: %s: @conv reads %s, which the generated callers do not set' %
+              (os.path.basename(f), ','.join(r for r in regs if r not in conv[a][0])))
 sys.exit(1 if bad else 0)
