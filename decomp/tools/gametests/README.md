@@ -21,6 +21,7 @@ loading (`tools/gametest_save.sh`); a run stops as soon as the game exits or wri
 | trees | the trees of save 215 are there (picture) |
 | army | the army window shows its text (picture) |
 | ogantar | Ogantar's trees (save 241, a player's) stand where the original puts them (picture `ref_ogantar.png`, made with every replacement switched off in a `--toggle` build) |
+| wall | a wall stops the hero (save 243, a player's: forward held with the test input's `hold`; picture `ref_wall.png` made with every replacement switched off) |
 | spellbook | the spell book (`GUIScene.WorldLevel:OnSpellBook`) looks as with every replacement switched off (picture `ref_spellbook.png` from a `--toggle` build; the first one, from a build with 0x45E830's misplaced village trees behind the book, was wrong) |
 
 The whole set takes about 20 minutes.

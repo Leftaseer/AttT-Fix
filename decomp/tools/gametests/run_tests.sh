@@ -1,6 +1,6 @@
 #!/bin/bash
 # build auto/$1 and run the game tests: village save x3, battle save, a battle from the village and back, extras, messages, exit after a battle,
-# main menu picture, 2 minutes from the start, trees, army window, spell book, Ogantar's trees
+# main menu picture, 2 minutes from the start, trees, army window, spell book, Ogantar's trees, a wall
 cd /opt/re
 T=/home/user/AttT-Fix/decomp; D=${1:-attt_n}
 t0=$(date +%s)
@@ -20,4 +20,5 @@ bash gametest_trees.sh $TI; echo trees rc=$?; tail -1 out/gbis/trees.log
 bash gametest_army.sh $TI; echo army rc=$?; tail -1 out/gbis/army.log
 bash gametest_spellbook.sh $TI; echo spellbook rc=$?; tail -1 out/gbis/spellbook.log
 bash gametest_ogantar.sh $TI; echo ogantar rc=$?; tail -1 out/gbis/ogantar.log
+bash gametest_wall.sh $TI; echo wall rc=$?; tail -1 out/gbis/wall.log
 echo "suite: $(( ($(date +%s) - t0) / 60 )) min"
