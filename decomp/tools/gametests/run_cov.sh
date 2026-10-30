@@ -18,6 +18,7 @@ GT_WAIT=120 bash gametest.sh $E; echo long rc=$?
 bash gametest_trees.sh $E; echo trees rc=$?
 bash gametest_army.sh $E; echo army rc=$?
 bash gametest_spellbook.sh $E; echo spellbook rc=$?
+bash gametest_ogantar.sh $E; echo ogantar rc=$?
 mkdir -p out/cov_$D; rm -f out/cov_$D/*.bin
 for f in game/*/decomp_coverage_*.bin; do cp $f out/cov_$D/$(basename $(dirname $f))_$(basename $f); done
 ls out/cov_$D | wc -l

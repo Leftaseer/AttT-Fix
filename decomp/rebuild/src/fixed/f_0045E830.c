@@ -3,8 +3,11 @@
  * floating label: the name of field 1 (0x0045BA50), the position of field 2 (0x0045CE60: x = [1], z = [3]) through
  * this one's world matrix (0x004ACE00, D3DXVec3TransformCoord) at the height of this (+0x78) and of its owner
  * (+0x1BC's +0x78) plus field 3, handed with the name to the labels 0x006C8E44 (0x00555160, which takes the label
- * object by value: vtable 0x0060B914, x, 0, z, a flag, the height; the original leaves the flag byte uninitialised,
- * 0 here) (the original destroys the temporaries if one throws; this C does not) */
+ * object by value: vtable 0x0060B914, x, 0, z, a flag, the height). The flag (0x00555160: nonzero puts the label
+ * on the ground, 0x00473110, instead of at its y of 0) is a byte the original never writes (its frame's +0x4C, left
+ * over from earlier calls, nonzero in practice: its trees stand on the ground); 1 here (0 put the trees of save 241
+ * at height 0, in front of Ogantar's houses) (the original destroys the temporaries if one throws; this C does
+ * not) */
 /* @conv ECX,EBX 4 */
 /* @func 0045E830 custom */
 #include "auto_pre.h"
@@ -67,7 +70,7 @@ void __cdecl f_0045E830(void *this, unsigned int ebx, void *tbl)
         l.x = x;
         l.y = 0.0f;
         l.z = z;
-        l.flag = 0;
+        l.flag = 1;
         l.h = h;
         sub_00555160(*(void **)d_006C8E44, name, l);
     }

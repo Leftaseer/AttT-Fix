@@ -20,6 +20,7 @@ loading (`tools/gametest_save.sh`); a run stops as soon as the game exits or wri
 | long | 2 minutes from the start without an engine error |
 | trees | the trees of save 215 are there (picture) |
 | army | the army window shows its text (picture) |
+| ogantar | Ogantar's trees (save 241, a player's) stand where the original puts them (picture `ref_ogantar.png`, made with every replacement switched off in a `--toggle` build) |
 | spellbook | the spell book (`GUIScene.WorldLevel:OnSpellBook`) looks as it does with the original's set-up 0x4C8B70 (picture `ref_spellbook.png`) |
 
 The whole set takes about 20 minutes.
