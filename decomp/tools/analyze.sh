@@ -130,6 +130,10 @@ py icalls.py "$WORK/bin/attt.exe" "$SYMS/attt_functions.tsv" "$O/attt_icalls.tsv
    -postScript ICallOverride.java "$O/attt_icalls.tsv" "$O/attt_icall_overrides.tsv" > "$WORK/logs/icall_attt.log" 2>&1
 "$HL" "$WORK/proj" attt -process attt.exe -noanalysis -readOnly -scriptPath "$GH" \
    -postScript AutoExport.java "$WORK/decomp/attt_auto.jsonl" "$WORK/decomp/attt_auto_types.h" > "$WORK/logs/auto_attt.log" 2>&1
+# the export types every import, the plain C runtime included (memcpy, printf, Direct3DCreate9), which step 3's
+# tailpop.py knew only for the C++ runtime (cxximports, import_protos): the import thunk pops come from it now
+py tailpop.py "$WORK/bin/attt.exe" "$O/attt_regparams.tsv" "$SYMS/attt_functions.tsv" \
+   "$WORK/decomp/attt_auto.jsonl.protos" "$O/attt_rtti.json"
 py autodecomp.py "$WORK/decomp/attt_auto.jsonl" "$WORK/decomp/attt_auto_types.h" "$WORK/auto/attt" \
    --exe "$WORK/bin/attt.exe" --functions "$SYMS/attt_functions.tsv" \
    --syms "$O/attt_g1/symbols.tsv" --syms "$SYMS/attt.sym" --syms "$SYMS/attt_manual.sym" --icalls "$O/attt_icall_overrides.tsv" \

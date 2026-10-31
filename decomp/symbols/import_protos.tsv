@@ -101,3 +101,8 @@ _AIL_set_sample_volume_levels@12	int	void *, float, float
 _AIL_quick_set_volume@12	int	void *, float, float
 _AIL_set_digital_master_volume_level@8	int	void *, float
 _AIL_digital_master_volume_level@4	float	void *
+
+# a plain C name, so cxximports.py has nothing for it; without it the thunk 0x5E3EC0 took the pop of the next
+# thunk in the same table (??0exception, 4) instead of its own __stdcall 8
+_CxxThrowException	void	void *, void *	__stdcall
+memcpy	void *	void *, void *, uint	__cdecl

@@ -70,7 +70,11 @@ for a, size in sizes.items():
     t = set()
     try:
         moves_esp, dep = False, 0
-        for i in md.disasm(pe.read(a, size), a):
+        # a function that opens with an unconditional jump is a thunk: that jump alone is its code, and the bytes
+        # after it are other thunks of the same table (0x5E3B10 'jmp 0x5E3EAE' then ~50 import thunks)
+        first = next(md.disasm(pe.read(a, 8), a, 1))
+        ins = [first] if first.mnemonic == 'jmp' else md.disasm(pe.read(a, size), a)
+        for i in ins:
             if i.mnemonic == 'jmp' and i.operands[0].type == x86.X86_OP_IMM:
                 d = i.operands[0].imm
                 if d in sizes and not (a <= d < a + size):
