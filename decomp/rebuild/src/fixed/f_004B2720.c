@@ -104,23 +104,28 @@ static char *p4b2720_dec(char *o, int v)
     return o;
 }
 
-/* the contents of a std::string (data at +0, size at +0x10) */
+/* the contents of an MSVC8 std::string: _Bx at +0 (16 bytes inline while _Myres at +0x14 is below 16, otherwise
+ * the heap pointer), _Mysize at +0x10.  The first probe read +0 as a pointer unconditionally and so printed heap
+ * garbage for every short string.  The size and capacity follow the text as /size/cap. */
 static char *p4b2720_str(char *o, const char *s)
 {
-    const unsigned char *d = *(const unsigned char **)s;
-    unsigned int n = *(const unsigned int *)(s + 0x10), i;
+    unsigned int n = *(const unsigned int *)(s + 0x10);
+    unsigned int cap = *(const unsigned int *)(s + 0x14), i;
+    const unsigned char *d = cap < 16 ? (const unsigned char *)s : *(const unsigned char *const *)s;
     *o++ = '\'';
-    if (!d)
-        *o++ = '?';
     for (i = 0; i < n && i < 48; i++)
         *o++ = d[i] >= 0x20 && d[i] < 0x7f ? (char)d[i] : '?';
     *o++ = '\'';
+    *o++ = '/';
+    o = p4b2720_dec(o, (int)n);
+    *o++ = '/';
+    o = p4b2720_dec(o, (int)cap);
     return o;
 }
 
 static void p4b2720_log(const char *what, const char *s, unsigned int a, unsigned int b, int c)
 {
-    char line[192], *o = line;
+    char line[256], *o = line;
     const char *t = "4b2720 ";
     while (*t)
         *o++ = *t++;
@@ -230,8 +235,19 @@ void *__thiscall f_004B2720(void *self, int a, void *list)
         imp_0060731C(&name, sub_0045BB70(&k, ebx, &s));
         imp_00607330(&s);
     }
+#ifdef DECOMP_DEBUG_LOG
+    {   /* the two values the original reads and throws away: field 2 and field 5 of the animation table */
+        float a2 = sub_0057AC90(&anim, 2);
+        float a5 = sub_0057AC90(&anim, 5);
+        unsigned int b2, b5;
+        __builtin_memcpy(&b2, &a2, 4);
+        __builtin_memcpy(&b5, &a5, 4);
+        p4b2720_log(" anim25", 0, b2, b5, 0);
+    }
+#else
     sub_0057AC90(&anim, 2);
     sub_0057AC90(&anim, 5);
+#endif
 #ifdef DECOMP_DEBUG_LOG
     p4b2720_log(" skins", 0, skins.w[0], skins.w[1], (int)skins.w[2]);
     p4b2720_log(" anim", 0, anim.w[0], anim.w[1], (int)anim.w[2]);
@@ -253,6 +269,13 @@ void *__thiscall f_004B2720(void *self, int a, void *list)
     }
     mem = sub_005E3EAE(0x1cc);
     *(void **)(this + 0x7c) = mem ? sub_004B2430(mem, *model) : 0;
+#ifdef DECOMP_DEBUG_LOG
+    {   /* the vtables say which class each scene object ended up as */
+        void *mo = *model, *pl = *(void **)(this + 0x7c);
+        p4b2720_log(" vtbl", 0, mo ? (unsigned int)(size_t)*(void **)mo : 0,
+                    pl ? (unsigned int)(size_t)*(void **)pl : 0, 0);
+    }
+#endif
     {
         float *pos = ((vfv_4B2720)VF(hero, 0x68))(hero);
         cr = (char *)*model;
@@ -310,6 +333,7 @@ void *__thiscall f_004B2720(void *self, int a, void *list)
             ps = 0;
         sub_0054EA10(ps, sub_0057AFB0(&val, 0x34, &s, 4));
 #ifdef DECOMP_DEBUG_LOG
+        p4b2720_log(" val", 0, val.w[0], val.w[1], (int)val.w[2]);
         p4b2720_log(" effect", &s, (unsigned int)(size_t)ps, 0, 0);
 #endif
         imp_00607330(&s);
