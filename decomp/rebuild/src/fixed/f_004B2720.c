@@ -104,14 +104,14 @@ static char *p4b2720_dec(char *o, int v)
     return o;
 }
 
-/* the contents of an MSVC8 std::string: _Bx at +0 (16 bytes inline while _Myres at +0x14 is below 16, otherwise
- * the heap pointer), _Mysize at +0x10.  The first probe read +0 as a pointer unconditionally and so printed heap
- * garbage for every short string.  The size and capacity follow the text as /size/cap. */
+/* the contents of an MSVC8 std::string (28 bytes): allocator at +0, _Bx at +4 (the 16-byte inline buffer while
+ * _Myres below 16, otherwise the heap pointer), _Mysize at +0x14, _Myres at +0x18.  The first probe read +0 as a
+ * pointer unconditionally and so printed heap garbage for every short string.  The size and capacity follow the text. */
 static char *p4b2720_str(char *o, const char *s)
 {
-    unsigned int n = *(const unsigned int *)(s + 0x10);
-    unsigned int cap = *(const unsigned int *)(s + 0x14), i;
-    const unsigned char *d = cap < 16 ? (const unsigned char *)s : *(const unsigned char *const *)s;
+    unsigned int n = *(const unsigned int *)(s + 0x14);
+    unsigned int cap = *(const unsigned int *)(s + 0x18), i;
+    const unsigned char *d = cap < 16 ? (const unsigned char *)(s + 4) : *(const unsigned char *const *)(s + 4);
     *o++ = '\'';
     for (i = 0; i < n && i < 48; i++)
         *o++ = d[i] >= 0x20 && d[i] < 0x7f ? (char)d[i] : '?';
