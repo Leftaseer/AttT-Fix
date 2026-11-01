@@ -1,8 +1,9 @@
-/* 0x0050E2D0: shows a unit's (arg 2) reach in battle (arg 3 unused): with arg 4 it is marked on its owner's
- * board (+0x2C8, 0x0051F5F0) and the view refreshed (+0x1C0 vf8C); otherwise its moves (+0xD8's +0x150 map by arg 1,
- * then by the unit: 0x00503BC0 / 0x00502D10; copied by value, 0x005019E0) go to the battle's search (0x004E46D0, 0x004FB800 with 0)
- * and each unit in the resulting set gets its count in +0x1E4. The original's attack branch (+0x15C, flag 1) is
- * unreachable (it tests arg 4 again) and left out. The sets are std::sets built and freed inline */
+/* 0x0050E2D0: shows a unit's (arg 2) reach in battle: with arg 4 it is marked on its owner's board (+0x2C8,
+ * 0x0051F5F0) and the view refreshed (+0x1C0 vf8C); otherwise arg 3 picks the moves (+0xD8's +0x150 map by arg 1,
+ * then by the unit: 0x00503BC0 / 0x00502D10; copied by value, 0x005019E0) or the attack reach (+0x15C), which go
+ * to the battle's search (0x004E46D0, 0x004FB800 with 0 or 1) and each unit in the resulting set gets its count in
+ * +0x1E4 (the attack counts are the damage preview on the health bars). The sets are std::sets built and freed
+ * inline */
 /* @conv ECX 16 */
 #include "auto_pre.h"
 typedef struct { unsigned int w[3]; } Obj12_50E2D0;
@@ -22,9 +23,9 @@ typedef void (__thiscall *vf_50E2D0)(void *self);
 #define NIL(n) ((n)[0x15])
 
 DECOMP(0050E2D0)
-void __thiscall f_0050E2D0(void *this, void *a1, char *unit, void *a3, unsigned char board)
+void __thiscall f_0050E2D0(void *this, void *a1, char *unit, unsigned char attack, unsigned char board)
 {
-    char *s = (char *)this, *n, *p, *dummy;
+    char *s = (char *)this, *n, *p, *dummy, *map;
     Set_50E2D0 set, *res, r;
     Obj12_50E2D0 reach;
     void **v;
@@ -40,8 +41,9 @@ void __thiscall f_0050E2D0(void *this, void *a1, char *unit, void *a3, unsigned 
     ((char **)set.head)[0] = set.head;
     ((char **)set.head)[2] = set.head;
     set.size = 0;
-    sub_005019E0(&reach, sub_00502D10(sub_00503BC0(*(char **)(s + 0xd8) + 0x150, &a1), &unit));
-    res = sub_004FB800(sub_004E46D0(), &r, reach, 0);
+    map = *(char **)(s + 0xd8) + (attack ? 0x15c : 0x150);
+    sub_005019E0(&reach, sub_00502D10(sub_00503BC0(map, &a1), &unit));
+    res = sub_004FB800(sub_004E46D0(), &r, reach, attack != 0);
     if (&set != res) {
         sub_004FAF90(&set, &dummy, *(char **)set.head, set.head);
         sub_004FAE50(&set, res);

@@ -97,6 +97,33 @@ static void TestMove(float dx, float dy)
     ORIG_CALL(0044A3F0)(d_006C9054, 0, &move);
 }
 
+/* "fastcam" in testinput.txt: the camera fly before a battle (CTacticAI's state 0xc, whose timer is +0x284) ends
+ * on its first update, so a manual bisection starts at the first turn instead of after the pan.  The AI's Update
+ * is virtual: vftable 0x6139C0 slot 1, which the +0x38 view 0x6139B8 reaches as its index 3 (same address).  The
+ * wrapper zeroes the timer before the original Update runs, so it sees %f - dt < 0 and ends the fly without
+ * moving the camera. */
+ORIG_DATA(006139C0);
+static bool g_fastCam;
+static unsigned (__thiscall *g_aiUpdate)(void *, float);
+static unsigned __thiscall FastCamUpdate(void *ai, float dt)
+{
+    float *timer = (float *)((char *)ai + 0x284);
+    if (g_fastCam && *timer > 0.0f)       /* once: the next Update sees the countdown expired */
+        *timer = 0.0f;
+    return g_aiUpdate(ai, dt);
+}
+static void EnableFastCam()
+{
+    void **slot = (void **)d_006139C0 + 1;
+    DWORD old;
+    g_aiUpdate = (unsigned (__thiscall *)(void *, float))*slot;
+    VirtualProtect(slot, sizeof(*slot), PAGE_READWRITE, &old);
+    *slot = (void *)FastCamUpdate;
+    VirtualProtect(slot, sizeof(*slot), old, &old);
+    g_fastCam = true;
+    OutputDebugStringA("testinput: fastcam on");
+}
+
 /* Lua of the test input runs at the end of a frame, where the GUI's own event handlers run: a scene switch
  * between frames leaves the engine without a scene for the next one */
 static char g_testLua[2048];
@@ -201,6 +228,30 @@ void TestLua()
     g_testLua[0] = 0;
 }
 
+/* Debug hotkeys for manual tests (bisection needs a level-up, money and time in a few seconds): with Ctrl held,
+ * F6 adds 100000 experience (the world trigger levels the hero up on its next evaluation), F7 100000 gold,
+ * F8 twelve game hours and F9 seven game days.  They only queue a Lua chunk for TestLua (the end of the frame),
+ * so the game state is changed where its own handlers run; the edge detection keeps a held key to one press. */
+static void DebugKeys()
+{
+    static const struct { int vk; const char *lua; const char *log; } keys[] = {
+        { VK_F6, "Actions:Expirience(100000)", "debug: +100000 experience" },
+        { VK_F7, "Actions:Gold(100000)", "debug: +100000 gold" },
+        { VK_F8, "Clock_AddMin(720)", "debug: +12 game hours" },
+        { VK_F9, "Clock_AddMin(10080)", "debug: +7 game days" },
+    };
+    static bool down[sizeof(keys) / sizeof(keys[0])];
+    bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+    for (unsigned i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        bool now = ctrl && (GetAsyncKeyState(keys[i].vk) & 0x8000) != 0;
+        if (now && !down[i] && !g_testLua[0]) {
+            sprintf(g_testLua, "pcall(function() %s DecompLog('%s') end)", keys[i].lua, keys[i].log);
+            g_testLuaWait = 0;
+        }
+        down[i] = now;
+    }
+}
+
 /* a line with the game's own cursor (drawn by the hardware, not in screenshots): where a click lands */
 static void TestPos(const char *what, unsigned ms)
 {
@@ -230,6 +281,7 @@ void TestInput(CInput *input)
     }
     if (g_testLua[0] && ++g_testLuaWait > 30)
         TestLua();
+    DebugKeys();
     AutoloadStep(start);
     {   /* every move of the game's cursor, to see where scripted mouse input lands */
         static int lx = -1, ly = -1;
@@ -285,6 +337,8 @@ void TestInput(CInput *input)
             OutputDebugStringA(line);
             lstrcpynA(g_testLua, lua + 5, sizeof(g_testLua));   /* run inside the next frame (TestLua) */
             g_testLuaWait = 0;
+        } else if (strstr(line, "fastcam")) {
+            EnableFastCam();
         } else if (sscanf(line, "%u key %d", &ms, &x) == 2) {
             PostMessageA(g_hWnd, WM_KEYDOWN, x, 1);
             PostMessageA(g_hWnd, WM_KEYUP, x, 0xC0000001);
