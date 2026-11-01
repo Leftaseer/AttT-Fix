@@ -85,9 +85,48 @@ static LONG CALLBACK CrashLog(EXCEPTION_POINTERS *e)
     wsprintfA(line, "crash %08X at %08X (address %08X)", code, (DWORD)e->ExceptionRecord->ExceptionAddress,
               e->ExceptionRecord->NumberParameters > 1 ? (DWORD)e->ExceptionRecord->ExceptionInformation[1] : 0);
     DebugLog(line);
+    wsprintfA(line, "  params %u: %08X %08X", e->ExceptionRecord->NumberParameters,
+              e->ExceptionRecord->NumberParameters > 0 ? (DWORD)e->ExceptionRecord->ExceptionInformation[0] : 0,
+              e->ExceptionRecord->NumberParameters > 1 ? (DWORD)e->ExceptionRecord->ExceptionInformation[1] : 0);
+    DebugLog(line);
     wsprintfA(line, "  eax %08X ebx %08X ecx %08X edx %08X esi %08X edi %08X ebp %08X esp %08X", c->Eax, c->Ebx,
               c->Ecx, c->Edx, c->Esi, c->Edi, c->Ebp, c->Esp);
     DebugLog(line);
+    HMODULE exe = GetModuleHandleA(nullptr);
+    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)((char *)exe + ((IMAGE_DOS_HEADER *)exe)->e_lfanew);
+    DWORD lo = (DWORD)exe + 0x1000, hi = (DWORD)exe + nt->OptionalHeader.SizeOfImage;
+    {   /* the EBP chain (MSVC frames): [ebp] = caller's ebp, [ebp+4] = return address */
+        DWORD *fp = (DWORD *)c->Ebp;
+        int m = 0;
+        char *o = line + lstrlenA(lstrcpyA(line, "  frames:"));
+        while (m < 24 && !IsBadReadPtr(fp, 8)) {
+            DWORD ret = fp[1], next = fp[0];
+            if (ret < lo || ret >= hi)
+                break;
+            o += wsprintfA(o, " %08X", ret);
+            if (next <= (DWORD)fp || next - (DWORD)fp > 0x100000)
+                break;
+            fp = (DWORD *)next;
+            if (++m % 8 == 0) {
+                DebugLog(line);
+                o = line + lstrlenA(lstrcpyA(line, "  frames:"));
+            }
+        }
+        DebugLog(line);
+    }
+    if (!IsBadReadPtr((DWORD *)c->Ebp, 0x48)) {   /* the frame itself: [0] saved ebp, [1] return, then the args */
+        DWORD *fp = (DWORD *)c->Ebp;
+        wsprintfA(line, "  ebp: %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X %08X",
+                  fp[0], fp[1], fp[2], fp[3], fp[4], fp[5], fp[6], fp[7], fp[8], fp[9], fp[10], fp[11], fp[12],
+                  fp[13], fp[14], fp[15], fp[16]);
+        DebugLog(line);
+    }
+    if (!IsBadReadPtr((DWORD *)c->Ecx - 4, 48)) {
+        DWORD *p = (DWORD *)c->Ecx;
+        wsprintfA(line, "  ecx: %08X %08X %08X %08X %08X %08X %08X %08X", p[0], p[1], p[2], p[3], p[4], p[5], p[6],
+                  p[7]);
+        DebugLog(line);
+    }
     {   /* the top of the stack as it is: after a call into nowhere the return address is the first */
         DWORD *top = (DWORD *)c->Esp;
         if (!IsBadReadPtr(top - 12, 48)) {
@@ -101,9 +140,6 @@ static LONG CALLBACK CrashLog(EXCEPTION_POINTERS *e)
             DebugLog(line);
         }
     }
-    HMODULE exe = GetModuleHandleA(nullptr);
-    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)((char *)exe + ((IMAGE_DOS_HEADER *)exe)->e_lfanew);
-    DWORD lo = (DWORD)exe + 0x1000, hi = (DWORD)exe + nt->OptionalHeader.SizeOfImage;
     DWORD *sp = (DWORD *)c->Esp;
     int n = 0;
     char *out = line + lstrlenA(lstrcpyA(line, "  stack:"));

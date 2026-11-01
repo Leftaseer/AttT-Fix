@@ -559,6 +559,13 @@ def main():
         elif conv == 'fastcall' and set(regs) <= {'ECX', 'EDX'}:
             conv, nstack = 'thiscall', max(0, nstack - 2)   # ECX and EDX pass through the adapter untouched
             regs = [r for r in regs if r != 'EDX']
+        if conv == 'cdecl' and nstack >= 0 and retpop > 4 * nstack and retpop % 4 == 0:
+            # The original caller pushed retpop bytes but the prototype names fewer dwords: the decompiler
+            # missed a by-value object (a std::string is 7 slots) or an argument the body never reads.  The
+            # body may still reach them through a pointer into its argument area (0x48C240 passes &param_3,
+            # the by-value string, to its destructor, which reads _Myres at +0x18), so the adapter forwards
+            # every dword the original caller pushed.
+            nstack = retpop // 4
         if conv not in ('cdecl', 'thiscall') or (conv == 'thiscall' and not set(regs) <= {'ECX'}) or \
                 (conv == 'cdecl' and addr in native and regs and nstack < 0):
             if addr in native:      # the decompiler's prototype does not fit the machine code: leave the original
