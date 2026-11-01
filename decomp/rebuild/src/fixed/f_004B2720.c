@@ -70,6 +70,81 @@ static void add_4B2720(char *this, void *p)
     ((vfp_4B2720)VF(list, 4))(list, p);
 }
 
+#ifdef DECOMP_DEBUG_LOG
+/* Probe for the level-up difference: the bisection points at this replacement, yet its code matches the original
+ * instruction for instruction, so the log of a broken run has to be compared with a working one.  Every value the
+ * constructor resolves (the hero's name, the skin, the animation and glow tables, the creature model and the
+ * three scene objects, and each glow entry) goes to decomp_debug.log. */
+extern void DebugLog(const char *text);
+
+static char *p4b2720_hex(char *o, unsigned int v)
+{
+    static const char d[] = "0123456789abcdef";
+    int i;
+    *o++ = '0';
+    *o++ = 'x';
+    for (i = 28; i >= 0; i -= 4)
+        *o++ = d[(v >> i) & 15];
+    return o;
+}
+
+static char *p4b2720_dec(char *o, int v)
+{
+    char t[12];
+    int i = 0;
+    if (v < 0) {
+        *o++ = '-';
+        v = -v;
+    }
+    do
+        t[i++] = (char)('0' + v % 10);
+    while (v /= 10);
+    while (i)
+        *o++ = t[--i];
+    return o;
+}
+
+/* the contents of a std::string (data at +0, size at +0x10) */
+static char *p4b2720_str(char *o, const char *s)
+{
+    const unsigned char *d = *(const unsigned char **)s;
+    unsigned int n = *(const unsigned int *)(s + 0x10), i;
+    *o++ = '\'';
+    if (!d)
+        *o++ = '?';
+    for (i = 0; i < n && i < 48; i++)
+        *o++ = d[i] >= 0x20 && d[i] < 0x7f ? (char)d[i] : '?';
+    *o++ = '\'';
+    return o;
+}
+
+static void p4b2720_log(const char *what, const char *s, unsigned int a, unsigned int b, int c)
+{
+    char line[192], *o = line;
+    const char *t = "4b2720 ";
+    while (*t)
+        *o++ = *t++;
+    while (*what)
+        *o++ = *what++;
+    if (s)
+        o = p4b2720_str(o, s);
+    t = " a=";
+    while (*t)
+        *o++ = *t++;
+    o = p4b2720_hex(o, a);
+    t = " b=";
+    while (*t)
+        *o++ = *t++;
+    o = p4b2720_hex(o, b);
+    t = " c=";
+    while (*t)
+        *o++ = *t++;
+    o = p4b2720_dec(o, c);
+    *o = 0;
+    DebugLog(line);
+}
+#endif
+
 DECOMP(004B2720)
 void *__thiscall f_004B2720(void *self, int a, void *list)
 {
@@ -102,6 +177,10 @@ void *__thiscall f_004B2720(void *self, int a, void *list)
         imp_00607330(&r1.key);
         sub_004220A0(&h);
     }
+#ifdef DECOMP_DEBUG_LOG
+    p4b2720_log(" hero", hero + 8, (unsigned int)(size_t)hero, (unsigned int)(size_t)this, 0);
+    p4b2720_log(" skin", &skin, 0, 0, 0);
+#endif
     {
         Str_4B2720 k1, k2;
         Tbl_4B2720 h, t;
@@ -153,6 +232,12 @@ void *__thiscall f_004B2720(void *self, int a, void *list)
     }
     sub_0057AC90(&anim, 2);
     sub_0057AC90(&anim, 5);
+#ifdef DECOMP_DEBUG_LOG
+    p4b2720_log(" skins", 0, skins.w[0], skins.w[1], (int)skins.w[2]);
+    p4b2720_log(" anim", 0, anim.w[0], anim.w[1], (int)anim.w[2]);
+    p4b2720_log(" glow", 0, glow.w[0], glow.w[1], (int)glow.w[2]);
+    p4b2720_log(" model", &name, 0, 0, 0);
+#endif
 
     mem = sub_005E3EAE(0x204);
     if (mem) {
@@ -198,6 +283,10 @@ void *__thiscall f_004B2720(void *self, int a, void *list)
         p = 0;
     *(void **)(this + 0x78) = p;
     add_4B2720(this, p);
+#ifdef DECOMP_DEBUG_LOG
+    p4b2720_log(" built", 0, (unsigned int)(size_t)*model, (unsigned int)(size_t)*(void **)(this + 0x7c),
+                (int)(size_t)*(void **)(this + 0x78));
+#endif
 
     sub_00403390(LS, REG, (int)glow.w[2]);
     it[1] = 0;
@@ -220,6 +309,9 @@ void *__thiscall f_004B2720(void *self, int a, void *list)
         } else
             ps = 0;
         sub_0054EA10(ps, sub_0057AFB0(&val, 0x34, &s, 4));
+#ifdef DECOMP_DEBUG_LOG
+        p4b2720_log(" effect", &s, (unsigned int)(size_t)ps, 0, 0);
+#endif
         imp_00607330(&s);
         n = (int)(long long)sub_0057AC90(&val, 1);
         sub_0054FE30(ps, n, 0.0f);
@@ -230,6 +322,13 @@ void *__thiscall f_004B2720(void *self, int a, void *list)
         pos[2] = (float)(0.0f + hp[2]);
         ((place_4B2720)*(void **)(ps + 0x2f4))(*(void **)(ps + 0x2f8), ps + 0x2e4, pos);
         add_4B2720(this, ps);
+#ifdef DECOMP_DEBUG_LOG
+        {   /* the count and the height the particle system got */
+            unsigned int hb;
+            __builtin_memcpy(&hb, &h, 4);
+            p4b2720_log(" entry", 0, (unsigned int)(size_t)ps, hb, n);
+        }
+#endif
         sub_004220A0(&val);
         sub_00402A70(LS, -2);
         *(unsigned char *)&it[2] = sub_00403B00(LS, -2) == 0;

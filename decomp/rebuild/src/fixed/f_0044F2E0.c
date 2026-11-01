@@ -106,8 +106,17 @@ static int same_44F2E0(const char *a, const char *b, int n)
     return 1;
 }
 
+#ifdef DECOMP_TEST_INPUT
+/* "skipintro" in testinput.txt (main.cpp sets the flag before Init): the start-up videos are not played */
+extern int g_skipIntro;
+#endif
+
 static void logo_44F2E0(char *this, const char *file)
 {
+#ifdef DECOMP_TEST_INPUT
+    if (g_skipIntro)
+        return;
+#endif
     Str_44F2E0 s;
     int w = *(int *)(CFG + 0x40), h = *(int *)(CFG + 0x44);
     imp_00607324(&s, file);

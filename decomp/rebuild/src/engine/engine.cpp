@@ -228,24 +228,30 @@ void TestLua()
     g_testLua[0] = 0;
 }
 
-/* Debug hotkeys for manual tests (bisection needs a level-up, money and time in a few seconds): with Ctrl held,
- * F6 adds 100000 experience (the world trigger levels the hero up on its next evaluation), F7 100000 gold,
- * F8 twelve game hours and F9 seven game days.  They only queue a Lua chunk for TestLua (the end of the frame),
- * so the game state is changed where its own handlers run; the edge detection keeps a held key to one press. */
+/* Debug hotkeys for manual tests (bisection needs a level-up, money and time in a few seconds): with Alt held,
+ * 1 adds 100000 experience (the world trigger levels the hero up on its next evaluation), 2 100000 gold,
+ * 3 twelve game hours and 4 seven game days.  The game uses the F keys itself, so they are left alone.  Each
+ * press queues a Lua chunk for TestLua (the end of the frame), so the game state is changed where its own
+ * handlers run, and shows a message the way the game's scripts do (Message.new, its size taken from the GUI's
+ * message style); the edge detection keeps a held key to one press. */
 static void DebugKeys()
 {
-    static const struct { int vk; const char *lua; const char *log; } keys[] = {
-        { VK_F6, "Actions:Expirience(100000)", "debug: +100000 experience" },
-        { VK_F7, "Actions:Gold(100000)", "debug: +100000 gold" },
-        { VK_F8, "Clock_AddMin(720)", "debug: +12 game hours" },
-        { VK_F9, "Clock_AddMin(10080)", "debug: +7 game days" },
+    static const struct { int vk; const char *lua; const char *msg; } keys[] = {
+        { '1', "Actions:Expirience(100000)", "+100000 experience" },
+        { '2', "Actions:Gold(100000)", "+100000 gold" },
+        { '3', "Clock_AddMin(720)", "+12 game hours" },
+        { '4', "Clock_AddMin(10080)", "+7 game days" },
     };
     static bool down[sizeof(keys) / sizeof(keys[0])];
-    bool ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+    bool alt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
     for (unsigned i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
-        bool now = ctrl && (GetAsyncKeyState(keys[i].vk) & 0x8000) != 0;
+        bool now = alt && (GetAsyncKeyState(keys[i].vk) & 0x8000) != 0;
         if (now && !down[i] && !g_testLua[0]) {
-            sprintf(g_testLua, "pcall(function() %s DecompLog('%s') end)", keys[i].lua, keys[i].log);
+            sprintf(g_testLua,
+                    "pcall(function() %s DecompLog('%s') end) "
+                    "pcall(function() Message:new('%s', TextStyle.tsMessages1.Size * Config.ResolutionCoefH, "
+                    "TextStyle.tsMessages1.FontFile, TextStyle.tsMessages1.ColorFile) end)",
+                    keys[i].lua, keys[i].msg, keys[i].msg);
             g_testLuaWait = 0;
         }
         down[i] = now;

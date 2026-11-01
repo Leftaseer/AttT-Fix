@@ -79,7 +79,7 @@ struct CInput {                              /* CSingleton<CInput> (0x7CC bytes)
 };
 static_assert(sizeof(CInput) == 0x7CC, "CInput is 0x7CC bytes");
 #ifdef DECOMP_DEBUG_LOG
-void DebugLog(const char *text);             /* main.cpp: a line in decomp_debug.log next to the exe */
+extern "C" void DebugLog(const char *text);  /* main.cpp: a line in decomp_debug.log next to the exe */
 #endif
 #ifdef DECOMP_TEST_INPUT
 void TestInput(CInput *input);

@@ -339,6 +339,8 @@ def main():
                     '(coverage.c, decomp_coverage.bin next to the exe; tools/coverage.py reads it)')
     ap.add_argument('--auto-list', help='only these auto-decompiled functions (file with one address per line)')
     ap.add_argument('--auto-exclude', help='not these auto-decompiled functions (e.g. bad.txt of tools/autobisect.py)')
+    ap.add_argument('--fixed-exclude', help='not these hand-written functions (file with one address per line): the '
+                    'generated code, or the original when there is none, takes their place')
     a = ap.parse_args()
 
     pe = PE(a.exe)
@@ -418,6 +420,9 @@ def main():
         fixed = {}
         for fx in sorted(glob.glob(os.path.join(fixed_dir, 'f_*.c'))) if game == 'attt' else []:
             fixed[int(os.path.basename(fx)[2:10], 16)] = fx
+        if a.fixed_exclude:
+            drop = set(int(l.split()[0], 16) for l in open(a.fixed_exclude) if l.strip() and not l.startswith('#'))
+            fixed = {ad: fx for ad, fx in fixed.items() if ad not in drop}
         if fixed:
             if allow is None:
                 allow = set(int(l.split('\t')[0], 16) for l in open(os.path.join(a.auto, 'functions.tsv'))
@@ -431,7 +436,8 @@ def main():
                   '-x', 'c', '-std=gnu11', '-w',
                   '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types',
                   '-Wno-error=incompatible-function-pointer-types', '-Wno-error=int-to-pointer-cast', '-Wno-error=return-type',
-                  '-I', os.path.join(HERE, 'include'), '-I', os.path.abspath(a.auto)]
+                  # the hand-written code of src/fixed is compiled here: it sees -D too (the probes of DECOMP_DEBUG_LOG)
+                  '-I', os.path.join(HERE, 'include'), '-I', os.path.abspath(a.auto)] + ['-D' + d for d in a.defines]
         # the prototypes the generated code uses: the register lists in their parameter order (they may name
         # registers the function does not read, which is harmless) and the ret pop
         for l in open(os.path.join(a.auto, 'convs.tsv')):

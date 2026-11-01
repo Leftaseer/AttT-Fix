@@ -28,7 +28,7 @@ CGameException::CGameException(const std::string &msg, const char *file, int lin
 
 #ifdef DECOMP_DEBUG_LOG
 /* decomp_debug.log next to the exe (the game's current folder may be another one) */
-void DebugLog(const char *text)
+extern "C" void DebugLog(const char *text)
 {
     static char path[MAX_PATH];
     if (!path[0]) {
@@ -341,71 +341,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
 #ifdef DECOMP_TEST_INPUT
 /* "skipintro" in testinput.txt (the bisection script writes it): the start-up videos (1CLogo.bik, logo.bik,
- * intro.bik) end at once.  The game's own player (0x4F7640) stops a video on the key-up of Escape, Enter or
- * Space among the window messages once 20 frames are shown, so while a video opened during CEngine::Init is open
- * (_BinkOpen@8 to _BinkClose@4, both reached through the import table; the videos come from memory, the packed
- * resources, not by file name) a thread posts that key-up every 100 ms.  The engine's
- * own "-nologo" is no use here: it is a developer switch that also starts in a world level without the menus,
- * where loading a saved game ends the game. */
-static void *(__stdcall *g_binkOpen)(const char *, unsigned);
-static void (__stdcall *g_binkClose)(void *);
-static void *volatile g_skipping;           /* the start-up video being skipped */
-static bool g_starting;                     /* in CEngine::Init: the videos opened now are the start-up ones */
-
-static DWORD WINAPI SkipIntroKeys(void *bink)
-{
-    for (int k = 0; k < 600 && g_skipping == bink; k++) {
-        PostMessageA(g_hWnd, WM_KEYUP, VK_ESCAPE, 0xC0010001);
-        Sleep(100);
-    }
-    return 0;
-}
-
-static void *__stdcall SkipIntroBinkOpen(const char *name, unsigned flags)
-{
-    void *bink = g_binkOpen(name, flags);
-    if (bink && g_starting) {
-        g_skipping = bink;
-        CloseHandle(CreateThread(nullptr, 0, SkipIntroKeys, bink, 0, nullptr));
-    }
-    return bink;
-}
-
-static void __stdcall SkipIntroBinkClose(void *bink)
-{
-    if (bink == g_skipping)
-        g_skipping = nullptr;
-    g_binkClose(bink);
-}
-
-/* the import table slot of DLL!NAME in this exe, or null */
-static void **ImportSlot(const char *dll, const char *name)
-{
-    char *base = (char *)GetModuleHandleA(nullptr);
-    IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
-    IMAGE_DATA_DIRECTORY &d = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-    for (IMAGE_IMPORT_DESCRIPTOR *i = (IMAGE_IMPORT_DESCRIPTOR *)(base + d.VirtualAddress); i->Name; i++) {
-        if (lstrcmpiA(base + i->Name, dll))
-            continue;
-        IMAGE_THUNK_DATA *names = (IMAGE_THUNK_DATA *)(base + (i->OriginalFirstThunk ? i->OriginalFirstThunk : i->FirstThunk));
-        void **slots = (void **)(base + i->FirstThunk);
-        for (int k = 0; names[k].u1.AddressOfData; k++)
-            if (!(names[k].u1.Ordinal & IMAGE_ORDINAL_FLAG) &&
-                !lstrcmpA(((IMAGE_IMPORT_BY_NAME *)(base + names[k].u1.AddressOfData))->Name, name))
-                return &slots[k];
-    }
-    return nullptr;
-}
-
-static void *Hook(void **slot, void *fn)
-{
-    DWORD old;
-    VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &old);
-    void *was = *slot;
-    *slot = fn;
-    VirtualProtect(slot, sizeof(void *), old, &old);
-    return was;
-}
+ * intro.bik) are not played at all.  CEngine::Init plays them with its logo loop (src/fixed/f_0044F2E0.c,
+ * logo_44F2E0), which returns at once while this flag is set; the videos themselves cost a few seconds of
+ * frames each.  The engine's own "-nologo" is no use here: it is a developer switch that also starts in a
+ * world level without the menus, where loading a saved game ends the game. */
+extern "C" int g_skipIntro = 0;
 
 static void SkipIntroIfAsked()
 {
@@ -413,18 +353,10 @@ static void SkipIntroIfAsked()
     if (!f)
         return;
     char line[256];
-    bool skip = false;
     while (fgets(line, sizeof(line), f))
         if (strstr(line, "skipintro"))
-            skip = true;
+            g_skipIntro = 1;
     fclose(f);
-    void **open = skip ? ImportSlot("binkw32.dll", "_BinkOpen@8") : nullptr;
-    void **close = skip ? ImportSlot("binkw32.dll", "_BinkClose@4") : nullptr;
-    if (!open || !close)
-        return;
-    g_starting = true;
-    g_binkClose = (void (__stdcall *)(void *))Hook(close, (void *)SkipIntroBinkClose);
-    g_binkOpen = (void *(__stdcall *)(const char *, unsigned))Hook(open, (void *)SkipIntroBinkOpen);
 }
 #endif
 
@@ -472,9 +404,6 @@ void GameMain(const char *cmdLine)
     SkipIntroIfAsked();
 #endif
     g_engine->Init(std::string(cmdLine));
-#ifdef DECOMP_TEST_INPUT
-    g_starting = false;
-#endif
     g_engine->SetActive(g_appActive);
 
     HACCEL accel = LoadAcceleratorsA(GetModuleHandleA(nullptr), MAKEINTRESOURCEA(101));
