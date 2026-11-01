@@ -4,10 +4,24 @@
  * (+0x74, "Creature" textures, 0x0042A0D0 / 0x0042A530) placed at the hero with the hero's direction and unit scale,
  * its animation player (+0x7C, 0x004B2430) and its shadow (+0x78, 0x004EC6F0); every entry of RankChangeGlow adds a
  * BloodPS particle system (0x00550420) with the entry's effect (field 0x34 as text), count (field 1) and height
- * (field 2) above the hero. Returns this */
+ * (field 2) above the hero. Returns this.
+ *
+ * The original reads the animation table's field 2 (first frame) and field 5 (last frame), truncates both to int and
+ * stores them in the two stack words right after the model-name std::string; 0x0042A530 picks them up from
+ * &name+0x1c / &name+0x20 as the model's frame range (+0x1d0/+0x1d4).  The name therefore lives in a struct whose
+ * trailing ints are that range, and the pointer passed to 0x0042A530 is the string member of it. */
 /* @conv ECX 8 */
 #include "auto_pre.h"
+/* the scene this constructor built, for the bisection diagnostics in src/engine/engine.cpp (screenshots of the
+ * frames after it, and of the frames while it is the engine's current scene) */
+void *g_rankSceneMade;
 typedef struct { unsigned int w[7]; } Str_4B2720;                 /* std::string */
+/* 0x0042A530 takes the model name as a std::string pointer and reads the animation's first and last frame from the
+ * two words that follow it: the original keeps them right after the name local, so this struct has to as well. */
+typedef struct { Str_4B2720 name; int first, last; } Name_4B2720;
+_Static_assert(sizeof(Str_4B2720) == 0x1c, "MSVC8 std::string layout");
+_Static_assert(__builtin_offsetof(Name_4B2720, first) == 0x1c && __builtin_offsetof(Name_4B2720, last) == 0x20,
+               "0x0042A530 reads the animation frame range at &name+0x1c/+0x20");
 typedef struct { unsigned int w[3]; } Tbl_4B2720;                 /* nScript::Table */
 typedef struct { void *tbl; Str_4B2720 key; } Ref_4B2720;
 typedef struct { Tbl_4B2720 t; const char *k; } RefC_4B2720;
@@ -156,7 +170,8 @@ void *__thiscall f_004B2720(void *self, int a, void *list)
     char *this = (char *)self, *hero, *cr;
     void **model = (void **)(this + 0x74);
     unsigned int ebx;
-    Str_4B2720 skin, name;
+    Str_4B2720 skin;
+    Name_4B2720 nm;
     Tbl_4B2720 skins, anim, glow;
     unsigned int it[3];
     void *mem, *p;
@@ -226,40 +241,32 @@ void *__thiscall f_004B2720(void *self, int a, void *list)
         sub_00435D90(&glow, &t);
         sub_004220A0(&t);
     }
-    imp_006071E0(&name);
+    imp_006071E0(&nm.name);
     {
         struct { void *t; int i; } k;
         Str_4B2720 s;
         k.t = &anim;
         k.i = 1;
-        imp_0060731C(&name, sub_0045BB70(&k, ebx, &s));
+        imp_0060731C(&nm.name, sub_0045BB70(&k, ebx, &s));
         imp_00607330(&s);
     }
-#ifdef DECOMP_DEBUG_LOG
-    {   /* the two values the original reads and throws away: field 2 and field 5 of the animation table */
-        float a2 = sub_0057AC90(&anim, 2);
-        float a5 = sub_0057AC90(&anim, 5);
-        unsigned int b2, b5;
-        __builtin_memcpy(&b2, &a2, 4);
-        __builtin_memcpy(&b5, &a5, 4);
-        p4b2720_log(" anim25", 0, b2, b5, 0);
+    {   /* the animation's frame range: fields 2 and 5, truncated toward zero like the original's fistpll */
+        nm.first = (int)sub_0057AC90(&anim, 2);
+        nm.last = (int)sub_0057AC90(&anim, 5);
     }
-#else
-    sub_0057AC90(&anim, 2);
-    sub_0057AC90(&anim, 5);
-#endif
 #ifdef DECOMP_DEBUG_LOG
+    p4b2720_log(" anim25", 0, (unsigned int)nm.first, (unsigned int)nm.last, 0);
     p4b2720_log(" skins", 0, skins.w[0], skins.w[1], (int)skins.w[2]);
     p4b2720_log(" anim", 0, anim.w[0], anim.w[1], (int)anim.w[2]);
     p4b2720_log(" glow", 0, glow.w[0], glow.w[1], (int)glow.w[2]);
-    p4b2720_log(" model", &name, 0, 0, 0);
+    p4b2720_log(" model", &nm.name, 0, 0, 0);
 #endif
 
     mem = sub_005E3EAE(0x204);
     if (mem) {
         Str_4B2720 c;
         imp_00607324(&c, d_0060C118);
-        p = sub_0042A530(mem, &name, sub_0042A0D0(&name, &c, 1), 1);
+        p = sub_0042A530(mem, &nm.name, sub_0042A0D0(&nm.name, &c, 1), 1);
         *model = p;
         add_4B2720(this, p);
         imp_00607330(&c);
@@ -359,10 +366,11 @@ void *__thiscall f_004B2720(void *self, int a, void *list)
     }
     ((vf0_4B2720)VF(hero, 0x50))(hero);
     sub_0045C920(it);
-    imp_00607330(&name);
+    imp_00607330(&nm.name);
     sub_004220A0(&glow);
     sub_004220A0(&anim);
     sub_004220A0(&skins);
     imp_00607330(&skin);
+    g_rankSceneMade = this;
     return this;
 }
