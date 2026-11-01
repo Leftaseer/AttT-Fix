@@ -346,17 +346,25 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
  * frames each.  The engine's own "-nologo" is no use here: it is a developer switch that also starts in a
  * world level without the menus, where loading a saved game ends the game. */
 extern "C" int g_skipIntro = 0;
+extern "C" FILE *TestInputFile();
 
 static void SkipIntroIfAsked()
 {
-    FILE *f = fopen("testinput.txt", "r");
-    if (!f)
+    FILE *f = TestInputFile();
+    if (!f) {
+#ifdef DECOMP_DEBUG_LOG
+        DebugLog("skipintro: no testinput.txt (the intro will play)");
+#endif
         return;
+    }
     char line[256];
     while (fgets(line, sizeof(line), f))
         if (strstr(line, "skipintro"))
             g_skipIntro = 1;
     fclose(f);
+#ifdef DECOMP_DEBUG_LOG
+    DebugLog(g_skipIntro ? "skipintro: on" : "skipintro: no 'skipintro' line");
+#endif
 }
 #endif
 

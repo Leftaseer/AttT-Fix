@@ -197,6 +197,9 @@ STACK_ONLY = set()      # DECOMP_STACK: replacements taking every argument on th
 # replacements a --toggle build never switches off: the entries of the Lua library, whose original code does not work
 # on the state the new one made
 ALWAYS_ON = set()
+# engine functions kept in src/fixed rather than src/engine, which a bisection step must not switch off either:
+# CEngine::Init plays the start-up videos, and the test input skips them (g_skipIntro)
+HARNESS_EXTRA = {0x0044F2E0}
 
 
 def scan_sources(files, cflags):
@@ -528,6 +531,11 @@ def main():
             sys.exit('%s: cannot find the compiled symbol of %s (candidates: %s)' % (fn, name, cands))
         sym = cands[0]
         ga = addr if addr in native else gaddr(addr)
+        if a.toggle and (ga not in native or addr in HARNESS_EXTRA):
+            # the hand-written code (src/engine, src/fixed) stays replaced in every bisection step: it is the
+            # engine that runs the test input (skipping the intros, loading the save, the debug keys), so a step
+            # that switched it off would break the test itself, not the function under test
+            ALWAYS_ON.add(ga)
         if game == 'valk' and addr not in native and fhow.get(addr) not in TRUSTED:
             sys.exit('%s: %s: the Valkyrie match of %08X is only "%s"; check it and mark it "manual" in '
                      'symbols/attt2valk.tsv, or exclude the function with #if DECOMP_GAME_ATTT'
@@ -747,6 +755,14 @@ def main():
                 f.write('%08X\t%s\n' % (ad, why))
         print('%d auto-decompiled functions left out (prototype does not fit; see %s)' % (len(skipped), os.path.join(work, 'skipped.txt')))
     print('%s: %d replaced functions, %d original symbols used -> %s' % (game, len(repl), len(syms), a.out))
+    if a.toggle:
+        # the bisection list next to the exe: every replacement a step may switch, sorted by original address
+        # (bisect scripts take "the first k" as an address range, so the order has to be the address order)
+        tl = os.path.splitext(a.out)[0] + '_toggle_list.txt'
+        with open(tl, 'w') as f:
+            f.write(''.join('%08X\n' % ga for ga, _ in sorted(repl) if ga not in ALWAYS_ON))
+        print('%s: %d switchable functions (the hand-written engine code stays on)' % (tl, sum(1 for ga, _ in repl
+                                                                                          if ga not in ALWAYS_ON)))
 
 
 if __name__ == '__main__':

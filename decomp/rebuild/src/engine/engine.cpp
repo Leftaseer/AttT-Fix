@@ -91,6 +91,23 @@ ORIG_DATA(0060C798);    /* evMoveInfo::vftable */
 ORIG_THISCALL(0057D220, void, (void *vm, const char *buf, int len, const char *name));   /* runs a Lua chunk */
 ORIG_DATA(006C88D4);    /* the script machine (its lua_State is used by every DoFile) */
 
+/* testinput.txt: in the working directory first (tools/rungame.py starts the game there), then next to the exe, so
+ * a script that starts the game with another working directory still finds it (bisect scripts, Start-Process) */
+extern "C" FILE *TestInputFile()
+{
+    FILE *f = fopen("testinput.txt", "r");
+    if (f)
+        return f;
+    char path[MAX_PATH];
+    GetModuleFileNameA(nullptr, path, sizeof(path));
+    char *slash = path;
+    for (char *p = path; *p; p++)
+        if (*p == '\\' || *p == '/')
+            slash = p + 1;
+    lstrcpynA(slash, "testinput.txt", (int)(sizeof(path) - (slash - path)));
+    return fopen(path, "r");
+}
+
 static void TestMove(float dx, float dy)
 {
     struct { void *vftable; float dx, dy, dz; } move = { d_0060C798, dx, dy, 0.0f };
@@ -167,22 +184,39 @@ static int __cdecl DecompLogLua(void *L)
     return 0;
 }
 
-/* "MS loadsave NAME" (the bisection script's game0): from the main menu, open the load menu, choose the saved game
- * NAME (Saves/NAME.sav, '*' the first one) and load it, tried every second until it is done or the save is not
- * there.  Once the world's GUI scene is up again, "autoload: loaded at MS ms" goes to the debugger output (the
- * tests wait for it, tools/rungame.py 'until'), and lines "L+MS ..." run MS milliseconds after that. */
+/* "MS loadsave NAME" (the bisection script's game0): open the load screen the way the main menu's Load button does
+ * (GUIScene.MainMenu.scene:ChooseScene('Load'), sceneload.lua), pick the saved game NAME (Saves/NAME.sav, '*' the
+ * first one) and press its Load button (StrongLoad), tried every second until it is done or the save is not there.
+ * Once the world's GUI scene is up again, "autoload: loaded at MS ms" goes to the debugger output (the tests wait
+ * for it, tools/rungame.py 'until'), and lines "L+MS ..." run MS milliseconds after that. */
 static char g_autoload[64];
 static int g_autoloadState;     /* 0 none, 1 trying, 2 loading, 3 not found, 4 loaded */
+static int g_autoloadTries;     /* attempts while the menu and the load screen are not up yet */
 static DWORD g_autoloadNext, g_loadedAt;
 
 static int __cdecl DecompAutoloadLua(void *L)
 {
     char *v = *(char **)((char *)L + 12);
-    if (v < *(char **)((char *)L + 8) && *(int *)(v + 4) == 3)
-        g_autoloadState = (int)*(float *)v;
+    if (v < *(char **)((char *)L + 8) && *(int *)(v + 4) == 3) {
+        int state = (int)*(float *)v;
+        if (state == 5) {           /* the load screen is not up (yet): look again on the next turn */
+            if (++g_autoloadTries > 120 && g_autoloadState == 1) {
+                g_autoloadState = 3;
+#ifdef DECOMP_DEBUG_LOG
+                DebugLog("autoload: the main menu or the load screen never appeared");
+#endif
+            }
+            return 0;
+        }
+        g_autoloadState = state;
+    }
     return 0;
 }
 
+/* GUIScenes.MainMenu is GUIScene.MainMenu (guiscenes.lua): its _Load handler is exactly the Load button.  The load
+ * scene's ParseFiles fills _SlotNames and _FirstSlotNum; StrongLoad loads _SlotNames[_FirstSlotNum + _CurrentSlotNum
+ * - 1].  Nothing happens if the scene tables have other names (an older build of the scripts): every step says so
+ * once in decomp_debug.log, so a run that does not load explains itself. */
 static void AutoloadStep(DWORD start)
 {
     if (g_autoloadState == 4 && !g_loadedAt) {
@@ -199,13 +233,28 @@ static void AutoloadStep(DWORD start)
                            "if W and rawget(W, 'scene') then DecompAutoload(4) end end)");
     else
         sprintf(g_testLua,
-                "pcall(function() local L = GUIScene and GUIScene.Load "
-                "if L and L.scene and L._SlotNames then "
-                "for i, n in pairs(L._SlotNames) do if n == '%s' or '%s' == '*' then L._CurrentSlotNum = i "
-                "DecompAutoload(2) DecompLog('autoload: ' .. n) L:StrongLoad() return end end "
-                "DecompAutoload(3) DecompLog('autoload: no saved game %s') return end "
-                "for k, v in pairs(GUIScene or {}) do if type(v) == 'table' and rawget(v, '_ChooseHero') and v.scene then "
-                "v:_Load() return end end end)", g_autoload, g_autoload, g_autoload);
+                "pcall(function() "
+                "local L = GUIScene and GUIScene.Load "
+                "local M = GUIScene and GUIScene.MainMenu "
+                "if L and L.scene then "
+                "  local names = L._SlotNames "
+                "  local n = names and #names or 0 "
+                "  if n > 0 then "
+                "    local want, idx = '%s', 0 "
+                "    for i = 1, n do "
+                "      if names[i] == want or want == '*' and i == 1 then idx = i break end end "
+                "    if idx > 0 then "
+                "      L._CurrentSlotNum = idx - (L._FirstSlotNum or 1) + 1 "
+                "      DecompAutoload(2) DecompLog('autoload: ' .. names[idx]) L:StrongLoad() return end "
+                "    DecompAutoload(3) DecompLog('autoload: no saved game %s among ' .. n) return end "
+                "  DecompAutoload(5) return end "
+                "if M and M.scene then "
+                "  if not _DecompLoadOpened then _DecompLoadOpened = 1 "
+                "    DecompLog('autoload: opening the load screen') end "
+                "  M.scene:ChooseScene('Load') "
+                "elseif not _DecompNoMenu then _DecompNoMenu = 1 "
+                "  DecompLog('autoload: no main menu yet') end "
+                "DecompAutoload(5) end)", g_autoload, g_autoload);
     g_testLuaWait = 0;
 }
 
@@ -276,9 +325,12 @@ void TestInput(CInput *input)
     struct { void *vftable; } info = { d_0060AC14 };
     if (!opened) {
         opened = true;
-        f = fopen("testinput.txt", "r");
+        f = TestInputFile();
         start = GetTickCount();
         OutputDebugStringA(f ? "testinput.txt opened" : "no testinput.txt");
+#ifdef DECOMP_DEBUG_LOG
+        DebugLog(f ? "testinput: opened" : "testinput: not found in the working directory nor next to the exe");
+#endif
     }
     static DWORD beat;
     if (GetTickCount() - beat > 5000) {
@@ -360,6 +412,137 @@ void TestInput(CInput *input)
 }
 #endif
 
+#ifdef DECOMP_TEST_INPUT
+/* Bisection diagnostics for the rank-change scene (the "no animation" bug): src/fixed/f_004B2720.c publishes the
+ * scene it built, and the frames after that, plus the frames while it is the engine's own current scene, are
+ * written next to the exe as small BMPs (rc_NN / rs_NN), so whether the scene was shown can be looked at instead
+ * of remembered.  decomp_debug.log gets every scene change, the frame the scene was built, the frame it became the
+ * current one, and the name of each shot. */
+extern "C" void *g_rankSceneMade;
+static void *g_rankSeen;                 /* the built scene the schedule below belongs to */
+static unsigned g_rankFrame, g_rankShot;
+static const unsigned RANK_SHOT_AT[] = { 20, 50, 80, 110, 140, 170 };
+static void *g_sceneSeen;                /* last value of scene, for the change log */
+static void *g_rankCurrent;             /* the built scene, once it is the engine's scene */
+static unsigned g_currentFrame, g_currentShot;
+static const unsigned CURRENT_SHOT_AT[] = { 10, 40, 70, 100 };
+
+static void RankWatch(void *current, unsigned frame)
+{
+    char b[96];
+    if (current != g_sceneSeen) {
+        g_sceneSeen = current;
+        wsprintfA(b, "scene %08X at frame %u", (unsigned)(size_t)current, frame);
+        DebugLog(b);
+    }
+    if (g_rankSceneMade != g_rankSeen) {
+        g_rankSeen = g_rankSceneMade;
+        g_rankFrame = frame;
+        g_rankShot = 0;
+        if (g_rankSeen) {
+            wsprintfA(b, "rankchange: built at frame %u", frame);
+            DebugLog(b);
+        }
+    }
+    if (g_rankSeen && current == g_rankSeen && g_rankCurrent != g_rankSeen) {
+        g_rankCurrent = g_rankSeen;
+        g_currentFrame = frame;
+        g_currentShot = 0;
+        wsprintfA(b, "rankchange: current scene at frame %u", frame);
+        DebugLog(b);
+    }
+}
+
+/* the next shot due this frame, or 0 */
+static const char *RankShotName(unsigned frame)
+{
+    static char name[32];
+    if (g_rankSeen && g_rankShot < sizeof(RANK_SHOT_AT) / sizeof(RANK_SHOT_AT[0]) &&
+        frame - g_rankFrame == RANK_SHOT_AT[g_rankShot])
+        wsprintfA(name, "rc_%02u.bmp", g_rankShot++);
+    else if (g_rankCurrent && g_currentShot < sizeof(CURRENT_SHOT_AT) / sizeof(CURRENT_SHOT_AT[0]) &&
+             frame - g_currentFrame == CURRENT_SHOT_AT[g_currentShot])
+        wsprintfA(name, "rs_%02u.bmp", g_currentShot++);
+    else
+        return nullptr;
+    return name;
+}
+
+/* the back buffer at a quarter of its size, next to the exe (1600x1200 -> 400x300, 24-bit BMP) */
+static void SaveBackBuffer(const char *name, unsigned frame)
+{
+    IDirect3DDevice9 *dev = g_d3dDevice;
+    IDirect3DSurface9 *rt = nullptr, *sys = nullptr;
+    D3DSURFACE_DESC d;
+    D3DLOCKED_RECT lr;
+    FILE *f;
+    unsigned w, h, pad, y, x;
+    unsigned char hdr[54] = { 0 }, row[4096];
+    char path[MAX_PATH], *slash;
+    unsigned total;
+    if (dev->GetRenderTarget(0, &rt) < 0)
+        return;
+    if (rt->GetDesc(&d) < 0)
+        goto done;
+    if (dev->CreateOffscreenPlainSurface(d.Width, d.Height, d.Format, D3DPOOL_SYSTEMMEM, &sys, nullptr) < 0)
+        goto done;
+    if (dev->GetRenderTargetData(rt, sys) < 0 || sys->LockRect(&lr, nullptr, D3DLOCK_READONLY) < 0)
+        goto done;
+    w = d.Width / 4;
+    h = d.Height / 4;
+    pad = (w * 3 + 3) & ~3u;
+    if (pad > sizeof(row))
+        goto done;
+    GetModuleFileNameA(nullptr, path, sizeof(path));
+    slash = path;
+    for (char *p = path; *p; p++)
+        if (*p == '\\' || *p == '/')
+            slash = p + 1;
+    lstrcpynA(slash, name, (int)(sizeof(path) - (slash - path)));
+    f = fopen(path, "wb");
+    if (!f)
+        goto done;
+    {
+        unsigned off = 54, hsize = 40, planes = 1, bpp = 24, raw = pad * h;
+        int iw = (int)w, ih = (int)h;
+        total = 54 + pad * h;
+        hdr[0] = 'B';
+        hdr[1] = 'M';
+        __builtin_memcpy(hdr + 2, &total, 4);
+        __builtin_memcpy(hdr + 10, &off, 4);
+        __builtin_memcpy(hdr + 14, &hsize, 4);
+        __builtin_memcpy(hdr + 18, &iw, 4);
+        __builtin_memcpy(hdr + 22, &ih, 4);
+        __builtin_memcpy(hdr + 26, &planes, 2);
+        __builtin_memcpy(hdr + 28, &bpp, 2);
+        __builtin_memcpy(hdr + 34, &raw, 4);
+    }
+    fwrite(hdr, 1, sizeof(hdr), f);
+    for (y = h; y-- > 0;) {                     /* BMP rows go bottom-up */
+        const unsigned char *src = (const unsigned char *)lr.pBits + (size_t)(y * 4) * lr.Pitch;
+        __builtin_memset(row, 0, pad);
+        for (x = 0; x < w; x++) {
+            const unsigned char *pix = src + (size_t)(x * 4) * 4;
+            row[x * 3 + 0] = pix[0];
+            row[x * 3 + 1] = pix[1];
+            row[x * 3 + 2] = pix[2];
+        }
+        fwrite(row, 1, pad, f);
+    }
+    fclose(f);
+    {
+        char b[64];
+        wsprintfA(b, "shot %s at frame %u", name, frame);
+        DebugLog(b);
+    }
+done:
+    if (sys)
+        sys->Release();
+    if (rt)
+        rt->Release();
+}
+#endif
+
 /* State 1 of the engine: timers, input, PrintScreen (screenshot) and Pause (pauses the game clock), then the
  * updaters, the scene and the GUI. */
 DECOMP(0044A9C0)
@@ -369,6 +552,9 @@ void CEngine::Frame()
     timers->frame.Wait();
     float dt = timers->frame.dt;
     ++frameCount;
+#ifdef DECOMP_TEST_INPUT
+    RankWatch((void *)scene, (unsigned)frameCount);
+#endif
     g_updateRoot->Update(dt);
     input->updater->Update(dt);
 #ifdef DECOMP_TEST_INPUT
@@ -418,6 +604,13 @@ void CEngine::Render()
     scene->Render();
     overlay->Render();
     dev->EndScene();
+#ifdef DECOMP_TEST_INPUT
+    {
+        const char *shot = RankShotName((unsigned)frameCount);
+        if (shot)
+            SaveBackBuffer(shot, (unsigned)frameCount);
+    }
+#endif
     if (g_d3dDevice->Present(nullptr, nullptr, nullptr, nullptr) < 0) {
         if (g_d3dDevice->TestCooperativeLevel() != D3DERR_DEVICENOTRESET)
             ThrowGameException("D3DERR_DEVICENOTRESET", ".\\Engine.cpp", 0x6F0);
