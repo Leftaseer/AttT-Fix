@@ -124,10 +124,12 @@ def load_map(name, how=None):
 WIDE_PARAM = re.compile(r'\b(double|long\s+long|longlong|ulonglong|undefined8|__int64|qword|float10)\b')
 
 
-def split_params(text):
+def split_params(text, types=None):
     """'(lua_State *L, int narg)' -> number of 4-byte stack slots the parameters take: an 8-byte one (double,
     long long, undefined8) takes two, a string by value seven.  Counted as one, an adapter copied a dword too few of 0x48C2D0's arguments
-    (byte, short, undefined8, int, int: 24 bytes), its ret 24 then took an argument for the return address."""
+    (byte, short, undefined8, int, int: 24 bytes), its ret 24 then took an argument for the return address.
+    types: by-value struct typedefs of the source (struct_slots) - a hand-written declaration takes its own
+    name for a std::string (0x5ACE90's Str_5A9550 is 7 slots, counted as 1 the shim left it with other values)."""
     t = text.strip()
     if t.startswith('('):
         t = t[1:t.rfind(')')]
@@ -151,8 +153,44 @@ def split_params(text):
             return 1
         if 'StrByValue' in p_:
             return 7            # a std::string by value (ghidra/ByValueParams.java): 28 bytes, 0x4F7430
+        if types:
+            word = p_.replace('const ', '').split()
+            if len(word) >= 2 and word[0] in types:
+                return types[word[0]]
         return 2 if WIDE_PARAM.search(p_) else 1
     return sum(slots(p_) for p_ in parts)
+
+
+BYVAL_TYPEDEF = re.compile(r'typedef\s+struct\s*\{([^{}]*)\}\s*([A-Za-z_]\w*)\s*;')
+
+
+def struct_slots(src):
+    """typedef struct { ... } Name; of a preprocessed source -> 4-byte stack slots Name takes by value, for the
+    parameters of split_params.  A member of unknown layout (`{`, `(`) leaves the type out: it keeps 1."""
+    out = {}
+    for m in BYVAL_TYPEDEF.finditer(src):
+        n = 0
+        for member in m.group(1).split(';'):
+            member = member.strip()
+            if not member:
+                continue
+            if '(' in member:
+                n = 0
+                break
+            dim = re.search(r'\[\s*(\d+)\s*\]\s*$', member)
+            if dim:
+                n += int(dim.group(1))
+            elif '*' in member:
+                n += 1
+            else:
+                w = member.replace('const ', '').split()
+                if len(w) >= 2 and w[0] in out:
+                    n += out[w[0]]          # a member of another typedef struct of this source
+                else:
+                    n += 2 if WIDE_PARAM.search(member) else 1
+        if n > 1:
+            out[m.group(2)] = n
+    return out
 
 
 STACK_ONLY = set()      # DECOMP_STACK: replacements taking every argument on the stack (decomp.h)
@@ -170,15 +208,16 @@ def scan_sources(files, cflags):
         extra = ['-x', 'c++', '-std=c++17'] if fn.endswith('.cpp') else ['-x', 'c', '-std=c11']
         return cached_run(['clang'] + cflags + extra + ['-DDECOMP_SCAN', '-E', '-P', fn], fn)
     for fn, src in zip(files, pmap(pre, files)):
+        types = struct_slots(src)
         for m in re.finditer(r'__decomp_marker__\(\s*([0-9A-Fa-f]{8})\s*\)\s*([^{;]*?)\b([A-Za-z_][\w:~<>]*)\s*(\((?:[^()]|\([^()]*\))*\))', src):
             addr, name, params = int(m.group(1), 16), m.group(3), m.group(4)
-            decomp.append((addr, name, split_params(params), '::' in name, fn))
+            decomp.append((addr, name, split_params(params, types), '::' in name, fn))
             if '__decomp_stack__' in m.group(2):
                 STACK_ONLY.add(addr)
             if os.path.basename(os.path.dirname(fn)) == 'lua51':
                 ALWAYS_ON.add(addr)
         for m in re.finditer(r'(__cdecl|__stdcall|__fastcall|__thiscall)\s+sub_([0-9A-Fa-f]{8})\s*(\((?:[^()]|\([^()]*\))*\))', src):
-            protos[int(m.group(2), 16)] = (conv_of[m.group(1)], split_params(m.group(3)))
+            protos[int(m.group(2), 16)] = (conv_of[m.group(1)], split_params(m.group(3), types))
     return decomp, protos
 
 
@@ -268,11 +307,16 @@ def shim_asm(name, raw, regs, nstack, retpop):
     """cdecl name(regs..., stack args...) -> original raw entry with its register convention."""
     a = ['\t.globl\t%s' % name, '%s:' % name, '\tpushl\t%ebx', '\tpushl\t%esi', '\tpushl\t%edi', '\tpushl\t%ebp']
     nr = len(regs)
-    # after the 4 pushes the first argument is at 20(%esp)
+    # the original pops more dwords than the C prototype takes (slots its code never reads: autodecomp.py
+    # keeps the callers' argument count and only pops them): the entry's ret N would take them from these
+    # saved registers, so push the filler dwords it pops first
+    extra = (retpop - 4 * nstack) // 4 if retpop and retpop % 4 == 0 and retpop > 4 * nstack else 0
+    a += ['\tpushl\t$0'] * extra
+    # after the 4 pushes (and the fillers) the first argument is at 20(%esp)
     for i in reversed(range(nstack)):
-        a.append('\tpushl\t%d(%%esp)' % (20 + 4 * (nr + i) + 4 * (nstack - 1 - i)))
+        a.append('\tpushl\t%d(%%esp)' % (20 + 4 * (extra + nr + i) + 4 * (nstack - 1 - i)))
     for j, r in enumerate(regs):
-        a.append('\tmovl\t%d(%%esp), %%%s' % (20 + 4 * nstack + 4 * j, r.lower()))
+        a.append('\tmovl\t%d(%%esp), %%%s' % (20 + 4 * (extra + nstack) + 4 * j, r.lower()))
     a.append('\tcalll\t%s' % raw)
     if not retpop and nstack:
         a.append('\taddl\t$%d, %%esp' % (4 * nstack))
@@ -382,7 +426,7 @@ def main():
         # x87 arithmetic like the original (its float code is x87; SSE rounds every step to float)
         # (the machine code's semantics, not C's: integers wrap, memory is accessed through any type, and pointers
         # are plain addresses: 0x470150 counts bytes down in a pointer to NULL, a loop clang made endless otherwise)
-        aflags = ['--target=i686-pc-windows-msvc', '-O1', '-march=pentium-mmx', '-mfpmath=387', '-fms-extensions', '-ffreestanding',
+        aflags = ['--target=i686-pc-windows-msvc', os.environ.get('DECOMP_OPT', '-O1'), '-march=pentium-mmx', '-mfpmath=387', '-fms-extensions', '-ffreestanding',
                   '-fno-builtin', '-fno-stack-protector', '-fwrapv', '-fno-strict-aliasing', '-fno-delete-null-pointer-checks',
                   '-x', 'c', '-std=gnu11', '-w',
                   '-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types',
@@ -429,6 +473,7 @@ def main():
             cached_run(['clang'] + aflags + cov + ['-c', src, '-o', obj], src, obj)
             return cached_run(['clang'] + aflags + ['-DDECOMP_SCAN', '-E', '-P', src], src), obj
         for (fn, src), (pre, obj) in zip(srcs, pmap(scan_compile, srcs)):
+            types = struct_slots(pre)
             for m in re.finditer(r'^/\* @func ([0-9A-F]{8}) custom \*/$', open(src, encoding='utf-8').read(), flags=re.M):
                 custom_auto[int(m.group(1), 16)] = True
             for m in re.finditer(r'__decomp_marker__\(\s*([0-9A-Fa-f]{8})\s*\)\s*([^{;]*?)\b(f_[0-9A-F]{8})\s*(\((?:[^()]|\([^()]*\))*\))', pre):
@@ -436,11 +481,11 @@ def main():
                 if ad in hand:
                     continue
                 cm = re.search(r'__(cdecl|stdcall|fastcall|thiscall)', m.group(2))
-                decomp.append((ad, m.group(3), split_params(m.group(4)), False, src, cm.group(1) if cm else 'cdecl'))
+                decomp.append((ad, m.group(3), split_params(m.group(4), types), False, src, cm.group(1) if cm else 'cdecl'))
                 native.add(ad)
             for m in re.finditer(r'(__cdecl|__stdcall|__fastcall|__thiscall)\s+sub_([0-9A-Fa-f]{8})\s*(\((?:[^()]|\([^()]*\))*\))', pre):
                 conv_of = {'__cdecl': 'FN', '__stdcall': 'STDCALL', '__fastcall': 'FASTCALL', '__thiscall': 'THISCALL'}
-                protos.setdefault(int(m.group(2), 16), (conv_of[m.group(1)], split_params(m.group(3))))
+                protos.setdefault(int(m.group(2), 16), (conv_of[m.group(1)], split_params(m.group(3), types)))
             objs.append(obj)
     rt = os.path.join(work, 'rt_support.obj')
     run(['clang'] + cflags + ['-c', os.path.join(HERE, 'rt_support.c'), '-o', rt])

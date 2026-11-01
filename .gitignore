@@ -11,3 +11,10 @@ src/AttTFix.sym
 AttTFix.ini
 decomp/rebuild/build/
 __pycache__/
+
+# toolchain downloads (host-side, copied into WSL)
+.env_dl/
+
+# local test builds handed out for playtesting, and scratch scripts/notes
+test_build/
+.att_tmp/

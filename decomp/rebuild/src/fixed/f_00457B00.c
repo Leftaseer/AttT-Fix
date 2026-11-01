@@ -1,0 +1,93 @@
+#include "auto_pre.h"
+DECOMP_C double decomp_CIsqrt(double);
+/* @func 00457B00 */
+#define sub_005E406A decomp_CIsqrt
+DECOMP(00457B00)
+void __thiscall f_00457B00(void *this, float *param_1)
+{
+  float fVar1;
+  float fVar2;
+  float fVar3;
+  float fVar4;
+  float10 fVar5;
+  
+  *(float *)((int)this + 4) = param_1[3] - *param_1;
+  *(float *)((int)this + 8) = param_1[7] - param_1[4];
+  *(float *)((int)this + 0xc) = param_1[0xb] - param_1[8];
+  *(float *)((int)this + 0x10) = param_1[0xf] - param_1[0xc];
+  fVar1 = GH_FROUND(*(float *)((int)this + 8));
+  fVar2 = GH_FROUND(*(float *)((int)this + 4));
+  fVar3 = GH_FROUND(*(float *)((int)this + 0xc));
+  fVar5 = sub_005E406A((float10)GH_FROUND(((fVar1 * fVar1 + fVar2 * fVar2) + fVar3 * fVar3)));
+  fVar4 = GH_FROUND((float)fVar5);
+  *(float *)((int)this + 4) = fVar2 / fVar4;
+  *(float *)((int)this + 8) = fVar1 / fVar4;
+  *(float *)((int)this + 0xc) = fVar3 / fVar4;
+  *(float *)((int)this + 0x10) = *(float *)((int)this + 0x10) / fVar4;
+  *(float *)((int)this + 0x14) = *param_1 + param_1[3];
+  *(float *)((int)this + 0x18) = param_1[7] + param_1[4];
+  *(float *)((int)this + 0x1c) = param_1[0xb] + param_1[8];
+  *(float *)((int)this + 0x20) = param_1[0xf] + param_1[0xc];
+  fVar1 = GH_FROUND(*(float *)((int)this + 0x18));
+  fVar2 = GH_FROUND(*(float *)((int)this + 0x14));
+  fVar3 = GH_FROUND(*(float *)((int)this + 0x1c));
+  fVar5 = sub_005E406A((float10)GH_FROUND(((fVar1 * fVar1 + fVar2 * fVar2) + fVar3 * fVar3)));
+  fVar4 = GH_FROUND((float)fVar5);
+  *(float *)((int)this + 0x14) = fVar2 / fVar4;
+  *(float *)((int)this + 0x18) = fVar1 / fVar4;
+  *(float *)((int)this + 0x1c) = fVar3 / fVar4;
+  *(float *)((int)this + 0x20) = *(float *)((int)this + 0x20) / fVar4;
+  *(float *)((int)this + 0x24) = param_1[3] + param_1[1];
+  *(float *)((int)this + 0x28) = param_1[7] + param_1[5];
+  *(float *)((int)this + 0x2c) = param_1[0xb] + param_1[9];
+  *(float *)((int)this + 0x30) = param_1[0xf] + param_1[0xd];
+  fVar1 = GH_FROUND(*(float *)((int)this + 0x28));
+  fVar2 = GH_FROUND(*(float *)((int)this + 0x24));
+  fVar3 = GH_FROUND(*(float *)((int)this + 0x2c));
+  fVar5 = sub_005E406A((float10)GH_FROUND(((fVar1 * fVar1 + fVar2 * fVar2) + fVar3 * fVar3)));
+  fVar4 = GH_FROUND((float)fVar5);
+  *(float *)((int)this + 0x24) = fVar2 / fVar4;
+  *(float *)((int)this + 0x28) = fVar1 / fVar4;
+  *(float *)((int)this + 0x2c) = fVar3 / fVar4;
+  *(float *)((int)this + 0x30) = *(float *)((int)this + 0x30) / fVar4;
+  *(float *)((int)this + 0x34) = param_1[3] - param_1[1];
+  *(float *)((int)this + 0x38) = param_1[7] - param_1[5];
+  *(float *)((int)this + 0x3c) = param_1[0xb] - param_1[9];
+  *(float *)((int)this + 0x40) = param_1[0xf] - param_1[0xd];
+  fVar1 = GH_FROUND(*(float *)((int)this + 0x38));
+  fVar2 = GH_FROUND(*(float *)((int)this + 0x34));
+  fVar3 = GH_FROUND(*(float *)((int)this + 0x3c));
+  fVar5 = sub_005E406A((float10)GH_FROUND(((fVar1 * fVar1 + fVar2 * fVar2) + fVar3 * fVar3)));
+  fVar4 = GH_FROUND((float)fVar5);
+  *(float *)((int)this + 0x34) = fVar2 / fVar4;
+  *(float *)((int)this + 0x38) = fVar1 / fVar4;
+  *(float *)((int)this + 0x3c) = fVar3 / fVar4;
+  *(float *)((int)this + 0x40) = *(float *)((int)this + 0x40) / fVar4;
+  *(float *)((int)this + 0x44) = param_1[3] - param_1[2];
+  *(float *)((int)this + 0x48) = param_1[7] - param_1[6];
+  *(float *)((int)this + 0x4c) = param_1[0xb] - param_1[10];
+  *(float *)((int)this + 0x50) = param_1[0xf] - param_1[0xe];
+  fVar1 = GH_FROUND(*(float *)((int)this + 0x48));
+  fVar2 = GH_FROUND(*(float *)((int)this + 0x44));
+  fVar3 = GH_FROUND(*(float *)((int)this + 0x4c));
+  fVar5 = sub_005E406A((float10)GH_FROUND(((fVar1 * fVar1 + fVar2 * fVar2) + fVar3 * fVar3)));
+  fVar4 = GH_FROUND((float)fVar5);
+  *(float *)((int)this + 0x44) = fVar2 / fVar4;
+  *(float *)((int)this + 0x48) = fVar1 / fVar4;
+  *(float *)((int)this + 0x4c) = fVar3 / fVar4;
+  *(float *)((int)this + 0x50) = *(float *)((int)this + 0x50) / fVar4;
+  *(float *)((int)this + 0x54) = param_1[3] + param_1[2];
+  *(float *)((int)this + 0x58) = param_1[7] + param_1[6];
+  *(float *)((int)this + 0x5c) = param_1[0xb] + param_1[10];
+  *(float *)((int)this + 0x60) = param_1[0xf] + param_1[0xe];
+  fVar1 = GH_FROUND(*(float *)((int)this + 0x58));
+  fVar2 = GH_FROUND(*(float *)((int)this + 0x54));
+  fVar3 = GH_FROUND(*(float *)((int)this + 0x5c));
+  fVar5 = sub_005E406A((float10)GH_FROUND(((fVar1 * fVar1 + fVar2 * fVar2) + fVar3 * fVar3)));
+  fVar4 = GH_FROUND((float)fVar5);
+  *(float *)((int)this + 0x54) = fVar2 / fVar4;
+  *(float *)((int)this + 0x58) = fVar1 / fVar4;
+  *(float *)((int)this + 0x5c) = fVar3 / fVar4;
+  *(float *)((int)this + 0x60) = *(float *)((int)this + 0x60) / fVar4;
+  return;
+}

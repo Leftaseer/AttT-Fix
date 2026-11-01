@@ -110,6 +110,13 @@ static inline double gh_rint(double x) { double r; __asm__("frndint" : "=t"(r) :
 #define ROUND(x) gh_rint(x)
 /* float to integer, towards zero (the decompiler's TRUNC; also MSVC's fistp after its truncating fldcw) */
 #define TRUNC(x) ((long long)(x))
+/* a float rounding barrier: MSVC stores the value to a float slot and loads it back (fstp dword [esp+x];
+ * fld dword [esp+x]) around the CRT math internals' arguments and around a float result (0x485985, 0x4B21D0);
+ * clang keeps the x87 value extended through a plain cast */
+#define GH_FROUND(x) ({ volatile float gh_fround_v_ = (x); gh_fround_v_; })
+/* the same for a double: MSVC's fst qword [esp+x] (0x43C1A8) rounds the x87 value to double, a plain C
+ * expression keeps it extended */
+#define GH_FROUND_D(x) ({ volatile double gh_fround_d_ = (x); gh_fround_d_; })
 /* the decompiler's CAST between a float and an integer type of one size keeps the bits (AutoExport.java) */
 /* (a double where the decompiler had a float, 'f - 1.0' with the constant a double in C, 0x5352E0, or a long
  * long for a 4-byte integer, 0x5234B0: of 4 bytes first, as the decompiler's value is) */

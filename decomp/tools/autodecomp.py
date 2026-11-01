@@ -60,6 +60,7 @@ def slot_bytes(t):
 machine = {}       # addr -> (register inputs, bytes popped by ret) from symbols/<game>_functions.tsv
 ebp_in = {}        # functions that read EBP before setting it (funclets using their caller's frame)
 convs = {}         # addr -> (registers in parameter order, ret pop) of the prototypes as written out
+shifted = {}       # addr -> indexes of the stack parameters that fit_convention moved a register in front of
 
 
 import_args = {}    # IAT slot -> argument bytes callers remove after calling it (tools/importargs.py)
@@ -450,7 +451,44 @@ def fit_convention(a, pr):
     # (a string by value is one parameter of 7 slots: 0x46D380)
     wide = sum(slot_bytes(t) - 4 for (t, _), s in zip(plist, storage) if s == 'stack' and t in BYVALUE)
     if pop not in (0, stack) or (stack - wide != 4 * (len(storage) - len(regs))):
-        return 'stack parameters do not fit the ret'
+        # The machine pops more bytes than the prototype has stack parameters: MSVC's __fastcall takes the
+        # first arguments in registers and the rest from the stack.
+        if pop is None or pop < stack or pop % 4:
+            return 'stack parameters do not fit the ret'
+        slots = stack_slots.get(a)
+        if pop > stack and slots is not None and 4 * slots <= stack:
+            # The slots popped beyond the prototype's stack parameters are never read (0x42AE80: ret 0xc,
+            # 'xor al, al'): build.py's shim pushes filler dwords for them and the call sites stay as the
+            # decompiler wrote them.
+            pr[0], pr[1] = '__cdecl', True
+            convs[a] = (regs, pop)
+            return None
+        # The machine reads those slots, so the prototype lacks parameters.  The decompiler sometimes has a
+        # stack argument in a register (0x425390: ECX and a dword the body reads as stack0x00000004, ret 4) or
+        # a register parameter it never reads (0x4CA820).  Move the register parameters it does not read to
+        # the stack, in front of the stack ones: the parameter count and the order the callers pass them stay
+        # the same.  A stack parameter the decompiler did name then sits one slot higher, so the body must not
+        # use any (convert rejects it), and callers must not be compiled (they would pass the value the
+        # decompiler saw in the register, not the dword the machine pushes).
+        st = list(storage)
+        orig_stack = [i for i, s in enumerate(st) if s == 'stack']
+        moved = 0
+        for i in range(len(st) - 1, -1, -1):
+            if stack + 4 * moved >= pop:
+                break
+            if st[i] == 'stack':
+                continue
+            if st[i] in regs_in or slot_bytes(plist[i][0]) != 4:
+                break
+            st[i] = 'stack'
+            moved += 1
+        if moved:
+            stack += 4 * moved
+            storage[:] = st
+            regs = [s for s in st if s != 'stack']
+            shifted[a] = orig_stack
+        if stack > pop or slots is None or 4 * slots > stack:
+            return 'stack parameters do not fit the ret'
     pr[0], pr[1] = '__cdecl', True
     convs[a] = (regs, pop)
     return None
@@ -644,6 +682,154 @@ def body_of(code):
     if i < 0:
         return None
     return code[i:]
+
+
+def round_returns(body, t):
+    """MSVC rounds a float/double result to the return type before it leaves in ST0 (fstp dword [esp]; fld [esp]),
+    clang keeps the x87 value extended: a volatile store puts the same rounding back (0x4B21D0)."""
+    out, i, n = [], 0, len(body)
+    while i < n:
+        ch = body[i]
+        if ch in '\'"':
+            j = i + 1
+            while j < n:
+                if body[j] == '\\':
+                    j += 2
+                    continue
+                j += 1
+                if body[j - 1] == ch:
+                    break
+            out.append(body[i:j])
+            i = j
+            continue
+        if body.startswith('/*', i):
+            j = body.find('*/', i + 2)
+            j = n if j < 0 else j + 2
+            out.append(body[i:j])
+            i = j
+            continue
+        if body.startswith('//', i):
+            j = body.find('\n', i)
+            j = n if j < 0 else j
+            out.append(body[i:j])
+            i = j
+            continue
+        if body.startswith('return', i) and (i == 0 or not (body[i - 1].isalnum() or body[i - 1] in '_.>')) and \
+                (i + 6 == n or not (body[i + 6].isalnum() or body[i + 6] == '_')):
+            k, depth, q = i + 6, 0, None
+            while k < n:
+                c = body[k]
+                if q:
+                    if c == '\\':
+                        k += 2
+                        continue
+                    if c == q:
+                        q = None
+                elif c in '\'"':
+                    q = c
+                elif c in '([{':
+                    depth += 1
+                elif c in ')]}':
+                    depth -= 1
+                elif c == ';' and depth <= 0:
+                    break
+                k += 1
+            expr = body[i + 6:k].strip()
+            if expr:
+                out.append('{ volatile %s gh_ret = %s; return gh_ret; }' % (t, expr))
+            else:
+                out.append(';')
+            i = k + 1
+            continue
+        out.append(ch)
+        i += 1
+    return ''.join(out)
+
+
+MATH_ROUNDED = ('005E4058', '005E405E', '005E4064', '005E406A', '005E420E', '005E422C',
+                '005E4238', '005E4244', '005E42A4')
+
+
+def round_math_args(body):
+    """The CRT math internals (cos, sin, atan2, sqrt, pow, acos, tan, asin) take their argument rounded to
+    float: MSVC stores it to a float slot and loads it back (0x485985: fstp dword [esp+0x10]; fld dword
+    [esp+0x10]; call 0x5e4058), clang passes the x87 value extended. 222 call sites round, the only 2
+    doubles are inside the Lua range that is excluded."""
+    n, events = len(body), []
+    i = 0
+    while i < n:
+        ch = body[i]
+        if ch in '\'"':
+            j = i + 1
+            while j < n:
+                if body[j] == '\\':
+                    j += 2
+                    continue
+                j += 1
+                if body[j - 1] == ch:
+                    break
+            i = j
+            continue
+        if body.startswith('/*', i):
+            j = body.find('*/', i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        if body.startswith('//', i):
+            j = body.find('\n', i)
+            i = n if j < 0 else j
+            continue
+        hit = False
+        for m in MATH_ROUNDED:
+            name = 'sub_' + m
+            if not body.startswith(name, i):
+                continue
+            after = i + len(name)
+            if not body.startswith('(', after):
+                continue
+            cpos = after + 1
+            cast = None
+            for c in ('(float10)', '(double)'):
+                if body.startswith(c, cpos):
+                    cast = c
+                    break
+            if cast is None:
+                continue
+            depth, j = 0, after
+            while j < n:
+                if body[j] == '(':
+                    depth += 1
+                elif body[j] == ')':
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            if j >= n:
+                continue
+            s = cpos + len(cast)
+            spans, start, d, k = [], s, 0, s
+            while k < j:
+                if body[k] == '(':
+                    d += 1
+                elif body[k] == ')':
+                    d -= 1
+                elif body[k] == ',' and d == 0:
+                    spans.append((start, k))
+                    start = k + 1
+                k += 1
+            spans.append((start, j))
+            for a, b in spans:
+                if body[a:b].strip():
+                    events.append((a, 'GH_FROUND('))
+                    events.append((b, ')'))
+            i = after
+            hit = True
+            break
+        if hit:
+            continue
+        i += 1
+    for pos, text in sorted(events, key=lambda e: -e[0]):
+        body = body[:pos] + text + body[pos:]
+    return body
 
 
 symaddr = {}
@@ -876,9 +1062,17 @@ def convert(f, protos, skip, imports, impnames):
             code = re.sub(r'\breturn extraout_EAX(?:_\d+)?;', 'return;', code)
             code = code[:hm.start(1)] + 'void' + code[hm.end(1):]
             junk_eax = True
-    # the 64-bit result of _ftol handed on whole (0x44A4D0 'return CONCAT44(extraout_EDX,(int)fVar1)': the
-    # injection decomp_ftol_int keeps EAX only): the float truncated to 64 bits, EDX:EAX as _ftol leaves them
+    # the result of _ftol: the injection decomp_ftol_int keeps EAX only, so where the whole 8 bytes are returned
+    # ('return CONCAT44(extraout_EDX,(int)fVar1)', 0x44A4D0) the high half is extraout_EDX - a register the
+    # helper writes only when __sse2_available is 0 (its x87 branch, 'fistp qword'); the SSE2 branch its callers
+    # take on any modern CPU is 'cvttsd2si eax' and leaves EDX alone (0x47B760: EDX held an earlier instruction's
+    # 1).  The functions return int, as the sources hand-decompiled after them already declare them
+    # (f_00463F50: 'unsigned int __cdecl sub_00463E20'), and their callers read EAX only.
+    ftol_int = False
     if 'decomp_ftol_int' in code:
+        if re.search(r'\breturn CONCAT44\(extraout_EDX(?:_\d+)?,\(int\)\w+\);', code):
+            ftol_int = True
+            code = re.sub(r'\breturn CONCAT44\(extraout_EDX(?:_\d+)?,\(int\)(\w+)\);', r'return (int)\1;', code)
         code = re.sub(r'\bCONCAT44\(extraout_EDX(?:_\d+)?,\(int\)(\w+)\)', r'(ulonglong)(longlong)\1', code)
         # (also where the decompiler kept an older EDX for the high half: 0x593340 'return CONCAT44(iVar1,
         # (int)(...))', EDX as _ftol leaves it is the high dword of the conversion)
@@ -1244,6 +1438,27 @@ def convert(f, protos, skip, imports, impnames):
         return None, 'varargs'
     if len(params) != len(plist):
         return None, 'parameter count differs from the prototype'
+    # the repair above put the moved register parameters in front of the stack ones, so every stack parameter
+    # that the decompiler named now sits one slot higher: the body would read its caller's arguments shifted
+    # (0x4CA820 keeps its three floats in param_3..5 and reads the fourth slot as in_stack_00000010)
+    if a in shifted:
+        for i in shifted[a]:
+            nm = re.search(r'([A-Za-z_]\w*)\s*$', params[i]) if i < len(params) else None
+            if nm and re.search(r'(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])' % nm.group(1), body):
+                return None, 'stack parameter %s is moved by the ret repair' % nm.group(1)
+    # incoming stack slots the decompiler left unnamed ('(undefined4 *)&stack0x00000004' where the prototype
+    # has a register parameter, 0x425390): the parameters fit_convention moved to the stack are those slots
+    stack_params = [i for i, s in enumerate(pr[5]) if s == 'stack']
+    if re.search(r'\bstack0x000000[0-9a-f]{2}\b', body):
+        offs = {int(x, 16) for x in re.findall(r'\bstack0x(000000[0-9a-f]{2})\b', body)}
+        bad = sorted(o for o in offs if o % 4 or o // 4 > len(stack_params))
+        if bad:
+            return None, 'stack slot 0x%x is not a parameter' % bad[0]
+
+        def slot_name(m):
+            n = re.search(r'([A-Za-z_]\w*)\s*$', params[stack_params[int(m.group(1), 16) // 4 - 1]])
+            return n.group(1) if n else m.group(0)
+        body = re.sub(r'\bstack0x(000000[0-9a-f]{2})\b', slot_name, body)
     # a class passed by value that is no 4-byte slot: the decompiler's guess for a dword it reads a byte of
     # (0x584190 GUIScene::vf15 'GUIScene param_3'); in C the callee would pop the whole class and wreck the
     # stack of its callers
@@ -1253,6 +1468,9 @@ def convert(f, protos, skip, imports, impnames):
             return None, 'class %s passed by value (%d bytes)' % (t, STRUCT_SIZE[t])
     if ret.startswith('undefined') and not re.search(r'\breturn\s+[^;\s]', re.sub(r'/\*.*?\*/', '', body, flags=re.S)):
         ret = 'void'               # the decompiler guessed a result that the function never sets
+    # (_ftol2's int result: the tail jump to the helper made the analysis prototype it ulonglong)
+    if ftol_int and ret in ('ulonglong', 'longlong', 'undefined8', 'qword'):
+        ret = 'int'
     # (a function that only throws never returns: what its callers do with EAX after it is never run, 0x4488D0)
     if ret == 'void' and a in eax_used and a not in never_returns and not junk_eax:
         if not FORCE[0]:
@@ -1594,6 +1812,13 @@ def convert(f, protos, skip, imports, impnames):
             if not FORCE[0]:
                 return None, 'callee %s: %s' % (c, why)
             NOTES.append('callee %s: %s' % (c, why))
+        # A callee whose ret repair moved a register parameter in front of its stack ones is called here with
+        # the values the decompiler gave for those registers (a dword it read off EDX at the call site), not
+        # with the dword the machine pushes: its stack slots would hold other values than in the original.
+        if ca in shifted:
+            if not FORCE[0]:
+                return None, 'callee %s: its stack parameters are moved by the ret repair' % c
+            NOTES.append('callee %s: its stack parameters are moved by the ret repair' % c)
         t = proto_text('sub_%s' % c, cp)
         if t is None:
             if not FORCE[0]:
@@ -1628,6 +1853,11 @@ def convert(f, protos, skip, imports, impnames):
     for key, t in f.get('sized', {}).items():
         decls.append('DECOMP_C char d_%s[];' % key[:8])
         decls.append('#define GV_%s (*(%s *)d_%s)' % (key, t, key[:8]))
+        if t == 'double' and key.endswith('_8'):
+            # the decompiler inserts a cast to float when a double global sits in a float expression
+            # ('fVar2 / (float)GV_0068AE10_8' for 'fdiv qword [0x68ae10]', 0x4C1820: 1000.0 as a double and
+            # the truncated float give different results): the x87 reads the 64 bits, no conversion happens
+            body = body.replace('(float)GV_%s' % key, 'GV_%s' % key)
     for s in f['strings']:
         decls.append('DECOMP_C char d_%s[];' % s)
         decls.append('#define S_%s d_%s' % (s, s))
@@ -1637,6 +1867,13 @@ def convert(f, protos, skip, imports, impnames):
     macros = [d for d in decls if d.startswith('#define')]
     decls = [d for d in decls if not d.startswith('#define')]
     undefs = ['#undef ' + d.split()[1] for d in macros] + ['#undef ' + n for n in frame_names]
+    # a 64-bit value the decompiler builds with CONCAT44 is unsigned in C, but the original's int64-to-float
+    # conversion is fild (signed): without the sign clang emits the 2^64 correction for negative values
+    # (0x59D960 divides a QueryPerformanceCounter delta by one).  Any (float)/(double)/(float10) of it is signed.
+    body = re.sub(r'\((float10|double|float)\)(\s*)CONCAT44\(', r'(\1)\2(long long)CONCAT44(', body)
+    if ret in ('float', 'double'):
+        body = round_returns(body, ret)
+    body = round_math_args(body)
     text = '/* @func %08X%s */\n%s\nDECOMP(%08X)\n%s\n%s\n%s\n' % (a, ' custom' if custom else '', '\n'.join(macros), a, head, body.strip(), '\n'.join(undefs))
     return (a, decls, text), None
 

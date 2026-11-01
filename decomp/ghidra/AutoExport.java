@@ -478,6 +478,29 @@ public class AutoExport extends GhidraScript {
             // rounding mode set just before, truncation
             if (text.equals("ROUND") && t.getPcodeOp() != null && truncatingCW(t.getPcodeOp().getSeqnum().getTarget())) {
                 sb.append("TRUNC");
+                // the value went through a float stack slot (fstp dword [esp+x]; fld dword [esp+x]) before the
+                // fistp: the original rounds it to float first, a bare C conversion keeps the x87 extra
+                // precision (0x4C1820: eax 1B2C8000 against 1B2C551B)
+                Varnode rin = t.getPcodeOp().getNumInputs() > 0 ? t.getPcodeOp().getInput(0) : null;
+                if (rin != null && rin.getSize() == 4) {
+                    int open = next(toks, ti + 1);
+                    if (open >= 0 && open < toks.size() && txt(toks, open).equals("(")) {
+                        int d = 0, close = -1;
+                        for (int k = open; k < toks.size(); k++) {
+                            String x = txt(toks, k);
+                            if (x.equals("(") || x.equals("[")) d++;
+                            else if (x.equals(")") || x.equals("]")) {
+                                d--;
+                                if (d == 0) { close = k; break; }
+                            }
+                        }
+                        int arg = close > open ? next(toks, open + 1) : -1;
+                        if (arg > open && arg < close) {
+                            prefix.put(arg, "(float)(");
+                            after.put(close, ")" + after.getOrDefault(close, ""));
+                        }
+                    }
+                }
                 continue;
             }
             if (t instanceof ClangFuncNameToken) {

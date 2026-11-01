@@ -27,6 +27,7 @@ HEAP_SIZE = 0x01000000
 STACK = 0x30000000
 STACK_SIZE = 0x00100000
 TEB = 0x7FFD0000
+SSE2_AVAILABLE = 0x008D18C0   # AttT's __sse2_available, set by __cpu_features_init before main
 
 
 class Unsupported(Exception):
@@ -147,25 +148,61 @@ class Harness:
         if eax is not None:
             uc.reg_write(UC_X86_REG_EAX, eax & 0xFFFFFFFF)
         if st0 is not None:
-            uc.reg_write(UC_X86_REG_FP0, st0) if False else self._push_st0(st0)
+            self._push_st0(st0)
         uc.reg_write(UC_X86_REG_ESP, sp + 4 + pop)
         uc.reg_write(UC_X86_REG_EIP, ra)
 
+    # --- x87 stack, read and written through the registers.  The intrinsics used to run little snippets with a
+    # nested emu_start, but these handlers run from inside the import code hook and a nested emu_start there
+    # corrupts where the outer emu_start resumes: 00485C40 resumed at the snippet's end instead of the return
+    # address, ran into the zero-filled STOP page and killed the process with a host SIGSEGV.
+    def _fpu_top(self):
+        return (self.uc.reg_read(UC_X86_REG_FPSW) >> 11) & 7
+
+    def _fpu_set_top(self, top):
+        fpsw = self.uc.reg_read(UC_X86_REG_FPSW)
+        self.uc.reg_write(UC_X86_REG_FPSW, (fpsw & ~0x3800) | ((top & 7) << 11))
+
     def _push_st0(self, value):
-        # fld qword from scratch memory
-        scratch = STOP + 0x100
-        self.uc.mem_write(scratch, struct.pack('<d', value))
-        code = b'\xdd\x05' + struct.pack('<I', scratch) + b'\xf4'
-        self.uc.mem_write(STOP + 0x200, code)
-        eip = self.uc.reg_read(UC_X86_REG_EIP)
-        self.uc.emu_start(STOP + 0x200, STOP + 0x206)
-        self.uc.reg_write(UC_X86_REG_EIP, eip)
+        # fld qword: round to double (the snippet stored/loaded a qword anyway), then push as an 80-bit value
+        top = (self._fpu_top() - 1) & 7
+        self._fpu_set_top(top)
+        v = float(value)
+        neg = math.copysign(1.0, v) < 0
+        a = abs(v)
+        if a != a:
+            m, e = 0xC000000000000000, 0x7FFF                    # quiet NaN
+        elif a == float('inf'):
+            m, e = 0x8000000000000000, 0x7FFF
+        elif a == 0.0:
+            m, e = 0, 0
+        else:
+            f, k = math.frexp(a)
+            m, e = int(f * 18446744073709551616.0), k + 16382      # f in [0.5,1): significand 2^63..2^64-1
+        if neg:
+            e |= 0x8000
+        self.uc.reg_write(UC_X86_REG_FP0 + top, (m, e))
+
+    def _fpu_pop(self, n=1):
+        self._fpu_set_top(self._fpu_top() + n)
 
     def _st0(self):
-        scratch = STOP + 0x100
-        self.uc.mem_write(STOP + 0x200, b'\xdd\x15' + struct.pack('<I', scratch))   # fst qword [scratch]
-        self.uc.emu_start(STOP + 0x200, STOP + 0x206)
-        return struct.unpack('<d', self.uc.mem_read(scratch, 8))[0]
+        return self._fpu_st(0)
+
+    def _st1(self):
+        return self._fpu_st(1)
+
+    def _fpu_st(self, i):
+        m, e = self.uc.reg_read(UC_X86_REG_FP0 + ((self._fpu_top() + i) & 7))
+        exp = e & 0x7FFF
+        if exp == 0x7FFF:
+            if m & 0x7FFFFFFFFFFFFFFF:
+                return float('nan')
+            return float('-inf') if e & 0x8000 else float('inf')
+        if not m:
+            return -0.0 if e & 0x8000 else 0.0
+        v = math.ldexp(float(m), exp - 16383 - 63)               # float(m) rounds to 53 bits, like fst qword
+        return -v if e & 0x8000 else v
 
     def _cstr(self, p):
         out = bytearray()
@@ -341,12 +378,12 @@ class Harness:
 
     def _x87_unary(self, fn):
         x = self._st0()
-        # pop the argument and push the result: emulate by replacing st0
-        self.uc.mem_write(STOP + 0x200, b'\xdd\xd8\xf4')                          # fstp st(0)
-        eip = self.uc.reg_read(UC_X86_REG_EIP)
-        self.uc.emu_start(STOP + 0x200, STOP + 0x202)
-        self.uc.reg_write(UC_X86_REG_EIP, eip)
-        self._ret(None, 0, fn(x))
+        self._fpu_pop()
+        try:
+            v = fn(x)                  # C returns NaN where Python raises (sqrt(-1), log(0), 1e308**2)
+        except (ValueError, OverflowError, ZeroDivisionError):
+            v = float('nan')
+        self._ret(None, 0, v)
 
     def crt_CIsin(self): self._x87_unary(math.sin)
     def crt_CIcos(self): self._x87_unary(math.cos)
@@ -634,12 +671,8 @@ class Harness:
     def _x87_binary(self, fn):
         # st1 op st0 -> st0 (both popped, result pushed)
         y = self._st0()
-        self.uc.mem_write(STOP + 0x200, b'\xdd\xd8\xf4')
-        eip = self.uc.reg_read(UC_X86_REG_EIP)
-        self.uc.emu_start(STOP + 0x200, STOP + 0x202)
-        x = self._st0()
-        self.uc.emu_start(STOP + 0x200, STOP + 0x202)
-        self.uc.reg_write(UC_X86_REG_EIP, eip)
+        x = self._st1()
+        self._fpu_pop(2)
         try: v = fn(x, y)
         except (ValueError, OverflowError, ZeroDivisionError): v = float('nan')
         self._ret(None, 0, v)
@@ -677,7 +710,21 @@ class Harness:
         for r, v in (regs or {}).items():
             uc.reg_write(r, v & 0xFFFFFFFF)
         uc.reg_write(UC_X86_REG_ESP, sp)
+        # MSVC passes floats on the stack and returns doubles in st0: every call starts with an empty x87 stack,
+        # so the two runs must too - a stale TOP/register left by the original run would otherwise decide what a
+        # function that leaves st0 unset compares as.
+        uc.reg_write(UC_X86_REG_FPSW, 0)
+        uc.reg_write(UC_X86_REG_FPTAG, 0xFFFF)
         uc.mem_write(self.RAND_STATE, struct.pack('<I', 1))      # srand(1): the same rand() sequence for both runs
+        # __cpu_features_init sets __sse2_available before main, so the game always runs _ftol2_sse's SSE2
+        # fast path (which leaves ECX and EDX alone).  The verifier does not run that initialiser; without the
+        # flag the original half takes the generic slow path and clobbers ECX - a register state the game never
+        # reaches and that the symbol table (crtfuncs.py: _ftol2_sse -> EAX only) does not model.
+        if self.orig.pe.FILE_HEADER.TimeDateStamp == 0x475EABAF:
+            try:
+                uc.mem_write(SSE2_AVAILABLE, struct.pack('<I', 1))
+            except UcError:
+                pass
         try:
             uc.emu_start(entry, STOP, count=getattr(self, 'steps', 5_000_000))
         except UcError as e:

@@ -44,6 +44,20 @@ class FastHarness(Harness):
         self.uc.mem_write(0, bytes(low))
         self.regions.append((0, LOW))
         self.pristine = {b: bytes(self.uc.mem_read(b, n)) for b, n in self.regions}
+        # the rest of the image is not compared, but it has to be put back: a garbage pointer can point into it
+        # and the first run's writes would change what the second reads (00577620 read 00946AAA, in .ntext,
+        # which the original half overwrote, and the replacement then took another branch)
+        self.image_regions = [(a, n) for a, n in
+                              ((self.rb.base + s.VirtualAddress, (s.Misc_VirtualSize + 0xFFF) & ~0xFFF)
+                               for s in self.rb.pe.sections)
+                              if not any(a == b for b, _ in self.regions)]
+        self.image0 = {a: bytes(self.uc.mem_read(a, n)) for a, n in self.image_regions}
+        # the callee's frame below the arguments is scratch, but it must start out the same for both runs:
+        # a function that reads an uninitialized local would otherwise compare two different stack leftovers.
+        # The whole stack is snapshotted: a callee chain can use more than 64 KiB of frame (004CCFA0 wrote a
+        # list header 0x21000 below the argument slots and the replacement read the original run's leftovers).
+        self.stack_lo = STACK
+        self.stack0 = bytes(self.uc.mem_read(self.stack_lo, STACK + STACK_SIZE - self.stack_lo))
         self.cov = set()
         self.cov_on = False
         self.uc.hook_add(UC_HOOK_BLOCK, self._on_block)
@@ -56,11 +70,13 @@ class FastHarness(Harness):
         """one call as original (head bytes) and one as replacement from the same memory and heap state;
         returns [(registers, memory), (registers, memory)] (memory: writable regions, heap, caller's stack)"""
         hp0 = self.heap_ptr
-        window = 0x40000
-        heap0 = bytes(self.uc.mem_read(HEAP, hp0 - HEAP + window))
+        # the whole heap, not just the used part: the callees allocate past it (0x555070's chain took another
+        # ~240 KiB) and what the first run leaves up there changes what the second reads
+        heap0 = bytes(self.uc.mem_read(HEAP, HEAP_SIZE))
         runs = []
         for h in (head, None):
             self.heap_ptr = hp0
+            self.uc.mem_write(self.stack_lo, self.stack0)
             if h is not None:
                 self.uc.mem_write(entry, h)
             self.cov_on = h is not None
@@ -71,13 +87,15 @@ class FastHarness(Harness):
             if h is not None:
                 self.uc.mem_write(entry, self.new_head)
             mem = [bytes(self.uc.mem_read(b, n)) for b, n in self.regions]
-            mem.append(bytes(self.uc.mem_read(HEAP, hp0 - HEAP + window)))
+            mem.append(bytes(self.uc.mem_read(HEAP, HEAP_SIZE)))
             keep = STACK + STACK_SIZE - self.arg_sp
             mem.append(bytes(self.uc.mem_read(self.arg_sp, keep)))
             runs.append((r, mem))
             for b, n in self.regions:
                 self.uc.mem_write(b, self.pristine[b])
             self.uc.mem_write(HEAP, heap0)
+            for a, n in self.image_regions:
+                self.uc.mem_write(a, self.image0[a])
         self.heap_ptr = hp0
         return runs
 
@@ -258,6 +276,7 @@ def main():
         c = int(open(cur).read().strip() or '0', 16)
         if c and c not in done:
             out.write('%08X\tcrashed\t0.00\tthe run died or hung in this function\n' % c)
+            out.flush()     # (a Unicorn segfault kills the process without unwinding)
             done.add(c)
     import signal
     signal.signal(signal.SIGALRM, lambda *_: os._exit(3))
@@ -314,6 +333,13 @@ def main():
                             print('   %08X: %s' % (v, peek(v)))
                 (r1, m1), (r2, m2) = h.run_case(entry, head, flat, regv, ret_kind(ret), 0, va)
                 f1, f2 = r1['fault'], r2['fault']
+                if f2 and 'did not return' in f2 and not f1:
+                    # the rebuild often needs more instructions than the original for the same loop
+                    # (0048C8B0: 17 vs 11 per iteration); give it one longer run before calling it a difference
+                    h.steps = max(a.steps * 20, 100_000_000)
+                    (r1, m1), (r2, m2) = h.run_case(entry, head, flat, regv, ret_kind(ret), 0, va)
+                    f1, f2 = r1['fault'], r2['fault']
+                    h.steps = a.steps
                 if f1 and 'unsupported' in f1 or f2 and 'unsupported' in f2:
                     status, detail = 'unsupported', (f1 if f1 and 'unsupported' in f1 else f2)
                     break

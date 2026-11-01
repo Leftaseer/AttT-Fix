@@ -1,0 +1,50 @@
+# autoverify: original vs rebuilt AttT exe, function by function.  Run:
+#   python3 decomp/tools/autoverify.py ATThrone.exe rebuild.exe rebuild.map AUTO_DIR WORK OUT.tsv
+#   (--n 30 --shard k/24 for the full sweep, --only ADDR,... to re-check single functions, --resume to continue)
+# status: verified    return registers, untouched registers and all written memory equal on every case
+#         lowcov      every case ended in a fault on both sides (fuzz-only garbage input), no diff observed
+#         unsupported the function calls an import the emulator does not model (C++ iostreams, Bink, ...)
+#         differs / faultdiff  a real difference in at least one case
+# Format: VA<TAB>status<TAB>class<TAB>why
+
+# --- re-check of every divergence classified in the build35-37 sweeps, against build42 (2026-11-01, 30 cases)
+# 12 verified, 4 lowcov (both sides fault on every fuzz case), 1 unsupported, 0 differs: the later pipeline fixes
+# (float rounding around CRT math arguments and returns, _ftol as int, the fixed difftest x87 stack and
+# __sse2_available) removed them.  The table below keeps the *historical* build37 verdicts with the cause, so a
+# regression shows up as a known class instead of a new mystery.
+004402A0	verified	nan-compare	build37: faultdiff - Ghidra printed an ordered x87 compare as a C float compare; a NaN input left the original in a lookup loop and the C took the other branch
+00440390	verified	nan-compare	build37: faultdiff - same class (dot product then linked-list scan)
+00458380	verified	nan-compare	build37: faultdiff - same class, dot <= 0.0 kept the original in the inner loop on NaN
+00477E00	lowcov	garbage-vcall	build37: faultdiff - this==0 -> the original read the vtable from [0] and called through it; the C dereference faulted earlier/later.  build42: both fault on all 30 cases
+004783C0	lowcov	garbage-vcall	build37: faultdiff - same class
+004CC8D0	verified	garbage-vcall	build37: differs - a random heap dword became the virtual target and was executed as code; call vs tail-jmp differed only in the stack leftovers the garbage code saw
+004E0E50	verified	int-div-0	build37: faultdiff - the original divides by a zero vector length (`div esi`), #DE; C division by zero is UB and clang drops/never traps
+004E0E90	verified	int-div-0	build37: faultdiff - same class
+00555E80	verified	int-div-0	build37: faultdiff - original `idiv ecx` with the power result 0; the C `1 / (longlong)x` made clang assume x != 0
+0051DB90	verified	dead-load	build37: faultdiff - element load whose value only feeds a no-op callee (00432EA0 is a bare `ret`, mis-prototyped as custom EAX); the load was dead in C
+00553260	unsupported	delay-loop	build37: faultdiff - `for (i = 0; i < n; i++) ;` with no side effects; clang deletes it, the original burns n iterations.  Now the function is unsupported: calls _vsnprintf
+0055B850	verified	allocator-garbage	build37: differs - the differing dword is an MSVCP80 allocator/string header field (0x08 vs 0xE8) written by emulated std::string code, not by the function's own logic
+004F6B30	verified	nan-math	build37: differs - NaN/garbage-pointer math: the original stored -NaN to computed low-memory addresses, the C reached other addresses after the first NaN comparison
+004FCCB0	lowcov	float-to-uint	build37: differs - (uint)(float) out of range: MSVC _ftol2 yields 0x80000000, clang's 64-bit fistp took the low 32 bits -> another grid cell, on garbage coordinates only.  build42: 1 ok + 29 both faulted
+00558520	verified	float-sum-order	build37: differs - Ghidra printed the term order of a float sum rotated; with FPCW=0x7F (single precision, set by D3D9 without FPU_PRESERVE) the original grouped ((f2^2+f3^2)+f4^2), the C ((f4^2+f2^2)+f3^2) -> last-bit difference on 15000 garbage vertices
+005B15B0	verified	partition-split	build37: differs - the descending sort's quicksort partition split differed on arrays whose keys all tie or are NaN, but the caller 005B2D60 ended with the same sorted array (100 random cases, orig == new)
+0047BF50	lowcov	dead-load	build37: faultdiff - the original read a garbage pointer before its count check; clang sank/removed the load.  build42: 1 ok + 29 both faulted
+
+# --- the only class the sweep still writes as 'crashed' (SIGALRM kills the run, it is not a code difference)
+# Fuzz-garbage pointers keep the original and the replacement in the same heap-walking loop for millions of
+# instructions, in lockstep (0048D0D0: 6935 atan2 calls in 200k steps on both sides; 00422E40: the same 199,991
+# iterations).  Re-run with --steps 300000: 255 lowcov + 12 verified, no diff (work/verify42c, work/verify42d).
+#
+# --- full build42 sweep (30 cases, 24 shards, 9 734 generated functions): 3 613 verified, 4 918 lowcov,
+# 936 unsupported, 267 crashed, 0 differs / 0 faultdiff (work/verify42/all.tsv)
+
+# --- fixed by hand (or by the pipeline) after the divergence was found
+0043B2E0	verified	fixed in f_0043B280.c (the caller relies on the EAX the callee leaves behind)
+004ABFF0	verified	fixed by hand (f_004ABFF0.c); later runs: 2 ok + 28 both faulted, no diff
+0047B760	verified	return truncation fixed in autodecomp (ftol_int)
+00507E40	verified	fixed by hand
+0051DBF0	verified	fixed by hand
+005882C0	verified	fixed by hand
+00481000	lowcov	hand-fixed: the scan loop's reads are volatile again (f_00481000.c), 2 ok + 28 both faulted, no diff
+004F6410	verified	fixed in f_004F6410.c (x87 excess precision: the store rounds to float before the sign test)
+004D4370	verified	fixed in f_004D4370.c (both the 2-term and the 3-term vertex sums round to float before the double multiply)
