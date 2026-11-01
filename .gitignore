@@ -17,4 +17,6 @@ __pycache__/
 
 # local test builds handed out for playtesting, and scratch scripts/notes
 test_build/
+AttT_decomp_exe_*/
+AttT_decomp_exe_*.zip
 .att_tmp/
