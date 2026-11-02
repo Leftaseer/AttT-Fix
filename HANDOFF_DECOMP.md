@@ -5,7 +5,9 @@ limits, then `decomp/README.md` for pipeline internals. Older sections below pre
 their status statements and test counts are superseded by the latest checkpoint.
 
 The level-up animation and battle Wait bugs were confirmed fixed in-game. Current work is restoring trustworthy
-verification after the Unicorn cache bug, validating pending hand fixes, and triaging observed differences.
+verification after the Unicorn cache bug and triaging observed differences. The recovered sweep now covers
+all 9,734 expected addresses (two recorded decoder versions), with 4 differs and 11 faultdiff still open.
+Plain/debug regression suites pass 18/18 each; the x87 decoder fix and recovery evidence are in the latest report.
 
 ---
 

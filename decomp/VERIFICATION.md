@@ -33,7 +33,7 @@ Autoverify selects **9,734 generated-function addresses**, including their hand 
   preserves that order and removes the NaN sign difference. Reproduction: `--only 004F6B30 --seed 11 --n 64
   --fpcw 0x27f`; before: differs at case 55; after: verified, coverage 1.00, 7 normal returns / 57 both faulted.
 - Relink: **4,604,704 bytes and 86,576 pointers checked, zero mismatches**.
-- Differential suite: **17 tests, zero failures**. New cases exercise valid virtual calls, bounded angular
+- Differential suite: **18 tests, zero failures**. New cases exercise valid virtual calls, bounded angular
   sorting with ties and NaNs, finite/NaN terrain frames, and the verifier's instruction-cache invalidation.
 - Negative control: disabling cache invalidation makes the new verifier regression return `(1, 1)` rather
   than `(1, 2)`, so the test detects the old original-versus-original failure.
@@ -54,17 +54,61 @@ All 263 verify76 crashed entries were rerun separately against the inherited pla
 **31 verified, 232 lowcov, no differs/faultdiff**. Different case counts change generated inputs; this is triage,
 not a replacement for the original 30-case sweep and not verification of those functions on all valid inputs.
 
-Current full sweep: `/home/attt-dev/work/checkpoint-20261102/sweep`, started fresh against the current binary.
+Initial sweep: `/home/attt-dev/work/checkpoint-20261102/sweep`, started fresh against the current binary.
 Its `manifest.json` pins binary, map, generated-source and tool hashes, Unicorn/Python versions and parameters.
 Parameters: 30 cases, seed 1, FPCW `0x27f`, 5,000,000 instructions, 24 shards, 30-second function limit.
-It is still in progress; no clean-sweep claim is made. Keep `lowcov`, `unsupported` and `crashed` as explicit
-gaps. A 30-second kill is a runner result, not proof of a game hang. The game uses FPCW `0x7f`; focused angular
-and frame tests exercise both precision settings, while the broad sweep retains `0x27f` for comparison.
+The initial runner stopped incomplete at 9,070/9,734 rows: shards 3, 10 and 17 exited on a Python
+`OverflowError` in the x87-to-binary64 decoder (`004658E0`, `004C1100`, `00549B00`). Finite x87 values can exceed
+the binary64 exponent range. The decoder now returns signed infinity on narrowing overflow; ordinary finite,
+zero, NaN and infinity handling is unchanged. Four new tooling tests cover overflow, representable limits and special values, and pass with the
+fix (seven tooling tests total, including the three linker tests). Fix commit: `ab36293`.
+
+### Recovered results
+
+All **9,734 unique expected addresses** now have a result. The initial 9,070 rows are preserved unchanged.
+Only the 664 missing addresses were processed in `sweep-completion/`, with the same binary, generated inputs,
+seed, case count and limits, under a separate manifest pinning the corrected decoder. All 24 completion shards
+exited successfully. This is an aggregate of two recorded tool versions, not a fresh uniform sweep of all
+addresses with the new decoder. Completed earlier calls never reached the decoder exception.
+
+| Verdict | Functions |
+|---|---:|
+| verified | 3,557 |
+| lowcov | 4,478 |
+| unsupported | 969 |
+| crashed (interrupted verifier run) | 715 |
+| differs | 4 |
+| faultdiff | 11 |
+| Total processed | 9,734 |
+
+`verified` meets the verifier's sampled coverage and normal-return thresholds; it is not a proof for all inputs.
+Keep `lowcov`, `unsupported` and `crashed` as gaps. The 30-second function limit differs from verify76's
+120-second limit, so interruption counts are not directly comparable or evidence of 715 gameplay crashes.
+The game uses FPCW `0x7f`; focused angular and frame tests exercise both precision settings, while the broad
+sweep retains `0x27f` for comparison.
+
+The comparison with verify76 is:
+
+- Former `differs` at `0043F260`, `004CC8D0`, `004F6B30` are now `verified`.
+- `0048C980` and `0048CC40` changed from `differs` to interrupted runs. Their bounded-array tests pass, but
+  the random-input cases are unresolved gaps and must not be counted as verified fixes.
+- Four `differs` remain: `004FCCB0`, `00558520`, `0055B850`, `005B15B0`.
+- All ten former `faultdiff` entries remain, plus a newly observed `00477E00` fault difference. Its fuzz case
+  reaches an invalid graphics-device target (`01030002`). A bounded constructor test using a valid synthetic
+  device covers both first acquisition and shared-declaration reuse, matches the original and returns normally.
+  The fuzz discrepancy is retained; this does not establish or rule out a gameplay defect.
+
+The three formerly decoder-blocked entries now have explicit outcomes: `004658E0` interrupted, `004C1100`
+unsupported (MSVCP80 string `swap`), `00549B00` lowcov. None stopped the completion shards.
+Aggregate evidence: `/home/attt-dev/work/checkpoint-20261102/sweep-recovered/summary.json` and `all.tsv`.
+`combine_sweep.py` validates cohort input identities, tool differences, disjoint address sets, expected address
+coverage and binary hashes before producing the report. Both source manifests and raw logs remain intact.
 
 The targeted inherited-baseline checks reconfirmed all ten faultdiff entries and remaining sorting, allocation,
 float-sum and prototype-related differences. Random-pointer sort cases timed out, whereas bounded array tests
 returned and matched. These results need classification, not blanket suppression of NaNs or fault differences.
-Raw evidence: `/home/attt-dev/work/checkpoint-20261102`.
+Raw evidence: `/home/attt-dev/work/checkpoint-20261102`. The narrower historical checks above are separate from
+the recovered results and must not be added to their counts.
 
 ## Reproduce and resume
 
@@ -76,15 +120,15 @@ python3 -I decomp/tools/difftest.py \
   /home/attt-dev/re/checkpoint-20261102/frame/ATThrone.exe \
   /home/attt-dev/re/checkpoint-20261102/frame/ATThrone.map
 
-# Only resume a stopped run; a lock rejects concurrent writers.
-python3 -I decomp/tools/verify_sweep.py \
-  /home/attt-dev/work/attt/bin/attt.exe \
-  /home/attt-dev/re/checkpoint-20261102/frame/ATThrone.exe \
-  /home/attt-dev/re/checkpoint-20261102/frame/ATThrone.map \
-  /home/attt-dev/work/attty_test/auto_fix4 \
-  /home/attt-dev/re/checkpoint-20261102/frame/work_attt \
-  /home/attt-dev/work/checkpoint-20261102/sweep \
-  --jobs 24 --shards 24 --n 30 --fn-timeout 30 --resume
+# The original sweep manifest pins the old decoder and intentionally rejects
+# resuming with the changed harness. Recheck/resume only the completion cohort:
+python3 - <<'PY'
+import json
+import subprocess
+with open('/home/attt-dev/work/checkpoint-20261102/completion-command.json') as f:
+    command = json.load(f)
+subprocess.run(command + ['--resume'], check=True)
+PY
 ```
 
 The runner rejects changed inputs/settings on resume. Its initial-run, resume-without-duplicate-rows and
@@ -101,7 +145,7 @@ The writer rejects nonzero bytes or relocations in an uninitialized section rath
 Plain candidate: `/home/attt-dev/re/checkpoint-20261102/bss/ATThrone.exe`.
 Size: **7,007,744 -> 4,875,264 bytes** (2,132,480 bytes removed, approximately 30%).
 `.data` raw size: 2,173,440 -> 40,960 bytes; virtual size stays 2,173,136 bytes.
-The 17 differential tests pass, and relink verification reports zero mismatches.
+All 18 differential tests pass, and relink verification reports zero mismatches.
 
 The synthetic linker test uses a 0x600-byte initialized prefix, an uninitialized tail and a relocation targeting
 a symbol deep in that tail. It checks address continuity, loader-visible zero fill and the reduced raw size.
@@ -119,9 +163,9 @@ directory. This is a structural comparison, not a new full autoverify sweep of t
 
 Debug candidate: `/home/attt-dev/re/checkpoint-20261102/debug-bss/ATThrone_debug.exe`, 5,319,680 bytes.
 Flags: `--toggle -D DECOMP_TEST_INPUT -D DECOMP_DEBUG_LOG -D DECOMP_DEBUG_MENU`.
-Relink verification and all **17 differential tests** pass on the debug candidate as well. Neither candidate
+Relink verification and all **18 differential tests** pass on the debug candidate as well. Neither candidate
 has been played or delivered. The broad sweep keeps its original binary and manifest unchanged.
 
-Next: finish the sweep, compare its discrepancy lists with verify76, triage remaining differences with valid
-fixtures, then deliver plain/debug v55 for the user's playtest. The smaller candidates are prepared locally.
+Next: triage the four remaining differences, eleven fault differences and interrupted/unsupported cases with
+valid fixtures, then deliver plain/debug v55 for the user's playtest. The smaller candidates are prepared locally.
 Delivery waits for verification triage; in-game validation will then be the user's step.
