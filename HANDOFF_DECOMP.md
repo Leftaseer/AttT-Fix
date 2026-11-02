@@ -4,13 +4,15 @@ Updated 2026-11-02. Read `decomp/VERIFICATION.md` for the current, hash-identifi
 limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
 their status statements and test counts are superseded by the latest checkpoint.
 
-The level-up animation and battle Wait bugs were confirmed fixed in-game. Current work is restoring trustworthy
-verification after the Unicorn cache bug and triaging observed differences. The recovered sweep now covers
-all 9,734 expected addresses (two recorded decoder versions), with 4 differs and 11 faultdiff still open.
-Latest triage fixes distance sums, NaN partitions and signed grid conversion; the fourth difference is
-classified allocator padding (raw fuzz result retained). Plain/debug suites pass 22/22 each plus nine tooling
-tests. See the latest report for targeted results and current hashes; the historical full-sweep counts above
-have not been replaced by these targeted checks.
+The level-up animation and battle Wait bugs were confirmed fixed in-game. **v55 is now delivered** at
+`E:\Programs\Qoder_plays\AttT-Fix\AttT_decomp_exe_v55`, source commit `37b6280`, with English instructions,
+plain/debug exes, matching maps, toggle list and hashes. Both binaries pass 31/31 differential tests plus nine
+tooling tests; relink has zero mismatches. Six additional translation defects are fixed (distance sums, NaN
+partitioning, signed grid conversion, two collision guards and the frustum guard). The 15-address recheck is
+5 verified / 1 lowcov / 1 allocator-padding differs / 8 classified faultdiff. These retained diagnostics and
+older full-sweep coverage gaps are documented, not hidden. **Next: the user's in-game playtest.** The agent
+has not launched the game or changed its Steam installation. The historical 9,734-row sweep belongs to an
+older binary; do not claim it was rerun on v55 or update its counts with targeted results.
 
 ---
 

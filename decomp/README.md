@@ -173,7 +173,7 @@ python3 decomp/rebuild/build.py --exe ATThrone.exe --out build/ATThrone.exe --au
 
 Current AttT state: 10,266 of 18,591 functions replaced (9,734 generated-function addresses plus 532 engine/Lua
 replacements). Original section addresses and PE timestamp are preserved; relink verification checks 4,604,704
-bytes and 86,576 pointers with zero mismatches. The current differential suite has 22 passing tests.
+bytes and 86,576 pointers with zero mismatches. The current differential suite has 31 passing tests.
 
 **Verification correction (2026-11-02):** a Unicorn instruction-cache bug caused earlier comparisons to execute
 the original function twice. All earlier passing difftest/autoverify claims, including the former full-sweep
@@ -183,9 +183,10 @@ See [VERIFICATION.md](VERIFICATION.md) for binary hashes, current results, known
 `rebuild/autoverify_findings.tsv` is historical diagnosis material, not current verification evidence.
 The original `.data` virtual tail is now emitted as uninitialized COFF data; the plain candidate is 4,875,264
 bytes (2,132,480 bytes smaller), with original section addresses preserved. Plain and debug candidates pass
-22 differential tests each; nine tooling tests cover BSS encoding, x87 decoding and generated conversion
-helpers. Three more translation defects (distance sums, NaN partitions, grid conversion) are fixed; the fourth
-recovered difference is traced to uninitialized allocator padding, retained in raw fuzz results.
+31 differential tests each; nine tooling tests cover BSS encoding, x87 decoding and generated conversion
+helpers. Distance sums, NaN partitions, grid conversion, collision float stores and frustum guards are fixed.
+The allocator-padding discrepancy and eight classified fault differences remain visible in raw fuzz results.
+v55 is delivered as a playtest candidate; see the verification report for hashes, normal-input fixtures and limits.
 The historical recovered sweep processed all 9,734 expected addresses across two recorded tool versions: 3,557 verified, 4,478 lowcov, 969 unsupported, 715 interrupted, 4 differs and 11 faultdiff.
 Completion is not a clean-verification claim; the remaining discrepancies and coverage gaps need triage.
 

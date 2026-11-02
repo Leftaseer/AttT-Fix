@@ -4,7 +4,69 @@ Active checkout: `/home/attt-dev/work/AttT-Fix`, branch `decomp/continue`.
 Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages; the agent does not launch the game.
 
-## Latest triage checkpoint — source commit 22e4a17
+## v55 playtest package — source commit 37b6280
+
+Delivered to `/mnt/e/Programs/Qoder_plays/AttT-Fix/AttT_decomp_exe_v55/`.
+WSL staging copy: `/home/attt-dev/work/playtest-packages/AttT_decomp_exe_v55/`.
+All seven delivered files were checked by SHA-256 against the WSL copies. Existing packages and the Steam
+installation were preserved. `README_EN.txt` explains installation, checks and limitations; `manifest.json`
+records the source revision and every delivered payload hash. No game was launched by the agent.
+
+| Binary | Bytes | SHA-256 |
+|---|---:|---|
+| `ATThrone.exe` | 4,875,264 | `33eaf4e22b3c55b33a9cde12c429c9542c32715a160288378282dd342d344630` |
+| `ATThrone_debug.exe` | 5,319,680 | `fe88c4ff9460b42ed96478e65e01dacd8abd4ebddb362fea782493b08ba6f184` |
+
+Both pass **31 differential tests**, keep 10,266 replacements, and pass relink verification (4,604,704 bytes,
+86,576 pointers, zero mismatches). All **nine tooling tests** pass. The debug build has toggle/log/test-input
+and debug-menu support; its 10,194-entry toggle list is included. Maps match the delivered binaries.
+Builds remain in `/home/attt-dev/re/v55-20261102/{plain,debug}/`.
+
+The eleven historical fault differences were triaged after the four-function work below. Three more
+translation defects were fixed, with failing-before/passing-after fixtures:
+
+- `004402A0`, `00440390`: the original stores/reloads coordinate differences, radius sums, squared distance
+  and squared radius as floats. The translation omitted the final stores. With finite inputs `x=1e30`,
+  `radius=1e29`, the original compares two infinities and continues; the translation compared wide finite
+  squares and rejected the object. Explicit float stores restore the original boundary behavior. The original
+  ordered comparison itself already handles NaNs correctly; this was not a comparison-negation bug.
+- `00458380`: restore the original y/x/z/w sum order and the `fcomip; ja` condition. A NaN dot product is not
+  an ordered positive plane hit; it must stay in the vertex scan. Bounded frustum tests cover inside/outside,
+  mixed vertices, empty buffers and NaNs.
+
+All three now verify on their original seed-1, 30-case fuzz inputs: circle 12 normal / 18 matching faults,
+shape 11 / 19, frustum 7 / 23. The three earlier fixes, allocator control, and generator primitive are below.
+
+### v55 recheck of the 15 previously flagged addresses
+
+A hash-pinned targeted run on the final plain binary completed all 15 addresses (`--n 30 --seed 1`, FPCW
+`0x27f`, 45-second function limit): **5 verified, 1 lowcov, 1 differs, 8 faultdiff**.
+Verified: `004402A0`, `00440390`, `00458380`, `00558520`, `005B15B0`.
+Grid lookup `004FCCB0` remains lowcov (1 normal / 29 matching faults); its bounded conversion fixtures pass.
+`0055B850` retains the diagnosed allocator-padding discrepancy in the raw harness.
+
+The eight retained fault differences have normal-input contract fixtures. They were not suppressed or claimed
+bit-equivalent on invalid inputs:
+
+| Addresses | Retained difference | Normal-input evidence |
+|---|---|---|
+| `00477E00`, `004783C0` | Fuzz calls an invalid synthetic device/vtable target | Both constructors match with valid mock devices, first acquisition and shared-declaration reuse |
+| `004E0E50`, `004E0E90` | Original unsigned division by a zero-sized selection range traps; C modulo-zero is undefined | Nonempty ranges of 1, 2, 8 entries return matching members |
+| `00555E80` | Original integer reciprocal traps when its computed denominator is zero; C division-zero is undefined | Defined integer powers and nonzero reciprocal denominators match |
+| `0047BF50` | Original pointer-chain preload occurs before the count guard; the compiler can sink/elide it | Valid headers for counts 0, 1, 2 match, including getter/setter virtual paths |
+| `0051DB90` | Original loads each unit before calling a bare-ret helper; the generated prototype loses that load | Valid unit arrays match with the current no-op helper; per-unit ECX/prototype reconstruction remains technical debt before changing that helper |
+| `00553260` | Original empty loop exceeds the emulator instruction limit on an oversized synthetic range; C removes it | Bounded 0/3/16-element ranges match coordinate writes; unrelated update/logging is stubbed |
+
+These fixtures support playtesting; they do not prove all invalid states safe. No full 9,734-address sweep has
+been run on v55, and low coverage, unsupported imports and interrupted runs in the earlier sweep remain gaps.
+The old aggregate counts remain historical and are not recomputed by mixing targeted results into them.
+The next required validation is the user's in-game playtest: existing saves, movement/forests/effects,
+battle Wait, level-up animation, save/load, and the debug-menu cursor/spell workflow.
+
+Evidence: `/home/attt-dev/work/fault-triage-20261102/` (disassemblies, geometry before/after tests, normal-input
+contracts, final plain/debug logs, targeted manifest/results, `v55-source-manifest.json`).
+
+## Earlier math triage checkpoint — source commit 22e4a17
 
 The four `differs` from the recovered sweep have now been investigated. Three translation defects have hand
 overrides and failing-before/passing-after regression fixtures. The fourth is an allocator-padding artifact
