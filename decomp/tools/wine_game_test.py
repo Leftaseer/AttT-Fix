@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
 import secrets
 import select
@@ -27,6 +28,18 @@ def sha256(path):
         while block := source.read(1024 * 1024):
             digest.update(block)
     return digest.hexdigest()
+
+
+def key_event(value):
+    """Parse one timed X11 key, without invoking a shell or the engine's test hooks."""
+    try:
+        seconds, key = value.split(':', 1)
+        seconds = float(seconds)
+        if not math.isfinite(seconds) or seconds < 0 or not re.fullmatch(r'[A-Za-z0-9_+]+', key):
+            raise ValueError()
+    except ValueError:
+        raise argparse.ArgumentTypeError('key event must be finite nonnegative SECONDS:KEY')
+    return seconds, key
 
 
 def xwd_to_png(source, target):
@@ -196,6 +209,8 @@ def main():
     parser.add_argument('--seconds', type=float, default=30)
     parser.add_argument('--launch-mode', choices=('normal', 'developer'), default='normal',
                         help='normal startup, or developer world start (-nologo bypasses the menu)')
+    parser.add_argument('--key-at', action='append', type=key_event, default=[], metavar='SECONDS:KEY',
+                        help='hold an X11 key for 0.5 seconds; repeat to drive original and rebuilt EXEs alike')
     parser.add_argument('--width', type=int, default=800)
     parser.add_argument('--height', type=int, default=600)
     parser.add_argument('--saves', type=Path)
@@ -205,6 +220,8 @@ def main():
     args = parser.parse_args()
     if not math.isfinite(args.seconds) or not 1 <= args.seconds <= 3600:
         parser.error('seconds must be finite and between 1 and 3600')
+    if any(when >= args.seconds for when, _ in args.key_at):
+        parser.error('key events must occur before the end of the run')
     if not 320 <= args.width <= 4096 or not 200 <= args.height <= 2160:
         parser.error('resolution must be between 320x200 and 4096x2160')
     if not args.label or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_' for c in args.label):
@@ -225,9 +242,14 @@ def main():
     result = {'exe': str(args.exe), 'exe_sha256': sha256(args.exe), 'assets': str(args.assets),
               'seconds': args.seconds, 'launch_mode': args.launch_mode, 'resolution': [args.width, args.height],
               'renderer': 'DXVK' if args.dxvk else 'WineD3D', 'status': 'preparing'}
+    result['key_events_requested'], result['key_events_sent'] = sorted(args.key_at), []
+    result['required_log_marker'] = args.require_log
     try:
         result['asset_identities'] = stage_game(args.assets, args.exe, output / 'game', args.width, args.height,
                                                args.saves, args.test_input)
+        result['save_inputs'] = {p.name: {'bytes': p.stat().st_size, 'sha256': sha256(p)}
+                                 for p in sorted((output / 'game/Saves').iterdir()) if p.is_file()}
+        result['test_input_sha256'] = sha256(output / 'game/testinput.txt') if args.test_input else None
         env = services.start()
         if args.dxvk:
             dll = args.dxvk / 'd3d9.dll'
@@ -240,6 +262,7 @@ def main():
         command = ['wine', 'ATThrone.exe'] + (['-nologo'] if args.launch_mode == 'developer' else [])
         game = services.start_process(command, 'wine', cwd=output / 'game')
         started, next_focus = time.monotonic(), 0
+        pending_keys = list(sorted(args.key_at))
         while time.monotonic() - started < args.seconds:
             if game.poll() is not None or list((output / 'game').glob('__ATThrone__ERRORS*')):
                 break
@@ -249,6 +272,15 @@ def main():
                 for window in windows.stdout.split():
                     subprocess.run(['xdotool', 'windowfocus', window], env=env, capture_output=True, timeout=5)
                 next_focus = time.monotonic() + 2
+            while pending_keys and time.monotonic() - started >= pending_keys[0][0]:
+                due, key = pending_keys.pop(0)
+                subprocess.run(['xdotool', 'keydown', key], env=env, check=True, capture_output=True, timeout=5)
+                try:
+                    time.sleep(.5)
+                finally:
+                    subprocess.run(['xdotool', 'keyup', key], env=env, check=True, capture_output=True, timeout=5)
+                result['key_events_sent'].append({'requested_at': due, 'key': key,
+                                                  'completed_at': round(time.monotonic() - started, 2)})
             time.sleep(.25)
         result['elapsed'] = round(time.monotonic() - started, 2)
         result['alive_at_end'] = game.poll() is None

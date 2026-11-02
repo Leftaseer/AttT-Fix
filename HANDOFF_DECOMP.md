@@ -4,7 +4,18 @@ Updated 2026-11-02. Read `decomp/VERIFICATION.md` for the current, hash-identifi
 limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
 their status statements and test counts are superseded by the latest checkpoint.
 
-**Current work: initial WSL Wine world-start checks passed**, shipped v57 binaries are unchanged. The user
+**Current work: WSL Wine normal startup/menu and save-loading milestone**, v57 binaries unchanged. Original
+and plain play intro videos (60 s runs) and reach visually matching main menus with external Escape keys at
+5/12/20 s (35 s runs). Debug loads copies of `game0` and `game00` (60 s each), with load selection and a required
+`scenario: world-scene 1` marker; captures show the loaded world/pause menu and tactical "Your turn" screen.
+No game error files. One no-key debug attempt failed its required marker because native reserved Init bypasses
+the old `skipintro` test hook; retained as failed, not a game crash. Input handling now records timed X11 keys,
+save hashes and test-input hashes. All 37 tooling tests pass. Evidence:
+`/home/attt-dev/work/wine-tests/menu-load-v57-20261102.json`; reproducible debug scenarios are in
+`decomp/tools/scenarios/`, details/limits in `decomp/WINE_TESTING.md`. Next: original/plain save UI baseline,
+write-save/reload, bounded combat/world actions and actual AttTFix activation; no mod was installed here.
+
+**Previous work: initial WSL Wine world-start checks passed**, shipped v57 binaries are unchanged. The user
 explicitly authorized running anything within the home directory. The original, v57 plain and v57 debug each
 survived 35 seconds of developer world start (`-nologo`) with identical assets/settings; screenshots show the
 opening world/dialogue scene, and debug also displays its menu and logs initialization. No game error files.

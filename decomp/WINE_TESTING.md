@@ -11,6 +11,46 @@ The earlier synthetic probe remains separate evidence containing no game code or
 
 ## Initial game integration results
 
+### Normal startup, menus and copied saves
+
+The next cohort is `/home/attt-dev/work/wine-tests/menu-load-v57-20261102.json`. All runs use normal
+startup, 800x600 and WineD3D, with unchanged v57 binaries. Six smoke checks pass; one required-marker check
+fails as retained below. No run produced a game error file. Screenshots were visually reviewed.
+
+| Scenario | Run directory under the evidence root | Result |
+|---|---|---|
+| Original, no input, 60 s | `original-normal-_9duzv4z` | Intro video visibly plays; still in video at capture |
+| v57 plain, no input, 60 s | `v57-plain-normal-tn5o4l96` | Intro video visibly plays; still in video at capture |
+| Original, Escape at 5/12/20 s, 35 s | `original-menu-keys-sdyy42gp` | Main menu visible |
+| v57 plain, same keys/settings/saves, 35 s | `v57-plain-menu-keys-9r1lue75` | Main menu visible, visually matches original; PNGs are not identical |
+| Debug, old `skipintro` fixture, no keys, 60 s | `v57-debug-load-game0-n89tlnyp` | Required world marker absent; intro still playing; **failed**, not a game crash |
+| Debug, copied `game0`, Escape at 5/12/20 s, 60 s | `v57-debug-load-game0-keys-1vdeojtm` | Load-screen selection logged; world-scene marker 1; loaded world behind pause/debug menus |
+| Debug, copied `game00`, same keys/settings, 60 s | `v57-debug-load-game00-keys-njaa1ngg` | Load-screen selection logged; world-scene marker 1; tactical "Your turn" screen behind debug menu |
+
+The AttTFix compatibility profile reserves original `CEngine::Init` (`0044F2E0`), so the old rewritten-init
+`skipintro` hook is bypassed even though its flag logs as enabled. Do not rely on that flag as evidence that
+videos were skipped. The failed attempt demonstrated that a surviving process without the required state
+marker is rejected. External Escape input reached the menu in original/plain, and enabled debug save loading
+without changing the game EXE or weakening its native compatibility reservations.
+
+`tools/scenarios/load-game0.txt` and `load-game00.txt` drive the existing debug-only harness. They request a
+named save through the load screen, then log `scenario: world-scene 1` only if a world GUI scene exists after
+the harness reports loading complete. Use `--require-log 'scenario: world-scene 1'`. The original/plain EXEs
+do not implement this injection harness; these save checks are not comparisons against original save-state
+execution. The late Escape can pause an already loaded world, as in the game0 capture. The tactical capture
+proves entry into that screen, not correct combat actions or turn processing.
+
+The maintained runner accepts repeated `--key-at SECONDS:KEY` events, holds each key for 0.5 s through X11,
+and records requested/completed times. It also records hashes of copied save inputs and injected test input.
+The two successful save runs used identical save inputs; the supplied source files still match those hashes.
+All **37 tooling tests** pass, including malformed-key-event controls. Log:
+`/home/attt-dev/work/wine-runtime/tooling-tests-menu-load.log`.
+
+Next: baseline save loading via original/plain UI, write-save/reload in private directories, bounded world
+and combat actions, and actual AttTFix 2.1.2 activation/effects. No mod was installed in this cohort.
+
+### Developer world start
+
 The original, v57 plain and v57 debug EXEs each survived **35 seconds** of developer world start (`-nologo`),
 at 800x600 with the same WineD3D runtime and hash-matched original assets. No mod, saves or scripted inputs
 were injected. No game error files appeared. Screenshots were visually reviewed: all render the opening
@@ -114,10 +154,9 @@ These directories isolate test data; Wine is not a security boundary for untrust
 
 Continue with:
 
-1. Normal startup/menu in the original EXE, then v57 plain/debug with identical assets/settings. The initial
-   developer world-start comparison above is complete; it does not exercise startup videos or menu navigation.
+1. Original/plain UI save loading as a baseline for the successful debug harness checks above.
 2. Menu interactions and a new game: compare visible state and errors with the original.
-3. Copies of the supplied saves: loading, world movement, UI, combat, save/reload; use bounded scenarios.
+3. Copies of the supplied saves: world movement, UI, combat actions, write-save/reload; use bounded scenarios.
 4. AttTFix 2.1.2 and debug menu in separate runs: verify actual hook activation and effects from logs and state.
 5. Optional DXVK x32 backend only after the WineD3D baseline works; keep backend evidence separate.
 

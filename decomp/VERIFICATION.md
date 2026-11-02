@@ -7,6 +7,15 @@ home directory; game tests now run from private WSL copies under `/home/attt-dev
 
 ## Initial WSL Wine game smoke tests
 
+The subsequent normal-start/menu/load cohort is documented in [WINE_TESTING.md](WINE_TESTING.md) and
+`/home/attt-dev/work/wine-tests/menu-load-v57-20261102.json`. Original/plain both play intro videos and reach
+visually matching main menus through the same timed Escape keys. Debug loads copied `game0` and `game00`
+with a required positive world-scene marker; screenshots show loaded world/pause and tactical turn screens.
+Six smoke checks pass. One no-key debug attempt fails its required marker because reserved native Init
+bypasses the old `skipintro` harness hook; that failure is preserved. No game error files; binaries unchanged.
+All 37 tooling tests pass. These saves have not yet been exercised through the original/plain UI, written
+and reloaded, or used to validate combat actions/mod activation. Earlier world-start-only evidence follows.
+
 The original, v57 plain and v57 debug EXEs each survived a 35-second developer world start (`-nologo`) with
 identical assets/settings under WineD3D at 800x600. No game error files appeared. Screenshots show the opening
 world/dialogue scene; debug also displays its menu and logs initialization. Evidence, identities and the

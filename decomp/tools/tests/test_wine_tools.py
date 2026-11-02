@@ -15,6 +15,14 @@ spec.loader.exec_module(wine)
 
 
 class WineToolsTests(unittest.TestCase):
+    def test_key_events_reject_invalid_times_and_shell_text(self):
+        for text in ('nan:Escape', 'inf:Escape', '-1:Escape', '2:Escape;touch /tmp/x', '2:', 'Escape'):
+            with self.subTest(text=text), self.assertRaises(wine.argparse.ArgumentTypeError):
+                wine.key_event(text)
+
+    def test_key_events_accept_fractional_times_and_modifiers(self):
+        self.assertEqual(wine.key_event('2.5:ctrl+alt+d'), (2.5, 'ctrl+alt+d'))
+
     def test_staging_copies_mutable_files_and_preserves_inputs(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

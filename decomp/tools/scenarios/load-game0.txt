@@ -1,0 +1,2 @@
+2000 loadsave game0
+L2000 lua local W=GUIScene and GUIScene.WorldLevel; DecompLog('scenario: world-scene', W and rawget(W,'scene') and 1 or 0)
