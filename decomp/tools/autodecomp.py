@@ -502,6 +502,16 @@ FPU_ARGS = {'_CIsin': 1, '_CIcos': 1, '_CItan': 1, '_CIsqrt': 1, '_CIatan': 1, '
             '_CIpow': 2, '_CIatan2': 2, '_CIfmod': 2}
 fpu_thunks = {}    # 'jmp [import]' thunk of an x87 intrinsic -> (name, arguments): ghidra/FpuIntrinsics.java
 ftols = {}         # the runtime's float to integer conversions of ST0 (tools/crtfuncs.py) -> C result type
+
+
+def ftol_macro(address, kind):
+    # Preserve the identified helper's width, including invalid-input results.
+    # Ghidra may have inlined the conversion as a cast; those sites still need
+    # disassembly-based review and must not be rewritten by an untyped regex.
+    expression = 'GH_FTOL32(x)' if kind == 'int' else '((%s)(x))' % kind
+    return '#define sub_%s(x) %s' % (address, expression)
+
+
 icalls = {}        # indirect call address -> (convention, stack arguments, result) of ghidra/ICallOverride.java
 
 
@@ -1742,8 +1752,7 @@ def convert(f, protos, skip, imports, impnames):
     for c in f['callees']:
         ca = int(c, 16)
         if ca in ftols:
-            # _ftol2(_sse): the value in ST0 converted towards zero, which C's cast does too
-            decls.append('#define sub_%s(x) ((%s)(x))' % (c, ftols[ca]))
+            decls.append(ftol_macro(c, ftols[ca]))
             continue
         if ca in fpu_thunks:
             # x87 intrinsic (arguments on the FPU stack): rebuild/rt_support.c puts them there and calls it

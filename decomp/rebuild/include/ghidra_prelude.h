@@ -117,6 +117,17 @@ static inline double gh_rint(double x) { double r; __asm__("frndint" : "=t"(r) :
 /* the same for a double: MSVC's fst qword [esp+x] (0x43C1A8) rounds the x87 value to double, a plain C
  * expression keeps it extended */
 #define GH_FROUND_D(x) ({ volatile double gh_fround_d_ = (x); gh_fround_d_; })
+/* _ftol2_sse with __sse2_available enabled: store double, then signed 32-bit
+ * truncation. C casts have undefined out-of-range behavior and can be folded
+ * into an unsigned/wider conversion; cvttsd2si preserves the integer-indefinite
+ * 0x80000000 result for overflow and NaN. No SSE register allocation is needed. */
+static inline int gh_ftol32(double value)
+{
+    int result;
+    __asm__ volatile("cvttsd2si %1, %0" : "=r"(result) : "m"(value));
+    return result;
+}
+#define GH_FTOL32(x) gh_ftol32(x)
 /* the decompiler's CAST between a float and an integer type of one size keeps the bits (AutoExport.java) */
 /* (a double where the decompiler had a float, 'f - 1.0' with the constant a double in C, 0x5352E0, or a long
  * long for a 4-byte integer, 0x5234B0: of 4 bytes first, as the decompiler's value is) */
