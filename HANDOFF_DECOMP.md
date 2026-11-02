@@ -261,7 +261,8 @@ last; }` with `_Static_assert(sizeof(Str_4B2720)==0x1c)` and `__builtin_offsetof
 
 Verification for v51: build73 (plain `--auto`) and build72 (`--toggle -D DECOMP_TEST_INPUT -D
 DECOMP_DEBUG_LOG`) — both `4604704 bytes and 86576 pointers checked, 0 mismatches`, both difftest 11/11.
-Awaiting the user's in-game confirmation.
+User confirmed in-game on 2026-11-02 ("анимация теперь работает"); fix pushed to `decomp/continue`
+(commits 2029335 harness, 7e5976c fix).
 
 ## 9. Hard-won technical facts
 
@@ -308,9 +309,25 @@ Awaiting the user's in-game confirmation.
 
 Done: toolchain, staging, baseline rebuild/relink/difftest, full Ghidra export, autoverify sweep, autodecomp
 fixes, float-return fixes, damage preview (0x50E2D0), Alt+1..4 keys + intro skip, save-load crash fix,
-packages v44 / v45 / v46 + v47 + v48 + v49 + v50 + v51.
-Open: **#13 diagnose the level-up animation regression** — cause found and fixed (section 8), v51 packaged;
-left: user's in-game confirmation, then commit + push.
+packages v44 / v45 / v46 + v47 + v48 + v49 + v50 + v51, and the level-up animation fix of #13 (confirmed
+in-game 2026-11-02).
+Open: nothing blocking. Next candidates: shrink the exe (the original .data BSS tail is written as zeros —
+see below), a debug menu (barracks / spells / tough-enemy battle), and wider differential testing.
+
+### Exe size (measured 2026-11-02)
+
+| file | size | .text | .rdata | .data raw | .data virtual |
+|---|---|---|---|---|---|
+| original attt.exe | 3,145,728 | 2,118,663 | 749,779 | 40,960 | 2,173,136 |
+| v51 ATThrone.exe | 7,008,256 | 2,119,188 | 750,152 | 2,173,440 | 2,173,136 |
+| v51 debug | 7,442,432 | 2,119,188 | 750,152 | 2,173,440 | 2,173,136 |
+
+The 3.86 MB delta: +2.13 MB because `exe2obj.py` copies each section's *virtual* size as initialized COFF
+data, so the original's 2.13 MB uninitialized `.data` tail is written as zeros (fixable: emit the tail as a
+BSS section, exe would drop to ~4.9 MB); +1.65 MB `.ntext` = our 10,266 functions + 5-byte jmp stubs (~51 KB)
++ glue adapters; +39 KB `.reloc`, +28 KB `.nrdata`, +22 KB `.zidata`; original `.text`/`.rdata` stay because
+the image layout (and thus every absolute address) is preserved, including the dead bodies of replaced
+functions. The debug build adds ~300 KB more code (log calls), 123 KB `.ndata` (log buffers) and 90 KB relocs.
 
 ## 12. Definition of done for the open bug
 
