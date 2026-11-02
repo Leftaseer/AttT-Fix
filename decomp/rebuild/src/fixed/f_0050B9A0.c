@@ -2,8 +2,9 @@
  * hero (0x00511E00 of the first troop's first creature) shows "scrYouAreDead.tga" (0x00519990); no enemy creature
  * alive means victory: the troop sizes are kept by name (+0x160 / +0x188, 0x005542E0), 0x00513CA0, state 11;
  * otherwise the next troop that has not moved (+0x270 list of {troop, state}, 0x0051DAA0 creatures) moves (state 2,
- * +0x27C, +0x64, _IsWaitMove on the second search); when none is left a new round starts (+0x1C4, SetNumTurn, the
- * round listeners 0x006CA8E0 get an event); the turn caption "tTurnT N. tTurnEnemyT / tTurnFriendT" (0x004AF480 on
+ * +0x27C, +0x64, _IsWaitMove on the second search); the search runs twice: state 0 (has not acted) first, then
+ * state 1 (waited, 0x0050C280 marks it); when none is left a new round starts (+0x1C4, SetNumTurn, the round
+ * listeners 0x006CA8E0 get an event); the turn caption "tTurnT N. tTurnEnemyT / tTurnFriendT" (0x004AF480 on
  * 0x006CA8DC) is shown, the troop's script hook +0x244 gets its name and size; then an AI troop (+0xB4) plays
  * (0x00509F00), a player troop waits (state 1) or the reach of all troops is marked (0x0051D6D0) */
 /* @conv ECX 0 */
@@ -145,7 +146,7 @@ int __thiscall f_0050B9A0(char *this)
     pass = 0;
     for (;;) {
         for (e = *(Ent_50B9A0 **)(this + 0x270); e != *(Ent_50B9A0 **)(this + 0x274); e++)
-            if (e->state == 0 && sub_0051DAA0(e->troop) > 0)
+            if (e->state == pass && sub_0051DAA0(e->troop) > 0)
                 goto next;
         if (pass == 0) {
             pass = 1;

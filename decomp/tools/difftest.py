@@ -725,6 +725,10 @@ class Harness:
                 uc.mem_write(SSE2_AVAILABLE, struct.pack('<I', 1))
             except UcError:
                 pass
+        # The two runs of a comparison rewrite the replaced entry (original body, then the jmp).  Unicorn 2.1.4
+        # keeps the cached translation of the first one when the stop address is mapped (as STOP is here), so
+        # the second run would silently execute the original code again.  Drop the entry block explicitly.
+        uc.ctl_remove_cache(entry, entry + 16)
         try:
             uc.emu_start(entry, STOP, count=getattr(self, 'steps', 5_000_000))
         except UcError as e:

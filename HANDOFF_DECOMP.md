@@ -87,14 +87,30 @@ python3 -I build.py --exe /home/attt-dev/work/attt/bin/attt.exe --auto /home/att
 ## 5. Verification (do both before every delivery)
 
 ```
-python3 decomp/tools/difftest.py /home/attt-dev/work/attt/bin/attt.exe <exe> <map>   # expects 11/11
+python3 decomp/tools/difftest.py /home/attt-dev/work/attt/bin/attt.exe <exe> <map>   # expects 12/12
 # verify_relink runs inside build.py and prints the numbers:
 #   sections .text,.rdata,.data,.ndata,.ntext, 4604704 bytes and 86576 pointers checked, 0 mismatches
 ```
 
 Difftest emulates original vs replacement functions (Unicorn) on the Lua/engine test suite in
-`decomp/rebuild/tests`. `autoverify.py` (random inputs) was run over all 9 734 generated functions earlier:
-3 613 verified / 4 918 lowcov / 936 unsupported / 267 crashed / **0 differs, 0 faultdiff**.
+`decomp/rebuild/tests`. `autoverify.py` (random inputs) was run over all 9 734 generated functions on
+2026-10-31: 3 613 verified / 4 918 lowcov / 936 unsupported / 267 crashed / 0 differs, 0 faultdiff —
+**but that sweep was vacuous, see §5.1; it is being re-run as verify76.**
+
+### 5.1 Unicorn TB cache bug in the harness (found 2026-11-02, fixed)
+
+`Harness.call()` runs the original bytes at the entry, then writes the replacement head (`E9` jmp or the
+function bytes) and runs again. Unicorn 2.1.4 does **not** invalidate the cached translation block on that
+`mem_write` when the `until` (STOP) address is a mapped page — which it is (0x0FFF0000). The second run
+therefore silently re-executed the cached *original* body, so every comparison compared the original with
+itself. Minimal reproductions: with STOP unmapped and `until = entry+3` the write invalidates; with STOP
+mapped it never does, for any write size. Proof against a real build: deleting the fix makes
+`test_0050B9A0_wait.py` pass on build75 (the buggy build), keeping it makes build75 fail.
+
+Fix: `uc.ctl_remove_cache(entry, entry + 16)` before every `emu_start` in `Harness.call()`
+(`decomp/tools/difftest.py`). `FastHarness.run_case()` (autoverify) goes through the same `call()`, so
+both tools are fixed. **All difftest/autoverify numbers produced before 2026-11-02 are invalid** and must
+be re-established with the fixed harness.
 
 ## 6. Playtest packages (gitignored folders in the repo root)
 
@@ -125,10 +141,16 @@ Difftest emulates original vs replacement functions (Unicorn) on the Lua/engine 
   `--auto`, 7,008,256 B, sha256 fba42f4d…) + `ATThrone_debug.exe` (build72, `--toggle -D DECOMP_TEST_INPUT
   -D DECOMP_DEBUG_LOG`), maps, `toggle_list.txt`, generic `toggle_bisect.bat|ps1` + `bisect_scenario.txt`,
   Russian README.
-- **v52 — current**: same plain exe (build75 is byte-identical to v51 plain) + `ATThrone_debug.exe`
-  (build74, adds `-D DECOMP_DEBUG_MENU`; 7,451,136 B, sha256 ac980534…), maps, toggle_list, Russian README
-  with the menu instructions. Builds: 0 mismatches / 11 difftest tests each. Not yet played: the menu was
-  verified statically (symbols, imports, embedded chunks) only.
+- **v52** — same plain exe as v51 (build75 was byte-identical to v51 plain; its 0x0050B9A0 contains the
+  wait bug of §14) + `ATThrone_debug.exe` (build74, adds `-D DECOMP_DEBUG_MENU`; 7,451,136 B, sha256
+  ac980534…), maps, toggle_list, Russian README with the menu instructions. Builds: 0 mismatches / 11
+  difftest tests each (comparisons were vacuous, §5.1). Not yet played: the menu was verified statically
+  (symbols, imports, embedded chunks) only.
+- **v53 — current**: the battle Wait fix (§14). Plain `ATThrone.exe` = build76 (`--auto`, 7,008,256 B,
+  sha256 33a4999c…) + `ATThrone_debug.exe` = build77 (toggle + debug log + debug menu; 7,451,136 B,
+  sha256 c47a02a1…), maps, `toggle_list.txt`, Russian README. 0 relink mismatches, 10 266 replaced
+  functions, difftest 12/12 on both **with the fixed harness**. Pending in-game confirmation of the Wait
+  button; the push is held until then.
 
 ## 7. Runtime bisection (`--toggle`)
 
@@ -340,6 +362,12 @@ User confirmed in-game on 2026-11-02 ("анимация теперь работ�
   difftest of both (11/11 each), packaging.
 - `build_v52.sh` / `build_v52_log.sh` / `build_v52_plain.sh` / `difftest_v52*.sh` / `pack52.sh` — v52 debug
   menu build (build74) and its byte-identical plain rebuild (build75), difftests and packaging.
+- `difftest_v53.sh` / `pack53.sh` / `sweep76.sh` — v53: full difftest of build76/77, packaging, and the
+  corrected full autoverify sweep (24 shards → `/home/attt-dev/work/verify76`).
+- `nofix_proof*.sh` — proof that the old harness was vacuous: the wait test passes on build75 when
+  `ctl_remove_cache` is removed. `probe_*.py/.sh`, `uc_bisect*.py`, `uc_inval*.py`, `uc_flush_*.py` — the
+  Unicorn cache-invalidation experiments behind §5.1. `orig_50B9A0.dis` / `new77_50B9A0.dis` — the two
+  disassemblies of the Wait fix.
 - Diagnosis scripts for the root cause: `callers_4b2720.sh`, `caller_ctx.sh`, `reg_ctx.sh`, `anim_ctx.sh`,
   `reg2.sh`, `model_args.sh`, `check_ctor_asm.sh`, `check_ctor_asm2.sh`.
 - `test50.ps1` / `test50b.ps1` / `check50.ps1` — stubbed end-to-end test of the v50 bisect script (search,
@@ -350,9 +378,11 @@ User confirmed in-game on 2026-11-02 ("анимация теперь работ�
 Done: toolchain, staging, baseline rebuild/relink/difftest, full Ghidra export, autoverify sweep, autodecomp
 fixes, float-return fixes, damage preview (0x50E2D0), Alt+1..4 keys + intro skip, save-load crash fix,
 packages v44 / v45 / v46 + v47 + v48 + v49 + v50 + v51, the level-up animation fix of #13 (confirmed
-in-game 2026-11-02), and the v52 debug menu (built + packaged; in-game test pending).
-Open: playtest v52's menu; shrink the exe (the original .data BSS tail is written as zeros — see below);
-wider differential testing.
+in-game 2026-11-02), the v52 debug menu (built + packaged), and the v53 battle Wait fix (built + packaged;
+in-game test pending).
+Open: playtest v53's Wait button and v52's menu (push held until that); the corrected autoverify sweep
+(verify76) must confirm or replace the old "0 differs" claim; shrink the exe (the original .data BSS tail is
+written as zeros — see below); wider differential testing.
 
 ### Exe size (measured 2026-11-02)
 
@@ -372,7 +402,8 @@ functions. The debug build adds ~300 KB more code (log calls), 123 KB `.ndata` (
 ## 12. Definition of done for the open bug
 
 Our 0x004B2720 compiled into a plain `--auto` build (no excludes, no logging), verify_relink 0 mismatches,
-difftest 11/11, user confirms the animation in-game, then commit the cause + fix, push `decomp/continue`, and
+difftest 11/11 (those runs predate the harness fix of §5.1; the suite is now 12/12 on v53), user confirms the
+animation in-game, then commit the cause + fix, push `decomp/continue`, and
 ship the final package whose README says which exe to play. v51 meets the build/verify half:
 `AttT_decomp_exe_v51\ATThrone.exe` (plain) + `ATThrone_debug.exe`, maps, toggle_list, `README_RU.txt`.
 
@@ -406,6 +437,38 @@ has run), so every button action runs in the game's own Lua state at the end of 
 - Units list: 115 ids (`uValkyr1` … `uTest`, default selection `uDragon`).
 - Static verification (no game launch): map symbols `_DecompDebugMenuLua/_DecompDebugMenuPaused/
   _DecompDebugMenuInit/_DecompQueueLua/?MenuProc?/?OpenBarracks?`, the four USER32 imports, embedded wide
-  strings and Lua chunks; build74 verify_relink 0 mismatches, difftest 11/11; build75 (plain) is byte-identical
-  to v51 plain. Caveat: an exclusive-fullscreen swap chain may cover the topmost window — README says to use
-  windowed/borderless if the menu is not visible.
+  strings and Lua chunks; build74 verify_relink 0 mismatches, difftest 11/11 (vacuous, §5.1); build75 (plain)
+  is byte-identical to v51 plain. Caveat: an exclusive-fullscreen swap chain may cover the topmost window —
+  README says to use windowed/borderless if the menu is not visible.
+
+## 14. Battle Wait acted like Skip (0x0050B9A0, fixed in v53, 2026-11-02)
+
+**Report**: in battle the Wait button did not move the unit's turn to the end of the round; it behaved like
+the Skip button. The user bisected it to 0x0050B9A0 (`bisect_exclude.txt` / `decomp_toggle.log` /
+`bisect_shots\confirm_0050B9A0`).
+
+**Original semantics** (disassembly in `.att_tmp/orig_50B9A0.dis`): after the victory/death checks, a
+two-pass search over the `{troop, state}` array at `this+0x270` selects the next troop:
+`cmp dword ptr [edi + 4], ebp` — pass 0 selects state 0 (has not acted), pass 1 selects state 1 (waited;
+0x0050C280 sets it). If both passes find nothing, all states are reset, `++[this+0x1c4]` (new round),
+SetNumTurn (0x613908) and the round listeners run, and the search restarts. The found entry gets state 2,
+`[+0x27c]`, `_IsWaitMove` (0x613914) = (pass == 1), the current troop `[+0x64]`, the caption, the troop
+script hook, then AI / wait / reach marking.
+
+**Bug**: our hand function searched `state == 0` on *both* passes (`e->state == 0` was a literal
+comparison). A troop that had waited (state 1) was never selected, so the second pass always fell through
+to "start a new round" — visually a skipped turn. 0x0050C280 was already correct.
+
+**Fix**: `f_0050B9A0.c` — `if (e->state == pass && sub_0051DAA0(e->troop) > 0)` and `_IsWaitMove` gets
+`pass == 1`. Build75 (v52 plain) has `cmp dword ptr [edi + 4], 0`; build76/77 have
+`cmp dword ptr [edi + 4], ebp` (verified in `.att_tmp/new77_50B9A0.dis`, `00AE9B9B`).
+
+**Test**: `decomp/rebuild/tests/test_0050B9A0_wait.py` stubs the callees, builds a 2-troop battle fixture
+and compares original vs rebuild for (current, waited) states (2,1), (0,1), (2,2), then runs the new code
+and asserts the waited troop is selected with `_IsWaitMove=1` and the round is not advanced. It fails on
+build75 with exactly the reported symptom (waited B not selected, A selected, round 2) and passes on
+build76/77. It only detects this because of the harness fix in §5.1.
+
+**Still true from the original**: a waited troop is only found on the second pass; if every remaining troop
+has already waited, the round rolls over normally. Wait availability as a UI action is decided elsewhere
+(0x0050C280), not here.
