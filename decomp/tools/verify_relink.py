@@ -23,6 +23,16 @@ def imports(pe):
         for i in e.imports: d[i.address] = (e.dll.decode().lower(), i.name or i.ordinal)
     return d
 io, inn = imports(po), imports(pn)
+forwarded = {}
+if '--keep-function-iat' in sys.argv:
+    for address, identity in io.items():
+        target = struct.unpack_from('<I', mn, address - bn)[0]
+        offset = target - bn
+        if 0 <= offset <= len(mn) - 6 and mn[offset:offset + 2] == b'\xff\x25':
+            slot = struct.unpack_from('<I', mn, offset + 2)[0]
+            if inn.get(slot) != identity:
+                sys.exit('original IAT forwarder targets a different import at %08X' % address)
+            forwarded[address] = identity
 osecs = [(s.Name.rstrip(b'\0').decode(), bo + s.VirtualAddress, s.Misc_VirtualSize) for s in po.sections]
 def omap(va):
     for n, v, sz in osecs:
@@ -40,12 +50,15 @@ for n, v, sz in osecs:
     ns = starts[n]
     a = v; end = v + sz
     while a < end:
+        if a in forwarded:
+            a += 4
+            continue
         if a in relocs and a + 4 <= end and a not in near:
             to = struct.unpack_from('<I', mo, a - bo)[0]
             tn = struct.unpack_from('<I', mn, ns + a - v - bn)[0]
             nrel += 1
             if to in io:
-                ok = inn.get(tn) == io[to]
+                ok = inn.get(tn, forwarded.get(tn)) == io[to]
             elif to in repl: ok = True
             else:
                 ok = omap(to) == tn

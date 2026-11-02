@@ -12,6 +12,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from difftest import Harness
 from unicorn import UC_HOOK_CODE
+from unicorn.x86_const import UC_X86_REG_ECX
 
 
 class MenuHarness(Harness):
@@ -29,8 +30,8 @@ class MenuHarness(Harness):
             raise AssertionError((name, matches))
         return matches[0]
 
-    def checked_call(self, entry, args=()):
-        result = self.call(entry, args=args)
+    def checked_call(self, entry, args=(), regs=None):
+        result = self.call(entry, args=args, regs=regs)
         assert result['fault'] is None, result
         return result['eax']
 
@@ -122,11 +123,18 @@ def main():
         function Clock_GetHours() return 123 end
         WorldLevel = {Armys = {}}
         Unit = {}
-        GUIScene = {WorldLevel = {scene = {OnArmyIcon = function(self)
-            GUIScene.ArmyScreen = {scene = {ChooseScene = function(self, name, info)
-                Opened = {name = name, info = info, owner = self}
+        local armyLoad = function(self) Opened = {name = 'ArmyScreen'} end
+        local barrackLoad = function(self, info) Opened = {name = 'Barrack', info = info, owner = self} end
+        GUIScene = {
+            ArmyScreen = {Load = armyLoad}, Barrack = {Load = barrackLoad},
+            WorldLevel = {scene = {OnArmyIcon = function(self)
+                local child = GUIScene.ArmyScreen
+                child.scene = {ChooseScene = function(self, name, info) self.pending = name end}
+                child:Load({})
+                child.scene.pending = nil -- GUIScene::vf17 activation clears a pre-activation ChooseScene
             end}}
-        end}}}
+        }
+        OriginalArmyScreen, OriginalBarrackLoad = GUIScene.ArmyScreen, barrackLoad
     """)
     # The compiled C++ formatter/queue must handle every selection, including the longest ID.
     ids = re.findall(r'"(u\w+)"', pathlib.Path(__file__).resolve().parents[1].joinpath(
@@ -138,12 +146,15 @@ def main():
         h.lua(h.queued())
         h.lua("""
             assert(Opened.name == 'Barrack')
-            assert(Opened.owner == GUIScene.ArmyScreen.scene)
+            assert(Opened.owner == GUIScene.Barrack)
+            assert(GUIScene.ArmyScreen == OriginalArmyScreen)
+            assert(GUIScene.Barrack.Load == OriginalBarrackLoad)
             assert(Opened.info[2] == '%s' and Opened.info[3] == 100)
             assert(Opened.info.curCount == 100 and Opened.info.lastTime == 123)
             assert(Dbg[#Dbg] == 'barracks: 100 x %s (10 troops x 10)')
         """ % (unit, unit))
-    print('ok: barracks actions for %d unit selections (world scene has no ChooseScene)' % len(ids))
+    h.lua('GUIScene.ArmyScreen:Load({}) assert(Opened.name == "ArmyScreen")')
+    print('ok: Barrack template/stock for %d selections; activation and restored army screen' % len(ids))
 
     h.lua("""
         Army, ArmyPos, Actions = {}, {}, {}
@@ -191,6 +202,34 @@ def main():
         assert ('show', menu, 0) in h.windows
         assert ('foreground', game) in h.windows
     print('ok: repeated Ctrl+Alt+D shows/focuses; Close and X hide (Win32 calls mocked)')
+
+    if '_DecompTestFrameEnd' in h.symbols:
+        # Compatibility Frame belongs to the native engine/mod. Exercise the actual queue drain used by the
+        # main loop after frameCount advances, through CLua::RunBuffer and the rebuilt Lua VM.
+        engine = h.alloc(0xD8, bytes(0xD8))
+        vm = h.alloc(8, struct.pack('<II', 0, h.L))
+        h.uc.mem_write(h.to_rebuilt(0x6C88A8), struct.pack('<I', engine))
+        h.uc.mem_write(h.to_rebuilt(0x6C88D4), struct.pack('<I', vm))
+        h.uc.mem_write(engine + 0xAC, struct.pack('<I', 1))
+
+        def mod_frame(uc, address, size, data):
+            assert uc.reg_read(UC_X86_REG_ECX) == engine
+            uc.mem_write(engine + 0xA8, struct.pack('<I', 1))
+            uc.mem_write(engine + 0xAC, struct.pack('<I', 2))
+            h._ret(1)
+
+        hook = h.uc.hook_add(UC_HOOK_CODE, mod_frame, begin=0x44A9C0, end=0x44A9C0)
+        assert h.checked_call(0x44FD50, regs={UC_X86_REG_ECX: engine}) & 0xFF == 1
+        h.uc.hook_del(hook)
+        assert bytes(h.uc.mem_read(engine + 0xA8, 4)) == struct.pack('<I', 1)
+        source = b'CheckFrameEnd = (CheckFrameEnd or 0) + 1\0'
+        buf = h.alloc(len(source), source)
+        assert h.checked_call(h.symbol('DecompQueueLua'), [buf]) & 0xFF == 1
+        h.checked_call(h.symbol('DecompTestFrameEnd'))
+        h.lua('assert(CheckFrameEnd == 1)')
+        h.checked_call(h.symbol('DecompTestFrameEnd'))
+        h.lua('assert(CheckFrameEnd == 1)')
+        print('ok: rebuilt Step reaches native Frame; frame-end queue runs once through native CLua::RunBuffer')
 
 
 if __name__ == '__main__':

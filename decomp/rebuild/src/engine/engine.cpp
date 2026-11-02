@@ -615,6 +615,17 @@ void CEngine::Frame()
 #endif
 }
 
+#if defined(DECOMP_ATTFIX_COMPAT) && defined(DECOMP_TEST_INPUT)
+/* The compatibility build leaves native Frame/Render available for AttTFix to replace.  The main loop calls
+ * this after a Step which advanced frameCount, preserving the same safe point for debug Lua even when the
+ * DLL owns Frame.  Do not run scene-changing chunks before the frame or from a timer/window callback. */
+extern "C" void DecompTestFrameEnd()
+{
+    RankWatch((void *)g_engine->scene, g_engine->frameCount);
+    TestLua();
+}
+#endif
+
 /* State 2: draw the scene and the overlay.  A failed Present is retried through a device reset only for
  * D3DERR_DEVICENOTRESET; any other failure (e.g. D3DERR_DEVICELOST while minimised) throws, as in the
  * original. */

@@ -187,8 +187,9 @@ static const char *kGold =
 /* The barracks fills AddInfo.curCount units in troops of HeroArmy.MaxQnUnitInTroop (10) each: 100 is exactly ten
  * troops of ten (scenebarrack.dis).  lastTime = Clock_GetHours() keeps it from adding the time since the last
  * visit, so the count is what the line says.  WorldLevel.scene has no ChooseScene method.  OnArmyIcon creates
- * the world's GUIScene container synchronously; ArmyScreen.scene:ChooseScene then schedules Barrack in that
- * container, preserving the world's normal child-screen close/return path (0053E040 / 00583D70).
+ * a child GUI from GUIScene.ArmyScreen synchronously (0053E040).  Give it the Barrack template and Load args
+ * for that call, then restore both Lua definitions, including on failure.  Choosing a second scene before the
+ * child becomes active does not work: its activation clears that pending choice (00583D20).
  *
  * The battle army is put 250 units away from the hero (its 'Простой' brain would attack on its own if the hero
  * were inside its radius) and starts the fight through Actions['Fight With Army'] with selfHero = false: the
@@ -291,10 +292,14 @@ static void OpenBarracks(const char *unit)
             "local u = Unit and Unit['%s'] "
             "if not (u and u.BattleParams) then error('unit %s has no BattleParams') end "
             "local info = { [2] = '%s', [3] = 100, curCount = 100, lastTime = Clock_GetHours() } "
-            "W.scene:OnArmyIcon() "
-            "local S = GUIScene.ArmyScreen and rawget(GUIScene.ArmyScreen, 'scene') "
-            "if not S then error('the army screen did not open') end "
-            "S:ChooseScene('Barrack', info) "
+            "local A, B = GUIScene.ArmyScreen, GUIScene.Barrack "
+            "if not (B and type(B.Load) == 'function') then error('the barracks script is not loaded') end "
+            "local load = B.Load "
+            "B.Load = function(self) return load(self, info) end "
+            "GUIScene.ArmyScreen = B "
+            "local opened, why = pcall(function() W.scene:OnArmyIcon() end) "
+            "GUIScene.ArmyScreen, B.Load = A, load "
+            "if not opened then error(why) end "
             "DecompDbg('barracks: 100 x %s (10 troops x 10)') "
             "end) "
             "if not ok then DecompDbg('barracks ERROR: ' .. tostring(err)) end",

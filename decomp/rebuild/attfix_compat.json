@@ -1,0 +1,777 @@
+{
+  "game_timestamp": "475EABAF",
+  "mod_sha256": "202caa2282681878e84022dab6d72f3d72fea619981f3a68c592392ab29b5a79",
+  "source_sha256": {
+    "attfix.cpp": "33c3187ac937c721e5d69b9188b8dbcd58f6984f1643c56ae7c9df70dce7b967",
+    "billboard.inc": "ed2e74f91f4e8fe5063a88199d554e8729168105b5ac8208a7c56ec9995bbb8d",
+    "cpuopt.inc": "a62b0d50ee143721d9ba497fa61326c865e3c73af7ce5f49e0902019e11714fc",
+    "effectsm.inc": "82f6bfb38159978a995c46c727c2c311fc045cc3a08fba6682842f09f622c154",
+    "instance.inc": "62f99b862a4e8dde8bdf15e9c3c9ff3488d7a1a7064abb2dbcbd4205ddc977da",
+    "mipmap.inc": "8981cbc04466fd7ff74563b8ae9b582faa54f58f879cf68eeffa5fb0bac80f20",
+    "msaa.inc": "1809f14590a0f0164263f2448df24c686c5ecbfe5aa1fe86f4836d00dbdda802",
+    "renderopt.inc": "8c89d42a1ee8b72ccc68b16f067dabf3f3f9edcc554ea480c1d6f4c084bcd413",
+    "shadow.inc": "6d1f6bc31592cc2be4688ceda617f27ecc37bcc6d4805e629b524cac1e2d3a0a",
+    "skin.inc": "295ac964768a9d3f7c8ac21585370f282cab7d1666a3181a5da7b3f3eeb0be5a",
+    "smoothanim.inc": "3aeede54c1042a91752a8a8158217de198e35bbb37a23c4db9f15138a1da8f60",
+    "sound.inc": "96870ad4198bd964ca412d48528c8e262d826be4a845860c9be67a799bf39680",
+    "wsart.inc": "42dc8d6f58b56291c0c35ced01d0bbd2181ea75cdce97f7233122e4a8f44f3d4"
+  },
+  "method": "conservative code-reference reservation; complete enclosing functions; excludes Lua/CRT",
+  "functions": {
+    "004188E0": {
+      "00418937": [
+        "dll code"
+      ]
+    },
+    "00424D90": {
+      "00424D90": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "00424E70": {
+      "00424E70": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "00428350": {
+      "00428350": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "0042F160": {
+      "0042F160": [
+        "attfix.cpp",
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "00430570": {
+      "00430570": [
+        "dll code",
+        "smoothanim.inc"
+      ]
+    },
+    "004305F0": {
+      "004305F0": [
+        "dll code",
+        "smoothanim.inc"
+      ]
+    },
+    "00430610": {
+      "00430610": [
+        "dll code",
+        "smoothanim.inc"
+      ]
+    },
+    "00430650": {
+      "00430650": [
+        "dll code",
+        "smoothanim.inc"
+      ]
+    },
+    "004306D0": {
+      "004306D0": [
+        "dll code",
+        "smoothanim.inc"
+      ]
+    },
+    "00432620": {
+      "00432620": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "00434550": {
+      "00434550": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "00435640": {
+      "00435640": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "00435B00": {
+      "00435B00": [
+        "shadow.inc"
+      ]
+    },
+    "004363D0": {
+      "004363D0": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "0043F2F0": {
+      "0043F2F0": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "00442AD0": {
+      "00442AD0": [
+        "attfix.cpp"
+      ],
+      "00442AEE": [
+        "attfix.cpp",
+        "dll code"
+      ],
+      "00442AF0": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004480C0": {
+      "004480C0": [
+        "dll code",
+        "effectsm.inc"
+      ]
+    },
+    "004480F0": {
+      "004480F0": [
+        "dll code",
+        "effectsm.inc"
+      ]
+    },
+    "00448110": {
+      "00448110": [
+        "billboard.inc",
+        "dll code"
+      ]
+    },
+    "00448140": {
+      "00448140": [
+        "billboard.inc",
+        "dll code"
+      ]
+    },
+    "00448180": {
+      "00448180": [
+        "billboard.inc",
+        "dll code"
+      ]
+    },
+    "00449F80": {
+      "00449F80": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "00449FE0": {
+      "00449FE0": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "0044A9C0": {
+      "0044A9C0": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "0044B610": {
+      "0044B610": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "0044C5A0": {
+      "0044C5A0": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "0044C840": {
+      "0044C840": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "0044CAE0": {
+      "0044CAE0": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "0044CCF0": {
+      "0044CCF0": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "0044D0C0": {
+      "0044D0C0": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "0044D9D0": {
+      "0044D9D0": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "0044DD20": {
+      "0044DD20": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "0044E480": {
+      "0044E480": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "0044F2E0": {
+      "0044F6F2": [
+        "attfix.cpp"
+      ],
+      "0044F75E": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004558C0": {
+      "004558C0": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "00455960": {
+      "00455960": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "00455CF0": {
+      "00455CF0": [
+        "dll code",
+        "renderopt.inc"
+      ],
+      "00455F8F": [
+        "dll code",
+        "renderopt.inc"
+      ],
+      "00455F99": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "00458120": {
+      "00458120": [
+        "dll code",
+        "shadow.inc"
+      ]
+    },
+    "0045A990": {
+      "0045AE55": [
+        "attfix.cpp"
+      ]
+    },
+    "0045C3E0": {
+      "0045C3E0": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "0045CB40": {
+      "0045CB40": [
+        "renderopt.inc"
+      ]
+    },
+    "00463E20": {
+      "00463E20": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "0046CB50": {
+      "0046CB50": [
+        "attfix.cpp"
+      ]
+    },
+    "00472E20": {
+      "00472F47": [
+        "attfix.cpp"
+      ]
+    },
+    "004773F0": {
+      "004773F0": [
+        "dll code",
+        "renderopt.inc",
+        "smoothanim.inc"
+      ]
+    },
+    "00477610": {
+      "00477610": [
+        "dll code",
+        "smoothanim.inc"
+      ]
+    },
+    "004802D0": {
+      "0048030F": [
+        "attfix.cpp"
+      ]
+    },
+    "004AB7D0": {
+      "004AB7D0": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004AC890": {
+      "004AC890": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004B1E20": {
+      "004B1E20": [
+        "attfix.cpp"
+      ]
+    },
+    "004B6880": {
+      "004B6880": [
+        "shadow.inc"
+      ]
+    },
+    "004B6B20": {
+      "004B6B20": [
+        "shadow.inc"
+      ],
+      "004B6BC5": [
+        "dll code",
+        "shadow.inc"
+      ],
+      "004B6BEF": [
+        "dll code",
+        "shadow.inc"
+      ],
+      "004B6C4C": [
+        "shadow.inc"
+      ]
+    },
+    "004B6D70": {
+      "004B6D70": [
+        "shadow.inc"
+      ],
+      "004B6DA8": [
+        "dll code",
+        "shadow.inc"
+      ],
+      "004B6DE6": [
+        "dll code",
+        "shadow.inc"
+      ]
+    },
+    "004B6E70": {
+      "004B6E70": [
+        "dll code",
+        "shadow.inc"
+      ]
+    },
+    "004B9110": {
+      "004B9110": [
+        "attfix.cpp",
+        "dll code",
+        "skin.inc"
+      ]
+    },
+    "004BA7F0": {
+      "004BA7F0": [
+        "skin.inc"
+      ]
+    },
+    "004BA850": {
+      "004BA850": [
+        "skin.inc"
+      ]
+    },
+    "004BAB70": {
+      "004BAB70": [
+        "skin.inc"
+      ]
+    },
+    "004C0620": {
+      "004C0620": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004C0680": {
+      "004C0680": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004C0DE0": {
+      "004C0DE0": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004C0E30": {
+      "004C0E30": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004C0E60": {
+      "004C0E60": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004C0EA0": {
+      "004C0EA0": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004C18F0": {
+      "004C18F0": [
+        "attfix.cpp",
+        "dll code",
+        "sound.inc"
+      ],
+      "004C18FC": [
+        "dll code",
+        "sound.inc"
+      ]
+    },
+    "004C19A0": {
+      "004C19A0": [
+        "attfix.cpp",
+        "dll code",
+        "sound.inc"
+      ]
+    },
+    "004C1AA0": {
+      "004C1AA0": [
+        "attfix.cpp",
+        "dll code",
+        "sound.inc"
+      ]
+    },
+    "004C2E10": {
+      "004C2E10": [
+        "dll code",
+        "sound.inc"
+      ],
+      "004C2E1E": [
+        "dll code",
+        "sound.inc"
+      ]
+    },
+    "004C53A0": {
+      "004C53A0": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004DDF10": {
+      "004DE9EF": [
+        "attfix.cpp"
+      ]
+    },
+    "004DEED0": {
+      "004DEED0": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004E0000": {
+      "004E02B4": [
+        "mipmap.inc"
+      ],
+      "004E02E6": [
+        "dll code",
+        "mipmap.inc"
+      ],
+      "004E0321": [
+        "dll code",
+        "mipmap.inc"
+      ],
+      "004E0416": [
+        "mipmap.inc"
+      ]
+    },
+    "004E0490": {
+      "004E06DF": [
+        "mipmap.inc"
+      ],
+      "004E0708": [
+        "dll code",
+        "mipmap.inc"
+      ]
+    },
+    "004E4220": {
+      "004E4220": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004E9C10": {
+      "004E9C10": [
+        "dll code",
+        "smoothanim.inc"
+      ]
+    },
+    "004EC6F0": {
+      "004EC793": [
+        "dll code",
+        "shadow.inc"
+      ],
+      "004EC798": [
+        "dll code",
+        "shadow.inc"
+      ],
+      "004EC7C4": [
+        "dll code",
+        "shadow.inc"
+      ],
+      "004EC7C9": [
+        "dll code",
+        "shadow.inc"
+      ]
+    },
+    "004EC910": {
+      "004ECEDC": [
+        "attfix.cpp"
+      ]
+    },
+    "004ECF20": {
+      "004ECF43": [
+        "dll code",
+        "shadow.inc"
+      ],
+      "004ECF48": [
+        "dll code",
+        "shadow.inc"
+      ]
+    },
+    "004F8AE0": {
+      "004F8AE0": [
+        "dll code",
+        "smoothanim.inc"
+      ]
+    },
+    "004F8CB0": {
+      "004F8CB0": [
+        "attfix.cpp"
+      ],
+      "004F8CC9": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004F91D0": {
+      "004F91D0": [
+        "attfix.cpp"
+      ],
+      "004F91F6": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "004FEF90": {
+      "004FEFFF": [
+        "dll code"
+      ]
+    },
+    "005180C0": {
+      "005180C0": [
+        "attfix.cpp"
+      ]
+    },
+    "00518D90": {
+      "00518D90": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "00521BC0": {
+      "00521BC0": [
+        "attfix.cpp"
+      ]
+    },
+    "00527DE0": {
+      "00527DF0": [
+        "shadow.inc"
+      ]
+    },
+    "00527ED0": {
+      "00528188": [
+        "dll code",
+        "shadow.inc"
+      ],
+      "0052818E": [
+        "dll code",
+        "shadow.inc"
+      ]
+    },
+    "00528970": {
+      "00528A34": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "00528C10": {
+      "0052919D": [
+        "dll code",
+        "shadow.inc"
+      ],
+      "005291A3": [
+        "dll code",
+        "shadow.inc"
+      ]
+    },
+    "00529CF0": {
+      "00529DAC": [
+        "shadow.inc"
+      ],
+      "0052A04A": [
+        "dll code",
+        "shadow.inc"
+      ],
+      "0052A04F": [
+        "dll code",
+        "shadow.inc"
+      ]
+    },
+    "0052A1D0": {
+      "0052A47A": [
+        "dll code",
+        "shadow.inc"
+      ]
+    },
+    "0052B1F0": {
+      "0052B1F0": [
+        "renderopt.inc"
+      ]
+    },
+    "0052B420": {
+      "0052B420": [
+        "renderopt.inc"
+      ]
+    },
+    "005352E0": {
+      "005352E0": [
+        "dll code",
+        "msaa.inc"
+      ]
+    },
+    "00535850": {
+      "00535850": [
+        "dll code",
+        "msaa.inc",
+        "renderopt.inc"
+      ]
+    },
+    "0053C5D0": {
+      "0053C5D0": [
+        "attfix.cpp"
+      ]
+    },
+    "005406F0": {
+      "005406F0": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "0054AF30": {
+      "0054AF30": [
+        "dll code",
+        "smoothanim.inc"
+      ]
+    },
+    "005520D0": {
+      "005520D0": [
+        "dll code",
+        "smoothanim.inc"
+      ]
+    },
+    "0055C500": {
+      "0055C500": [
+        "cpuopt.inc",
+        "dll code"
+      ]
+    },
+    "0055C690": {
+      "0055C690": [
+        "dll code",
+        "renderopt.inc"
+      ],
+      "0055C6E7": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "0055DF60": {
+      "0055DF60": [
+        "billboard.inc",
+        "dll code"
+      ]
+    },
+    "0055E820": {
+      "0055E820": [
+        "cpuopt.inc",
+        "renderopt.inc"
+      ],
+      "0055EA5D": [
+        "cpuopt.inc",
+        "dll code"
+      ],
+      "0055EA6B": [
+        "cpuopt.inc",
+        "dll code"
+      ]
+    },
+    "0055EDF0": {
+      "0055EDF0": [
+        "renderopt.inc"
+      ],
+      "0055EDFA": [
+        "billboard.inc",
+        "dll code"
+      ],
+      "0055EE02": [
+        "dll code",
+        "renderopt.inc"
+      ]
+    },
+    "0055F700": {
+      "0055F710": [
+        "attfix.cpp"
+      ]
+    },
+    "0057D220": {
+      "0057D220": [
+        "attfix.cpp",
+        "dll code"
+      ]
+    },
+    "00582FA0": {
+      "00583258": [
+        "attfix.cpp"
+      ]
+    },
+    "0058E660": {
+      "0058E6E0": [
+        "shadow.inc"
+      ]
+    },
+    "0058EB50": {
+      "0058EB50": [
+        "dll code",
+        "shadow.inc"
+      ]
+    }
+  }
+}

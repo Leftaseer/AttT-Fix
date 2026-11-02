@@ -8,6 +8,9 @@
 extern "C" void DecompDebugMenuInit();      /* debugmenu.cpp */
 extern "C" bool DecompDebugMenuPaused();    /* the menu window has the focus: the game must not step */
 #endif
+#if defined(DECOMP_ATTFIX_COMPAT) && defined(DECOMP_TEST_INPUT)
+extern "C" void DecompTestFrameEnd();
+#endif
 
 /* ---------------------------------------------------------------------------------------------------------------
  * CGameException: the message, then "\n---in file - '<file>'\n---line = <line>" when a file is given. */
@@ -452,8 +455,15 @@ void GameMain(const char *cmdLine)
 #ifdef DECOMP_TEST_INPUT
             TestInput(CInput::Instance());
 #endif
+#if defined(DECOMP_ATTFIX_COMPAT) && defined(DECOMP_TEST_INPUT)
+            unsigned frameBefore = g_engine->frameCount;
+#endif
             if (!g_engine->Step())
                 break;
+#if defined(DECOMP_ATTFIX_COMPAT) && defined(DECOMP_TEST_INPUT)
+            if (g_engine->frameCount != frameBefore)
+                DecompTestFrameEnd();
+#endif
             continue;
         }
         if (!TranslateAcceleratorA(msg.hwnd, accel, &msg)) {

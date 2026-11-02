@@ -18,7 +18,7 @@ import sys, os, struct, argparse, pefile
 IMAGE_REL_I386_DIR32 = 6
 IMAGE_REL_I386_REL32 = 0x14
 SCN = {'.text': 0x60000020, '.rdata': 0x40000040, '.data': 0xC0000040, '.ndata': 0xC0000040,
-       '.bss': 0xC0000080}
+       '.bss': 0xC0000080, '.ntext$iat': 0x60000020}
 ALIGN_4096 = 0x00D00000
 NRELOC_OVFL = 0x01000000
 
@@ -34,6 +34,8 @@ def main():
     ap.add_argument('--toggle', action='store_true', help='jmps through slots that rebuild/toggle.c can switch off '
                     'at start-up (decomp_toggle_table)')
     ap.add_argument('--always-on', help='file of addresses (hex, one a line) --toggle leaves plainly replaced')
+    ap.add_argument('--keep-function-iat', action='store_true', help='keep native function-import operands at '
+                    'their original addresses; old IAT slots forward through the new, hookable import table')
     a = ap.parse_args()
     pe = pefile.PE(a.exe)
     base = pe.OPTIONAL_HEADER.ImageBase
@@ -70,6 +72,7 @@ def main():
 
     # imports: IAT slot address -> (dll, symbol)
     iat = {}
+    function_iat = set()
     defs = {}
     for e in pe.DIRECTORY_ENTRY_IMPORT:
         dll = e.dll.decode()
@@ -83,6 +86,11 @@ def main():
                 sym = '__imp__' + nm
                 defs.setdefault(dll, []).append('%s @%d NONAME' % (nm, imp.ordinal))
             iat[imp.address] = sym
+            # Data exports need the loader's actual data pointer, not an executable forwarding stub.
+            if not imp.name or (not nm.startswith('??_7') and nm not in {
+                    '_acmdln', '_wcmdln', '_adjust_fdiv', '_iob', '__iob', '__initenv', '__winitenv',
+                    '_commode', '_fmode', '_environ', '_wenviron', '__argc', '__argv', '__wargv'}):
+                function_iat.add(imp.address)
 
     symtab = []  # (name, value, secnum(1-based or 0 undef or -1 abs), storage)
     symidx = {}
@@ -107,7 +115,7 @@ def main():
             continue  # reloc in a dropped section (.rsrc never has any)
         s = secs[si]; off = r - s[1]
         tgt = struct.unpack_from('<I', s[3], off)[0]
-        if tgt in iat:
+        if tgt in iat and not (a.keep_function_iat and tgt in function_iat):
             struct.pack_into('<I', s[3], off, 0)
             s[4].append((off, sym(iat[tgt]), IMAGE_REL_I386_DIR32)); stats['iat'] += 1; continue
         # pointers to replaced functions keep the old address (its entry jumps to the new code): a function has
@@ -266,6 +274,28 @@ def main():
         add.setdefault(si, []).append((off + 1, sym(cname(new)), IMAGE_REL_I386_REL32))
     for si in drop:
         secs[si][4] = [x for x in secs[si][4] if x[0] not in drop[si]] + add[si]
+
+    if a.keep_function_iat:
+        # The mod reads some original IAT slots directly (e.g. qsort at 00607488), and some byte guards include
+        # the absolute IAT operand. Each old function slot therefore points at a tail-jump through the canonical
+        # new IAT. A mod's PatchIAT affects both native and rebuilt callers, including already-copied pointers.
+        code, relocations = bytearray(), []
+        section = len(secs) + 1
+        for address in sorted(function_iat):
+            si = find_sec(address)
+            if si is None:
+                raise ValueError('original function IAT slot is outside retained sections')
+            entry = sym('$iat_forward_%08X' % address, len(code), section, 3)
+            code += b'\xFF\x25'
+            relocations.append((len(code), sym(iat[address]), IMAGE_REL_I386_DIR32))
+            code += bytes(4)
+            s = secs[si]
+            offset = address - s[1]
+            struct.pack_into('<I', s[3], offset, 0)
+            s[4] = [r for r in s[4] if r[0] != offset]
+            s[4].append((offset, entry, IMAGE_REL_I386_DIR32))
+        secs.append(['.ntext$iat', 0xF2000000, len(code), code, relocations])
+        print('original function IAT: %d forwarding slots' % len(function_iat))
 
     # public symbols for new code
     if a.syms:

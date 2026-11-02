@@ -344,6 +344,8 @@ def main():
     ap.add_argument('--auto-exclude', help='not these auto-decompiled functions (e.g. bad.txt of tools/autobisect.py)')
     ap.add_argument('--fixed-exclude', help='not these hand-written functions (file with one address per line): the '
                     'generated code, or the original when there is none, takes their place')
+    ap.add_argument('--attfix-compat', action='store_true', help='preserve the native engine functions used by '
+                    'AttTFix hooks (attfix_compat.json), including their byte-checked interior patch sites')
     a = ap.parse_args()
 
     pe = PE(a.exe)
@@ -354,6 +356,15 @@ def main():
     os.makedirs(work, exist_ok=True)
     funcs = load_functions(game)
     machine_funcs = dict(funcs)    # as the machine code is; funcs may get the generated code's register lists
+    attfix_keep = set()
+    if a.attfix_compat:
+        if game != 'attt':
+            sys.exit('--attfix-compat currently covers only the AttT Steam executable')
+        profile = json.load(open(os.path.join(HERE, 'attfix_compat.json')))
+        attfix_keep = {int(ad, 16) for ad in profile['functions']}
+        if not attfix_keep <= set(funcs):
+            sys.exit('attfix_compat.json contains unknown function addresses')
+        a.defines.append('DECOMP_ATTFIX_COMPAT')
     native_refs = set()     # filled for auto-decompiled code of Valkyrie (its own addresses)
     fhow = {}
     fmap = load_map('attt2valk.tsv', fhow) if game == 'valk' else None
@@ -383,6 +394,7 @@ def main():
               '-I', os.path.join(HERE, 'src'), '-D', 'DECOMP_GAME_%s=1' % game.upper()] + ['-D' + d for d in a.defines]
     header_digest([os.path.join(HERE, 'include'), os.path.join(HERE, 'src')] + ([os.path.abspath(a.auto)] if a.auto else []))
     decomp, protos = scan_sources(files, cflags)
+    decomp = [d for d in decomp if d[0] not in attfix_keep]
     # compile
     lua_dir = os.path.join(HERE, 'src', 'lua51')
 
@@ -418,6 +430,11 @@ def main():
                 allow = set(int(l.split('\t')[0], 16) for l in open(os.path.join(a.auto, 'functions.tsv'))
                             if l.split('\t')[1] == 'compiled')
             allow -= set(int(l.split()[0], 16) for l in open(a.auto_exclude) if l.strip() and not l.startswith('#'))
+        if attfix_keep:
+            if allow is None:
+                allow = set(int(l.split('\t')[0], 16) for l in open(os.path.join(a.auto, 'functions.tsv'))
+                            if l.split('\t')[1] == 'compiled')
+            allow -= attfix_keep
         # the functions fixed by hand replace their generated versions; '/* @conv REGS POP */' in them is the
         # prototype as convs.tsv would give it
         fixed = {}
@@ -426,6 +443,7 @@ def main():
         if a.fixed_exclude:
             drop = set(int(l.split()[0], 16) for l in open(a.fixed_exclude) if l.strip() and not l.startswith('#'))
             fixed = {ad: fx for ad, fx in fixed.items() if ad not in drop}
+        fixed = {ad: fx for ad, fx in fixed.items() if ad not in attfix_keep}
         if fixed:
             if allow is None:
                 allow = set(int(l.split('\t')[0], 16) for l in open(os.path.join(a.auto, 'functions.tsv'))
@@ -652,6 +670,7 @@ def main():
         f.write(''.join('%08X\n' % x for x in sorted(ALWAYS_ON)))
     run([sys.executable, '-I', os.path.join(TOOLS, 'exe2obj.py'), a.exe, work,
          '--syms', os.path.join(work, 'syms.txt'), '--replace', os.path.join(work, 'replace.txt')] +
+        (['--keep-function-iat'] if a.attfix_compat else []) +
         (['--toggle', '--always-on', os.path.join(work, 'always_on.txt')] if a.toggle else []))
     # imports the new code needs and the original exe does not use
     have = {}
@@ -748,7 +767,8 @@ def main():
     npe.close()
     open(a.out, 'wb').write(data)
     print(run([sys.executable, '-I', os.path.join(TOOLS, 'verify_relink.py'), a.exe, a.out, mapf,
-               '--replace', os.path.join(work, 'replace.txt')]).strip())
+               '--replace', os.path.join(work, 'replace.txt')] +
+              (['--keep-function-iat'] if a.attfix_compat else [])).strip())
     if skipped:
         with open(os.path.join(work, 'skipped.txt'), 'w') as f:
             for ad, why in skipped:
