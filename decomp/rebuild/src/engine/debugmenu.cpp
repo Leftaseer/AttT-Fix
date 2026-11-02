@@ -24,7 +24,7 @@ extern "C" int __cdecl DecompDebugMenuLua(void *L);      /* registered as Decomp
 static HWND g_menu, g_status, g_list;
 static HICON g_icon;
 static HCURSOR g_arrow;
-static bool g_created, g_visible, g_paused;
+static bool g_created, g_paused;
 static int g_cursorShows;                               /* ShowCursor calls made to bring the count to >= 0 */
 static int g_unitIndex = -1;                            /* the unit selected in the list */
 
@@ -186,13 +186,16 @@ static const char *kGold =
 
 /* The barracks fills AddInfo.curCount units in troops of HeroArmy.MaxQnUnitInTroop (10) each: 100 is exactly ten
  * troops of ten (scenebarrack.dis).  lastTime = Clock_GetHours() keeps it from adding the time since the last
- * visit, so the count is what the line says. *
+ * visit, so the count is what the line says.  WorldLevel.scene has no ChooseScene method.  OnArmyIcon creates
+ * the world's GUIScene container synchronously; ArmyScreen.scene:ChooseScene then schedules Barrack in that
+ * container, preserving the world's normal child-screen close/return path (0053E040 / 00583D70).
+ *
  * The battle army is put 250 units away from the hero (its 'Простой' brain would attack on its own if the hero
  * were inside its radius) and starts the fight through Actions['Fight With Army'] with selfHero = false: the
  * normal troop-per-troop battle of heroarmy.dis, not the special hero unit.  The fourth argument true keeps the
  * action from saving the game over game00 (false would save it).  ChangeParam is added to every unit's
- * BattleParams by WorldArmy:BeginBattle: one uDragon (201 health) gets 100201.  AttT has no game speed setting;
- * the battle runs at its normal 1x. */
+ * BattleParams by WorldArmy:BeginBattle: Health gains 100000 and Speed gains (1 - base Speed), giving this
+ * battle's dragon a Speed stat of exactly 1 without changing other dragons or global unit definitions. */
 static const char *kTough =
     "local ok, err = pcall(function() "
     "if not (GUIScene and GUIScene.WorldLevel and rawget(GUIScene.WorldLevel, 'scene')) then"
@@ -206,10 +209,11 @@ static const char *kTough =
     "Army['DecompTough'] = { DisplayName = 'DEBUG ARMY', Attitude = 'Agressive', Standard = 'stVagrant',"
     "  TroopList = { { Unit = 'uDragon', Quantity = 1 } } } "
     "local a = WorldArmy:new('DecompTough') "
-    "a.ChangeParam = { Health = 100000 } "
-    "local hp = Unit.uDragon.BattleParams.Health + 100000 "
+    "local b = Unit.uDragon.BattleParams "
+    "a.ChangeParam = { Health = 100000, Speed = 1 - b.Speed } "
+    "local hp = b.Health + 100000 "
     "Actions['Fight With Army'](Actions, 'DecompTough', false, true) "
-    "DecompDbg('battle: 1 x uDragon, ' .. hp .. ' HP, speed 1x (normal)') "
+    "DecompDbg('battle: 1 x uDragon, ' .. hp .. ' HP, unit Speed 1') "
     "end) "
     "if not ok then DecompDbg('battle ERROR: ' .. tostring(err)) end";
 
@@ -242,7 +246,6 @@ static void ShowMenu(bool activate)
 {
     if (!g_menu)
         return;
-    g_visible = true;
     ShowWindow(g_menu, activate ? SW_SHOW : SW_SHOWNOACTIVATE);
     SetWindowPos(g_menu, HWND_TOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | (activate ? 0 : SWP_NOACTIVATE));
@@ -256,22 +259,14 @@ static void HideMenu()
 {
     if (!g_menu)
         return;
-    g_visible = false;
     ShowWindow(g_menu, SW_HIDE);
     if (g_appActive)
         SetForegroundWindow(g_hWnd);
 }
 
-static void ToggleMenu()
-{
-    if (g_visible)
-        HideMenu();
-    else
-        ShowMenu(true);
-}
-
 /* A queued chunk is run by the game's frame (TestLua), so the focus goes back to the game window: the chunk runs
- * at the end of the next frame, and this window stays on top (hidden with Ctrl+Alt+D or its Close button). */
+ * at the end of the next frame.  Ctrl+Alt+D always shows/focuses this window, even if already visible; only the
+ * Close button or title-bar X hides it. */
 static void QueueAction(const char *chunk, const char *what)
 {
     if (!DecompQueueLua(chunk)) {
@@ -279,7 +274,7 @@ static void QueueAction(const char *chunk, const char *what)
         return;
     }
     AddStatus(what);
-    AddStatus("queued; the game runs it at the end of the next frame");
+    AddStatus("queued for the next game frame; Ctrl+Alt+D returns to this menu");
     if (g_hWnd) {
         SetActiveWindow(g_hWnd);
         SetForegroundWindow(g_hWnd);
@@ -296,7 +291,10 @@ static void OpenBarracks(const char *unit)
             "local u = Unit and Unit['%s'] "
             "if not (u and u.BattleParams) then error('unit %s has no BattleParams') end "
             "local info = { [2] = '%s', [3] = 100, curCount = 100, lastTime = Clock_GetHours() } "
-            "W.scene:ChooseScene('Barrack', info) "
+            "W.scene:OnArmyIcon() "
+            "local S = GUIScene.ArmyScreen and rawget(GUIScene.ArmyScreen, 'scene') "
+            "if not S then error('the army screen did not open') end "
+            "S:ChooseScene('Barrack', info) "
             "DecompDbg('barracks: 100 x %s (10 troops x 10)') "
             "end) "
             "if not ok then DecompDbg('barracks ERROR: ' .. tostring(err)) end",
@@ -318,8 +316,8 @@ static void CreateControls(HWND hwnd)
     Make(hwnd, L"STATIC", L"AttT decomp debug menu  (DECOMP_DEBUG_MENU build)", SS_LEFT, x, y, w, 18, 0);
     y += 22;
     Make(hwnd, L"STATIC",
-         L"Load a saved game and stand on the world map.  Each action is queued and runs at the end of the next"
-         L" game frame; this window returns the focus to the game.  Ctrl+Alt+D shows or hides it.",
+         L"On the world map, actions run after the next game frame and return focus to the game. "
+         L"Ctrl+Alt+D shows/focuses this menu. Close or X hides it.",
          SS_LEFT, x, y, w, 44, 0);
     y += 48;
     Make(hwnd, L"BUTTON", L"Learn spells (working first; click again for all)", BS_PUSHBUTTON | WS_TABSTOP, x, y, w,
@@ -347,14 +345,14 @@ static void CreateControls(HWND hwnd)
          IDC_BARRACKS);
     y += 30;
     Make(hwnd, L"BUTTON",
-         L"Tough battle: 1 x uDragon with +100000 health (100201 HP), speed 1x",
+         L"Tough battle: 1 x uDragon, +100000 health, unit Speed 1",
          BS_PUSHBUTTON | WS_TABSTOP, x, y, w, 26, IDC_TOUGH);
     y += 32;
     Make(hwnd, L"STATIC", L"Status:", SS_LEFT, x, y, w, 16, 0);
     y += 18;
     g_status = Make(hwnd, L"STATIC", L"status: idle", SS_LEFT, x, y, w, 120, 0);
     y += 126;
-    Make(hwnd, L"BUTTON", L"Back to the game (Ctrl+Alt+D)", BS_PUSHBUTTON | WS_TABSTOP, x, y, w, 26, IDC_BACK);
+    Make(hwnd, L"BUTTON", L"Close menu / back to the game", BS_PUSHBUTTON | WS_TABSTOP, x, y, w, 26, IDC_BACK);
     RefreshStatus();
 }
 
@@ -380,7 +378,7 @@ static LRESULT CALLBACK MenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         break;
     case WM_HOTKEY:
         if ((int)wp == kHotkey)
-            ToggleMenu();
+            ShowMenu(true);
         return 0;
     case WM_COMMAND:
         switch (LOWORD(wp)) {
@@ -414,7 +412,7 @@ static LRESULT CALLBACK MenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 }
 
 /* Called by GameMain after the game window and the engine exist (main.cpp).  The window appears without taking
- * the focus, so the game keeps running until the player clicks the menu; Ctrl+Alt+D shows or hides it. */
+ * the focus, so the game keeps running until the player clicks the menu; Ctrl+Alt+D shows and focuses it. */
 extern "C" void DecompDebugMenuInit()
 {
     if (g_created)
