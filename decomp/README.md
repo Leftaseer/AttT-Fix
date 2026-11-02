@@ -53,8 +53,15 @@ python3 decomp/rebuild/build.py --exe "C:/Games/Ascension to the Throne/ATThrone
 
 Оригинальные `.text`, `.rdata`, `.data` остаются **на прежних адресах**, а новый код, данные и таблицы импорта
 идут в отдельные секции после них (`.ntext`, `.nrdata`, `.ndata`, `.zidata`); TimeDateStamp тоже оригинальный.
-Поэтому AttTFix (dinput8.dll) работает с пересобранным exe: его адреса данных верны, а функции, которые
-заменены, он не трогает — все его патчи сначала сверяют байты кода.
+AttTFix can recognize and load alongside the rebuilt EXE, but preserving addresses and timestamp alone does
+not make its engine features work: replaced functions fail its original-byte checks. For the supplied
+AttTFix 2.1.2 DLL, add **`--attfix-compat`** to the build command. This preset reserves 110 native functions
+from `rebuild/attfix_compat.json`, including interior patch sites, and preserves original function IAT slots
+through forwarders to the canonical new import table. v57 has 10,167 replacements with this preset; builds
+without it retain the full replacement set. The debug main loop drains Lua after a completed native/mod-owned
+frame. `tools/attfix_compat.py check ORIGINAL_EXE REBUILT_EXE rebuild/attfix_compat.json` audits the reserved
+bytes. The profile records the DLL hash; end-to-end mod behavior still requires an in-game playtest, and
+future mod versions need a new audit. See `VERIFICATION.md` for the current checkpoint and limits.
 
 ### Проверка без игры
 

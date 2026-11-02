@@ -4,6 +4,66 @@ Active checkout: `/home/attt-dev/work/AttT-Fix`, branch `decomp/continue`.
 Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages; the agent does not launch the game.
 
+## v57 AttTFix compatibility / barracks candidate — source commit c9d773e
+
+Package: `/mnt/e/Programs/Qoder_plays/AttT-Fix/AttT_decomp_exe_v57/`.
+Staging: `/home/attt-dev/work/playtest-packages/AttT_decomp_exe_v57/`.
+All seven files were delivered and checked by SHA-256 against staging; earlier packages are preserved.
+Both binaries use the new `--attfix-compat` build preset: **10,167 replacements**, with 10,100 switchable
+functions in debug. This supersedes v56's compatibility assessment and barracks implementation. The user's
+v56 logs show AttTFix 2.1.2 loaded successfully but rejected Frame, DoFile and most optimization hooks;
+the barracks success message accompanied an ordinary army screen. Preserved addresses/timestamp alone
+were insufficient evidence of functional mod compatibility.
+
+The preset reserves 110 complete native functions referenced by the supplied mod DLL and local mod source,
+including interior patch sites. Of those, 99 were replaced in v56. The profile records individual references,
+source hashes and DLL SHA-256 `202caa2282681878e84022dab6d72f3d72fea619981f3a68c592392ab29b5a79` in
+`decomp/rebuild/attfix_compat.json`. Lua's API remains replaced as a complete library. Default builds without
+the preset retain the original replacement set. Generation/audit commands:
+
+```sh
+python3 -I decomp/tools/attfix_compat.py generate ORIGINAL_EXE MOD_DLL PROFILE_JSON --source-dir src
+python3 -I decomp/tools/attfix_compat.py check ORIGINAL_EXE REBUILT_EXE decomp/rebuild/attfix_compat.json
+```
+
+Native function-import operands also retain their original addresses. **540 old function IAT slots** tail-jump
+through the canonical new IAT, so the DLL's byte guards match and direct reads such as its qsort slot remain
+callable. Later canonical IAT hooks affect these native callers too. Data imports are still relocated normally.
+`verify_relink.py --keep-function-iat` verifies every forwarder's import identity before allowing that slot to
+differ. This does not disable the DLL's byte checks. A linked synthetic-PE regression proves that an unchanged
+native import call reaches two successive replacements installed in its canonical IAT.
+
+Native Frame/Render remain available to the mod. The debug main loop detects a Step that advances frameCount
+and calls `DecompTestFrameEnd` afterward, preserving frame-end Lua execution even when Frame is owned by the
+DLL. Emulation verifies that rebuilt Step reaches the native Frame entry, and that the queue executes once
+through native CLua::RunBuffer. Compatibility builds do not use the replaced Frame/Render's synthetic key
+injection or automatic screenshot hooks; manual debug actions and Alt debug keys remain available.
+
+Barracks now supplies the Barrack template and selected-unit Load arguments during the native child creation
+call, restoring the army template and original Load function immediately afterward, including on failure.
+The v56 approach queued ChooseScene before activation; native GUI activation `00583D20` clears that pending
+scene name. The action fixture now models template loading/activation and verifies the actual chosen template,
+stock and restored normal army screen, rather than only accepting a mocked ChooseScene call.
+
+| Binary | Bytes | SHA-256 |
+|---|---:|---|
+| `ATThrone.exe` | 4,828,672 | `d06a3d610fa8fae842962bd45d5f885097d75ce82e9658ed21365d8896a5b18d` |
+| `ATThrone_debug.exe` | 5,270,528 | `755576eed4c71b99315c29fbfb1967bd3004dbe0aa7bd27ce30140ff8911e78c` |
+
+Both pass **31 differential tests**, relink with **zero mismatches** (4,603,348 bytes / 86,595 pointers),
+and the profile audit: **110 reserved functions / 51,968 native bytes exactly match the original**. Ten tooling
+tests pass. Debug action checks cover 115 unit selections, restored army definitions, Speed 1 / +100000 Health,
+repeat battles, no-save arguments, menu recall/Close and native-frame queue integration. Scene objects and
+Win32 remain mocked. Timestamp `0x475EABAF` and image base `0x400000` are unchanged.
+
+**End-to-end mod behavior and real barracks rendering remain user playtest steps.** This is a candidate tied
+to the recorded DLL hash, not a blanket compatibility claim for future mod versions. No full sweep was rerun;
+earlier unsupported/low-coverage/interrupted cases and classified fault differences remain unclosed.
+The agent has not launched the game or changed its Steam installation or mod configuration.
+
+Evidence: `/home/attt-dev/re/v57-20261102/{plain,debug}/` and `/home/attt-dev/work/debugmenu-v57/`
+(action/tooling/audit logs, supplied feedback logs, expected v56 audit failure, source/payload manifest).
+
 ## v56 debug-menu playtest package — source commit cbab162
 
 Package: `/mnt/e/Programs/Qoder_plays/AttT-Fix/AttT_decomp_exe_v56/`.

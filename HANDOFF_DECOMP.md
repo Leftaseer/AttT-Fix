@@ -4,7 +4,21 @@ Updated 2026-11-02. Read `decomp/VERIFICATION.md` for the current, hash-identifi
 limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
 their status statements and test counts are superseded by the latest checkpoint.
 
-**Current checkpoint: v56 debug-menu fixes**, source commit `cbab162`, package
+**Current checkpoint: v57 AttTFix compatibility / barracks candidate**, source commit `c9d773e`, package
+`E:\Programs\Qoder_plays\AttT-Fix\AttT_decomp_exe_v57`. Both binaries use `--attfix-compat`, reserving 110
+native functions and forwarding 540 original function IAT slots through the new import table. This leaves
+10,167 replacements (99 fewer than v56); debug has 10,100 switchable functions. The supplied AttTFix 2.1.2
+DLL loaded in v56, but its engine hooks failed byte checks: preserving addresses/timestamp was insufficient.
+The new profile audit proves all 110 reserved functions / 51,968 bytes match the original. Both binaries pass
+31 differential tests and relink with zero mismatches; ten tooling tests pass. Debug frame-end Lua works
+through the native/mod-owned Frame, checked in emulation. Barracks now initializes its template directly;
+the previous pre-activation ChooseScene was cleared by native GUI activation. All 115 selections pass the
+updated action fixture, and normal army definitions are restored afterward. **Next: user playtest with the
+mod enabled: ATTTFIX options / F11 overlay, barracks stock, normal army screen, dragon stats and menu focus.**
+No game has been launched by the agent. Evidence is under `/home/attt-dev/re/v57-20261102/` and
+`/home/attt-dev/work/debugmenu-v57/`. See `decomp/VERIFICATION.md` for hashes, build details and limits.
+
+Previous candidate: v56 debug-menu fixes, source commit `cbab162`, package
 `E:\Programs\Qoder_plays\AttT-Fix\AttT_decomp_exe_v56`. Barracks now opens through the world's army-screen
 GUI container; the tough dragon has unit Speed 1 (an additive correction against its base Speed);
 Ctrl+Alt+D always shows/focuses the menu, while Close/X hide it. The updated debug binary passes 31
@@ -12,7 +26,7 @@ differential tests and relink with zero mismatches; nine tooling tests pass. Add
 Lua VM checks cover 115 unit selections, battle stats and menu recall with scene/Win32 mocks. The plain
 binary and map are identical to v55. **Next: user playtest of barracks, dragon stats, focus and cursor.**
 Builds/logs are under `/home/attt-dev/re/v56-20261102/` and `/home/attt-dev/work/debugmenu-v56/`.
-See `decomp/VERIFICATION.md` for hashes and limits. The game has not been launched by the agent.
+The user's next playtest found the barracks and mod hook failures described above; v57 supersedes this candidate.
 
 Previous checkpoint: the level-up animation and battle Wait bugs were confirmed fixed in-game. v55 was delivered at
 `E:\Programs\Qoder_plays\AttT-Fix\AttT_decomp_exe_v55`, source commit `37b6280`, with English instructions,
