@@ -2,14 +2,13 @@
 import struct
 
 
-def test_tween_constructor(h):
+def _constructor(h, constructor, declarations, references):
     from unicorn.x86_const import UC_X86_REG_ECX
 
     device_global = 0x006C8C10
-    declarations = 0x006CA09C
-    references = 0x006CA0A8
     saved = [(device_global, bytes(h.uc.mem_read(device_global, 4))),
-             (declarations, bytes(h.uc.mem_read(declarations, 16)))]
+             (declarations, bytes(h.uc.mem_read(declarations, 8))),
+             (references, bytes(h.uc.mem_read(references, 4)))]
     diffs = []
     try:
         # stdcall CreateVertexDeclaration(device, elements, out): count calls,
@@ -22,10 +21,10 @@ def test_tween_constructor(h):
             device = h.alloc(8, struct.pack('<II', table, 0))
             obj = h.alloc(0x100, b'\xa5' * 0x100)
             h.uc.mem_write(device_global, struct.pack('<I', device))
-            h.uc.mem_write(declarations, bytes(16))
+            h.uc.mem_write(declarations, bytes(8))
             h.uc.mem_write(references, struct.pack('<I', initial_references))
-            diffs += h.compare(0x00477E00, regs={UC_X86_REG_ECX: obj}, ret='eax')
-            result = h.call(0x00477E00, regs={UC_X86_REG_ECX: obj})
+            diffs += h.compare(constructor, regs={UC_X86_REG_ECX: obj}, ret='eax')
+            result = h.call(constructor, regs={UC_X86_REG_ECX: obj})
             if result['fault'] or result['eax'] != obj or result['esp'] != 4:
                 diffs.append('constructor did not return this normally: %r' % result)
             count = struct.unpack('<I', h.uc.mem_read(device + 4, 4))[0]
@@ -39,3 +38,11 @@ def test_tween_constructor(h):
         for address, data in saved:
             h.uc.mem_write(address, data)
     return diffs
+
+
+def test_tween_constructor(h):
+    return _constructor(h, 0x00477E00, 0x006CA09C, 0x006CA0A8)
+
+
+def test_soft_animation_constructor(h):
+    return _constructor(h, 0x004783C0, 0x006CA094, 0x006CA0C8)
