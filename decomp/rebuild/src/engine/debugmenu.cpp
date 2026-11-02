@@ -25,6 +25,7 @@ static HWND g_menu, g_status, g_list;
 static HICON g_icon;
 static HCURSOR g_arrow;
 static bool g_created, g_visible, g_paused;
+static int g_cursorShows;                               /* ShowCursor calls made to bring the count to >= 0 */
 static int g_unitIndex = -1;                            /* the unit selected in the list */
 
 /* ---------------------------------------------------------------------------------------------------------------
@@ -106,6 +107,17 @@ static void PauseGame()
     if (g_engine)
         g_engine->SetActive(false);         /* silences the music, stops the frame timer (as an inactive window does) */
     ClipCursor(nullptr);
+    /* The game sets the cursor to NULL (0x443C00 / 0x443E80 keep a saved cursor and clear it every step), so while
+     * the menu has the focus there is no cursor at all.  Bring the display count to >= 0 and set the arrow: the game
+     * is not stepping now, so nothing clears it again.  -nologo launches leave the count at -1 (0x44F7BB). */
+    g_cursorShows = 0;
+    for (;;) {
+        int n = ShowCursor(TRUE);
+        g_cursorShows++;
+        if (n >= 0)
+            break;
+    }
+    SetCursor(g_arrow);
 }
 
 static void ResumeGame()
@@ -113,6 +125,10 @@ static void ResumeGame()
     if (!g_paused)
         return;
     g_paused = false;
+    while (g_cursorShows > 0) {             /* back to the display count the game had */
+        ShowCursor(FALSE);
+        g_cursorShows--;
+    }
     if (g_engine && g_appActive) {
         g_engine->SetActive(true);
         CInput::Instance()->Reset();        /* the clicks and key presses of the menu are not the game's */
@@ -125,16 +141,37 @@ static void ResumeGame()
 /* ---------------------------------------------------------------------------------------------------------------
  * The actions: Lua chunks for TestLua (the name "=debugmenu" is only for syntax errors; TestLua passes its own). */
 
+/* Two steps: the first click learns only the spells the game actually implements (the 24 entries the spell
+ * scripts put into SpellAct, plus spA07_Portal, which the spellbook casts through the Portal scene), the second
+ * (when none of those is missing any more) learns every key of Spell, unfinished ones included.  The unfinished
+ * spells have no SpellAct entry and crash when cast (e.g. spF03_FireWall: "СТЕНА ОГНЯ" only has a description).
+ * SpellAct is unioned in so a mod's implemented spells are treated as real too; the literal list keeps the first
+ * click useful when the state has no spell scripts loaded. */
 static const char *kSpells =
     "local ok, err = pcall(function() "
     "local u = Unit and Unit.Hero "
     "local b = u and u.BattleParams "
     "if not (b and type(b.Magic) == 'table') then error('Unit.Hero.BattleParams.Magic is missing (load a saved game)') end "
-    "local M, have, n = b.Magic, {}, 0 "
+    "local M, have = b.Magic, {} "
     "for i = 1, #M do have[M[i]] = true end "
-    "for k in pairs(Spell) do "
-    "  if type(k) == 'string' and not have[k] then M[#M + 1] = k have[k] = true n = n + 1 end end "
-    "DecompDbg('spells: learned ' .. n .. ', the hero knows ' .. #M) "
+    "local real = {} "
+    "for k in ('spF01_Fireball spF04_TrippleFireball spF05_AresSword spF08_FieryRain spF09_DragonBreath "
+    "spF10_Armageddon spW01_Healing spW02_HolyBalzam spW03_Poison spW04_PoisonWeapon spW05_Regeneration "
+    "spW06_WaterResist spW07_AirResist spW08_EarthResist spW09_FireResist spW10_Ressurection spA01_Speed "
+    "spA04_ShootDamage spA05_Teleport spA06_Snapgoat spA07_Portal spA08_Lighting spE01_Slow spE04_Armor "
+    "spE08_StoneRain'):gmatch('%S+') do real[k] = true end "
+    "for k in pairs(SpellAct or {}) do if Spell[k] then real[k] = true end end "
+    "local miss = 0 "
+    "for k in pairs(real) do if Spell[k] and not have[k] then miss = miss + 1 end end "
+    "local n, all = 0, false "
+    "if miss > 0 then "
+    "  for k in pairs(real) do if Spell[k] and not have[k] then M[#M + 1] = k have[k] = true n = n + 1 end end "
+    "else "
+    "  all = true "
+    "  for k in pairs(Spell) do if type(k) == 'string' and not have[k] then M[#M + 1] = k have[k] = true n = n + 1 end end "
+    "end "
+    "DecompDbg('spells: learned ' .. n .. (all and ' (ALL, unfinished too)' or ' (working only; click again for all)')"
+    " .. '; hero knows ' .. #M) "
     "end) "
     "if not ok then DecompDbg('spells ERROR: ' .. tostring(err)) end";
 
@@ -285,8 +322,8 @@ static void CreateControls(HWND hwnd)
          L" game frame; this window returns the focus to the game.  Ctrl+Alt+D shows or hides it.",
          SS_LEFT, x, y, w, 44, 0);
     y += 48;
-    Make(hwnd, L"BUTTON", L"Learn all spells (Hero.BattleParams.Magic)", BS_PUSHBUTTON | WS_TABSTOP, x, y, w, 26,
-         IDC_SPELLS);
+    Make(hwnd, L"BUTTON", L"Learn spells (working first; click again for all)", BS_PUSHBUTTON | WS_TABSTOP, x, y, w,
+         26, IDC_SPELLS);
     y += 30;
     Make(hwnd, L"BUTTON", L"Gold +100000", BS_PUSHBUTTON | WS_TABSTOP, x, y, w, 26, IDC_GOLD);
     y += 34;
@@ -333,6 +370,14 @@ static LRESULT CALLBACK MenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         else
             PauseGame();
         return 0;
+    case WM_SETCURSOR:
+        /* the game clears the cursor itself (SetCursor(NULL) every step), and only the window that gets
+         * WM_SETCURSOR may set it back: the arrow over the menu and over its child controls */
+        if (LOWORD(lp) == HTCLIENT) {
+            SetCursor(g_arrow ? g_arrow : LoadCursorA(nullptr, IDC_ARROW));
+            return TRUE;
+        }
+        break;
     case WM_HOTKEY:
         if ((int)wp == kHotkey)
             ToggleMenu();

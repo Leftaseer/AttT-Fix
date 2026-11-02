@@ -146,11 +146,19 @@ be re-established with the fixed harness.
   ac980534…), maps, toggle_list, Russian README with the menu instructions. Builds: 0 mismatches / 11
   difftest tests each (comparisons were vacuous, §5.1). Not yet played: the menu was verified statically
   (symbols, imports, embedded chunks) only.
-- **v53 — current**: the battle Wait fix (§14). Plain `ATThrone.exe` = build76 (`--auto`, 7,008,256 B,
+- **v53** — the battle Wait fix (§14). Plain `ATThrone.exe` = build76 (`--auto`, 7,008,256 B,
   sha256 33a4999c…) + `ATThrone_debug.exe` = build77 (toggle + debug log + debug menu; 7,451,136 B,
   sha256 c47a02a1…), maps, `toggle_list.txt`, Russian README. 0 relink mismatches, 10 266 replaced
-  functions, difftest 12/12 on both **with the fixed harness**. Pending in-game confirmation of the Wait
-  button; the push is held until then.
+  functions, difftest 12/12 on both **with the fixed harness**.
+- **v54 — current**: debug-menu usability only, plain exe unchanged. Cursor fix (game clears it with
+  `SetCursor(NULL)` every step and `ShowCursor(0)` on `-nologo`; the menu now shows/unwinds the display count
+  on pause/resume and answers `WM_SETCURSOR` at `HTCLIENT`) and two-stage spell learning (first click = the
+  25 working spells — 24 with a `SpellAct` implementation + `spA07_Portal`; second click = all 40, unfinished
+  included). Plain `ATThrone.exe` = build79 (`--auto`, 7,008,256 B, sha256 33a4999c… = v53) + debug
+  `ATThrone_debug.exe` = build78 (7,452,160 B, sha256 74049765…), maps, `toggle_list.txt`, Russian README.
+  0 relink mismatches, 10 266 replaced, difftest 12/12 on both; the new `kSpells` chunk also validated in a
+  real Lua 5.1 VM (fengari): 40-spell table → 25 on the first click → 40 on the second, FireWall only on the
+  second. Pending in-game confirmation of both v53 and v54; the push is held until then.
 
 ## 7. Runtime bisection (`--toggle`)
 
@@ -364,6 +372,14 @@ User confirmed in-game on 2026-11-02 ("анимация теперь работ�
   menu build (build74) and its byte-identical plain rebuild (build75), difftests and packaging.
 - `difftest_v53.sh` / `pack53.sh` / `sweep76.sh` — v53: full difftest of build76/77, packaging, and the
   corrected full autoverify sweep (24 shards → `/home/attt-dev/work/verify76`).
+- `build78.sh` / `build79.sh` / `pack54.sh` — v54: build78 = toggle+log+menu with the cursor and two-stage
+  spell changes, build79 = plain auto (sha256 = build76), packaging. `spelltest.js` (+ `node_modules`:
+  `fengari`, `luaparse`) extracts the `kSpells` chunk from `debugmenu.cpp` and exercises it in a real Lua 5.1
+  VM; `spellmap.py`, `spellact.py`, `spell_ids.sh`, `spell_school.sh`, `spellcfg.sh`, `cast_search.sh` and
+  the other `spell*` / `lua*` scripts produced the working-spell list (`SpellAct` implementations + Portal).
+- Cursor diagnosis (v54): `showcursor_ctx.sh`, `objdump_cursor*.sh`, `iat_cursor.sh`, `setcursor_ctx.sh`,
+  `cursor_search.sh`, `mouse_search.sh`, `strings44f.sh` — located `ShowCursor(0)` at 0x44F7BB (inside
+  0x44F2E0, `-nologo` only) and the saved-cursor `SetCursor(NULL)` pattern at 0x443C00 / 0x443E80.
 - `nofix_proof*.sh` — proof that the old harness was vacuous: the wait test passes on build75 when
   `ctl_remove_cache` is removed. `probe_*.py/.sh`, `uc_bisect*.py`, `uc_inval*.py`, `uc_flush_*.py` — the
   Unicorn cache-invalidation experiments behind §5.1. `orig_50B9A0.dis` / `new77_50B9A0.dis` — the two
@@ -378,9 +394,9 @@ User confirmed in-game on 2026-11-02 ("анимация теперь работ�
 Done: toolchain, staging, baseline rebuild/relink/difftest, full Ghidra export, autoverify sweep, autodecomp
 fixes, float-return fixes, damage preview (0x50E2D0), Alt+1..4 keys + intro skip, save-load crash fix,
 packages v44 / v45 / v46 + v47 + v48 + v49 + v50 + v51, the level-up animation fix of #13 (confirmed
-in-game 2026-11-02), the v52 debug menu (built + packaged), and the v53 battle Wait fix (built + packaged;
-in-game test pending).
-Open: playtest v53's Wait button and v52's menu (push held until that); the corrected autoverify sweep
+in-game 2026-11-02), the v52 debug menu (built + packaged), the v53 battle Wait fix (built + packaged;
+in-game test pending), and v54's debug-menu cursor + two-stage spell learning (built + packaged).
+Open: playtest v53's Wait button and the v54 menu (push held until that); the corrected autoverify sweep
 (verify76) must confirm or replace the old "0 differs" claim; shrink the exe (the original .data BSS tail is
 written as zeros — see below); wider differential testing.
 
@@ -407,7 +423,7 @@ animation in-game, then commit the cause + fix, push `decomp/continue`, and
 ship the final package whose README says which exe to play. v51 meets the build/verify half:
 `AttT_decomp_exe_v51\ATThrone.exe` (plain) + `ATThrone_debug.exe`, maps, toggle_list, `README_RU.txt`.
 
-## 13. Debug menu (v52, `-D DECOMP_DEBUG_MENU`)
+## 13. Debug menu (v52, `-D DECOMP_DEBUG_MENU`; extended in v54)
 
 `src/engine/debugmenu.cpp` (hand engine source, `#ifdef DECOMP_DEBUG_MENU`, `#error` unless
 `DECOMP_TEST_INPUT`). `main.cpp` calls `DecompDebugMenuInit()` after `g_engine->ApplyGamma()`; the main loop
@@ -424,8 +440,21 @@ has run), so every button action runs in the game's own Lua state at the end of 
   (`CEngine::SetActive(false)`, `ClipCursor(nullptr)`) and `ResumeGame()` (`SetActive(true)`, `CInput::Reset()`,
   `ClipCursor(game rect)`) — mirrors the game's own inactive-window handling. Buttons return the focus to the
   game window after queueing.
+- Cursor (v54): the game hides the OS cursor two ways — `SetCursor(NULL)` from the saved-cursor RAII pattern at
+  0x443C00 / 0x443E80 (runs every step, stores the old handle at +0x280) and `ShowCursor(0)` at 0x44F7BB
+  (inside 0x44F2E0, only with `-nologo` + config byte +0x40 == 0), so the display count can sit at -1. The
+  menu now loops `ShowCursor(TRUE)` on pause until the count is >= 0 (remembered in `g_cursorShows`), sets
+  `g_arrow`, and unwinds the exact count with `ShowCursor(FALSE)` on resume, leaving the game's state as
+  found. `WM_SETCURSOR` at `HTCLIENT` returns the arrow (both windows belong to the process, so the menu would
+  otherwise inherit the game's NULL).
 - Actions (all Lua chunks, `pcall`, errors go to the status):
-  - `kSpells`: every string key of `Spell` missing from `Unit.Hero.BattleParams.Magic` appended.
+  - `kSpells` (v54: two-stage): working set = the 24 spells implemented in `SpellAct` (union over the global
+    table at run time, so mods are picked up) plus `spA07_Portal` (works, but opens `ChooseScene('Portal')`
+    instead of going through `SpellAct`). If any working spells are missing from `Unit.Hero.BattleParams.Magic`,
+    the click appends only those (`learned N (working only; click again for all)`); otherwise it appends every
+    remaining string key of `Spell` (`learned N (ALL, unfinished too)`). The 15 unfinished spells (e.g.
+    `spF02_FireWall`) have no `SpellAct` implementation and crash the game when cast — v52 learned them on the
+    first click. Chunk validated with fengari (real Lua 5.1 VM), see §10.
   - `kGold`: `Hero.Inventory.Gold += 100000`.
   - `OpenBarracks(unit)`: `GUIScene.WorldLevel.scene:ChooseScene('Barrack', {[2]=unit,[3]=100,curCount=100,
     lastTime=Clock_GetHours()})` → 100 units = 10 troops × `HeroArmy.MaxQnUnitInTroop` (10).
