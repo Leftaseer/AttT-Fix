@@ -34,3 +34,7 @@ SuspendThread@4 KERNEL32.dll
 ResumeThread@4 KERNEL32.dll
 GetThreadContext@8 KERNEL32.dll
 GetCurrentThread@0 KERNEL32.dll
+LoadCursorA USER32.dll
+SetWindowTextW USER32.dll
+SendMessageW USER32.dll
+RegisterHotKey USER32.dll

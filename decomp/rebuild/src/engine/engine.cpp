@@ -91,6 +91,10 @@ ORIG_DATA(0060C798);    /* evMoveInfo::vftable */
 ORIG_THISCALL(0057D220, void, (void *vm, const char *buf, int len, const char *name));   /* runs a Lua chunk */
 ORIG_DATA(006C88D4);    /* the script machine (its lua_State is used by every DoFile) */
 
+#ifdef DECOMP_DEBUG_MENU
+extern "C" int __cdecl DecompDebugMenuLua(void *L);   /* debugmenu.cpp: DecompDbg(...) of the menu's chunks */
+#endif
+
 /* testinput.txt: in the working directory first (tools/rungame.py starts the game there), then next to the exe, so
  * a script that starts the game with another working directory still finds it (bisect scripts, Start-Process) */
 extern "C" FILE *TestInputFile()
@@ -270,12 +274,33 @@ void TestLua()
         ORIG_CALL(004034F0)(L, -10002 /* LUA_GLOBALSINDEX */, "DecompLog");
         ORIG_CALL(004031F0)(L, DecompAutoloadLua, 0);
         ORIG_CALL(004034F0)(L, -10002, "DecompAutoload");
+#ifdef DECOMP_DEBUG_MENU
+        ORIG_CALL(004031F0)(L, DecompDebugMenuLua, 0);
+        ORIG_CALL(004034F0)(L, -10002, "DecompDbg");
+#endif
         registered = L;
     }
     if (vm)
         ORIG_CALL(0057D220)(vm, g_testLua, (int)strlen(g_testLua), "=testinput");
     g_testLua[0] = 0;
 }
+
+#ifdef DECOMP_DEBUG_MENU
+/* The debug menu (debugmenu.cpp) gives its Lua chunks to the same queue the scripted input uses: they then run
+ * where the GUI's own handlers run, at the end of a frame.  One chunk at a time; a chunk still waiting is not
+ * overwritten (the menu says the machine is busy). */
+extern "C" bool DecompQueueLua(const char *chunk)
+{
+    if (!chunk || !chunk[0] || g_testLua[0])
+        return false;
+    size_t n = strlen(chunk);
+    if (n >= sizeof(g_testLua))
+        return false;
+    lstrcpynA(g_testLua, chunk, (int)sizeof(g_testLua));
+    g_testLuaWait = 0;
+    return true;
+}
+#endif
 
 /* Debug hotkeys for manual tests (bisection needs a level-up, money and time in a few seconds): with Alt held,
  * 1 adds 100000 experience (the world trigger levels the hero up on its next evaluation), 2 100000 gold,

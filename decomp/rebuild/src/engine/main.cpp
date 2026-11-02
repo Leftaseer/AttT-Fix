@@ -4,6 +4,11 @@
 #include "game/engine.h"
 #include <tlhelp32.h>
 
+#ifdef DECOMP_DEBUG_MENU
+extern "C" void DecompDebugMenuInit();      /* debugmenu.cpp */
+extern "C" bool DecompDebugMenuPaused();    /* the menu window has the focus: the game must not step */
+#endif
+
 /* ---------------------------------------------------------------------------------------------------------------
  * CGameException: the message, then "\n---in file - '<file>'\n---line = <line>" when a file is given. */
 
@@ -421,12 +426,20 @@ void GameMain(const char *cmdLine)
     GetWindowRect(g_hWnd, &r);
     ClipCursor(&r);
     g_engine->ApplyGamma();
+#ifdef DECOMP_DEBUG_MENU
+    DecompDebugMenuInit();
+#endif
 
     MSG msg;
     for (;;) {
         if (GetKeyState(VK_CONTROL) < 0)
             GetKeyState(VK_HOME);            /* leftover of a debug shortcut, the result is not used */
-        if (!g_appActive) {
+        bool active = g_appActive;
+#ifdef DECOMP_DEBUG_MENU
+        if (DecompDebugMenuPaused())
+            active = false;                  /* the menu window has the focus: no Step, wait for its messages */
+#endif
+        if (!active) {
 #ifdef DECOMP_TEST_INPUT
             OutputDebugStringA("main loop: inactive, waiting for messages");
 #endif

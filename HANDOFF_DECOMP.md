@@ -63,7 +63,7 @@ MSYS_NO_PATHCONV=1 wsl.exe -d AttT-Dev -- bash /mnt/e/Programs/Qoder_plays/AttT-
 ```
 cd /mnt/e/Programs/Qoder_plays/AttT-Fix/decomp/rebuild
 python3 -I build.py --exe /home/attt-dev/work/attt/bin/attt.exe --auto /home/attt-dev/work/attty_test/auto_fix4 \
-    [--toggle] [-D DECOMP_DEBUG_LOG] [-D DECOMP_TEST_INPUT] \
+    [--toggle] [-D DECOMP_DEBUG_LOG] [-D DECOMP_TEST_INPUT] [-D DECOMP_DEBUG_MENU] \
     [--fixed-exclude FILE] [--auto-exclude FILE] [--coverage] \
     --out /home/attt-dev/re/buildNN/ATThrone_xxx.exe
 ```
@@ -75,6 +75,9 @@ python3 -I build.py --exe /home/attt-dev/work/attt/bin/attt.exe --auto /home/att
 - `-D DECOMP_DEBUG_LOG`: `decomp_debug.log` (crash handler + engine errors + custom probes).
 - `-D DECOMP_TEST_INPUT`: `testinput.txt` (`skipintro`, `fastcam`, `loadsave NAME`, `MS lua CODE`, …) and the
   debug hotkeys **Alt+1..4** (1 = +100000 experience → level up, 2 = +100000 gold, 3 = +12 h, 4 = +7 days).
+- `-D DECOMP_DEBUG_MENU`: the Win32 debug menu of v52 (`src/engine/debugmenu.cpp`; requires
+  `DECOMP_TEST_INPUT`, enforced by `#error`): Ctrl+Alt+D window with all spells, +100000 gold, a barracks with
+  any of 115 unit ids, and a 1×uDragon battle at +100000 health. See section 13.
 - `--coverage`: per-function coverage counters.
 - Hand sources in `decomp/rebuild/src/fixed/f_*.c` override generated ones; header `/* @conv ECX 8 */` must
   match `convs.tsv`. Engine sources in `src/engine/`, Lua 5.1.2 in `src/lua51/`.
@@ -95,7 +98,7 @@ Difftest emulates original vs replacement functions (Unicorn) on the Lua/engine 
 
 ## 6. Playtest packages (gitignored folders in the repo root)
 
-`AttT_decomp_exe_v42 … v48`, each with a Russian `README_RU.txt` (+ `maps/`). History:
+`AttT_decomp_exe_v42 … v52`, each with a Russian `README_RU.txt` (+ `maps/`). History:
 
 - v42/v43/v44 — auto / auto_debug / coverage / hand + `toggle_bisect.bat|ps1` + `toggle_list.txt`.
   v42 was the save-load crash (fixed in 635a126: the ABI adapter must forward every stack dword the original
@@ -113,11 +116,19 @@ Difftest emulates original vs replacement functions (Unicorn) on the Lua/engine 
   baseline step, Russian README. Superseded v48: the user's first v48 step switched off our own engine code.
   Its bisection produced 14 "no" answers in a row and "found" 004205D0, which is byte-identical to the
   original — the answers were not reliable (see §7.2).
-- **v50 — current**: `ATThrone_auto_debug.exe` (sha256 1a1e4d73…) = the same build plus engine-side
+- **v50** — `ATThrone_auto_debug.exe` (sha256 1a1e4d73…) = the same build plus engine-side
   diagnostics (scene-change log, `rankchange: built/current scene` frames, back-buffer shots `rc_NN`/`rs_NN`),
   automatic level-up through `testinput.txt` (`L4000 lua …`), `toggle_bisect.ps1` v50 with A/B controls, a
   per-run engine verdict, a "no scene built → repeat the step" guard, a confirmation run, and a
   `bisect_version.txt` tag that sets v49 results aside instead of trusting them.
+- **v51** — the level-up animation fix (section 8) confirmed in-game. `ATThrone.exe` (build73, plain
+  `--auto`, 7,008,256 B, sha256 fba42f4d…) + `ATThrone_debug.exe` (build72, `--toggle -D DECOMP_TEST_INPUT
+  -D DECOMP_DEBUG_LOG`), maps, `toggle_list.txt`, generic `toggle_bisect.bat|ps1` + `bisect_scenario.txt`,
+  Russian README.
+- **v52 — current**: same plain exe (build75 is byte-identical to v51 plain) + `ATThrone_debug.exe`
+  (build74, adds `-D DECOMP_DEBUG_MENU`; 7,451,136 B, sha256 ac980534…), maps, toggle_list, Russian README
+  with the menu instructions. Builds: 0 mismatches / 11 difftest tests each. Not yet played: the menu was
+  verified statically (symbols, imports, embedded chunks) only.
 
 ## 7. Runtime bisection (`--toggle`)
 
@@ -193,6 +204,33 @@ Script logic was tested end-to-end with a stubbed `Start-Process`/`Read-Host` (1
 the not-confirmed paths, resume from `bisect_state.txt`, no-scene-built guard, toggle-count accounting) in
 `.att_tmp/test50.ps1` / `test50b.ps1` plus the parser check `check50.ps1`; it has never launched the real game
 from this side.
+
+### 7.3 Generic bisection script (v51+, `AttT_decomp_exe_v51\toggle_bisect.*`)
+
+The v50 script was hard-wired to the animation (level-up trigger, `rankchange:` evidence, 0x004B2720 forced).
+v51 ships a generic one for any bug; its example scenario is the animation bug, now fixed, so Control A on it is
+expected to say "the bug did not appear":
+
+- `bisect_scenario.txt`: `[note]` (printed before each run), `[input]` (testinput.txt lines; `0 skipintro`
+  and `0 fastcam` are always prepended), `[force]` (generated addresses kept on in every step).
+- The only question is "is the bug present?" (y/n/r/q), so the same search works for any bug.
+- Controls: A = `+ all` must answer y; B = `- all` must answer n (hand-written code is always on). B answering
+  y means the cause is hand-written code (engine, src/fixed, harness) — the search stops and says so.
+- Search rules `- all`, `+ prefix`, `- exclusions`, `+ force`; the found function is appended to
+  `bisect_exclude.txt`; the confirmation run is `+ all`, `- exclusions`, `- culprit`.
+- Evidence per step: toggle count from `decomp_toggle.log` (with an expected-count warning), the last 30 new
+  lines of `decomp_debug.log`, every new `*.bmp`, plus `decomp_toggle.txt`, `testinput.txt` and `step.txt` in
+  `bisect_shots\<step>\`. The v51 exe still writes BMPs only for the rank-change scene, so generic steps usually
+  have none - the log tail is the evidence.
+- `bisect_version.txt` is a SHA256 signature (scenario + toggle_list + exe); when any of them changes,
+  `bisect_state/exclude/ctrl_*` move to `bisect_old_<stamp>\` and are never read as the new search's results.
+  A search resumes through `bisect_state.txt`.
+- `testinput.txt` is rewritten per step and removed by the finally block (Ctrl+C leaves it behind - delete it
+  by hand so the next launch does not replay the scenario).
+- Default exe: `ATThrone_auto_debug.exe`, then `ATThrone_debug.exe`; `-Exe` overrides. `-Check` parses the
+  scenario and exits without starting the game.
+- Tested with the same stubbed harness (`.att_tmp/test_bisect.ps1`): find, stop+resume, confirm, both control
+  failures, `[force]`, scenario-change archiving. Never launched the real game from this side.
 
 ## 8. OPEN BUG — level-up (rank change) animation disappears
 
@@ -300,6 +338,8 @@ User confirmed in-game on 2026-11-02 ("анимация теперь работ�
 - `build71.sh` / `copy71.sh` / `dt71.sh` — the v50 diagnostic build, its packaging and difftest.
 - `build72_73.sh` / `dt73.sh` / `pack51.sh` — the v51 fix: build72 = toggle+log, build73 = plain auto,
   difftest of both (11/11 each), packaging.
+- `build_v52.sh` / `build_v52_log.sh` / `build_v52_plain.sh` / `difftest_v52*.sh` / `pack52.sh` — v52 debug
+  menu build (build74) and its byte-identical plain rebuild (build75), difftests and packaging.
 - Diagnosis scripts for the root cause: `callers_4b2720.sh`, `caller_ctx.sh`, `reg_ctx.sh`, `anim_ctx.sh`,
   `reg2.sh`, `model_args.sh`, `check_ctor_asm.sh`, `check_ctor_asm2.sh`.
 - `test50.ps1` / `test50b.ps1` / `check50.ps1` — stubbed end-to-end test of the v50 bisect script (search,
@@ -309,10 +349,10 @@ User confirmed in-game on 2026-11-02 ("анимация теперь работ�
 
 Done: toolchain, staging, baseline rebuild/relink/difftest, full Ghidra export, autoverify sweep, autodecomp
 fixes, float-return fixes, damage preview (0x50E2D0), Alt+1..4 keys + intro skip, save-load crash fix,
-packages v44 / v45 / v46 + v47 + v48 + v49 + v50 + v51, and the level-up animation fix of #13 (confirmed
-in-game 2026-11-02).
-Open: nothing blocking. Next candidates: shrink the exe (the original .data BSS tail is written as zeros —
-see below), a debug menu (barracks / spells / tough-enemy battle), and wider differential testing.
+packages v44 / v45 / v46 + v47 + v48 + v49 + v50 + v51, the level-up animation fix of #13 (confirmed
+in-game 2026-11-02), and the v52 debug menu (built + packaged; in-game test pending).
+Open: playtest v52's menu; shrink the exe (the original .data BSS tail is written as zeros — see below);
+wider differential testing.
 
 ### Exe size (measured 2026-11-02)
 
@@ -335,3 +375,37 @@ Our 0x004B2720 compiled into a plain `--auto` build (no excludes, no logging), v
 difftest 11/11, user confirms the animation in-game, then commit the cause + fix, push `decomp/continue`, and
 ship the final package whose README says which exe to play. v51 meets the build/verify half:
 `AttT_decomp_exe_v51\ATThrone.exe` (plain) + `ATThrone_debug.exe`, maps, toggle_list, `README_RU.txt`.
+
+## 13. Debug menu (v52, `-D DECOMP_DEBUG_MENU`)
+
+`src/engine/debugmenu.cpp` (hand engine source, `#ifdef DECOMP_DEBUG_MENU`, `#error` unless
+`DECOMP_TEST_INPUT`). `main.cpp` calls `DecompDebugMenuInit()` after `g_engine->ApplyGamma()`; the main loop
+treats `DecompDebugMenuPaused()` like an inactive app (`no Step`). `engine.cpp` registers `DecompDebugMenuLua`
+as `DecompDbg` in `TestLua` and exposes `DecompQueueLua(chunk)` (fills `g_testLua` only if the previous chunk
+has run), so every button action runs in the game's own Lua state at the end of a frame. New USER32 imports
+(`LoadCursorA`, `SetWindowTextW`, `SendMessageW`, `RegisterHotKey`) are in `rebuild/imports_extra.txt`.
+
+- Window: `AttTDecompDebugMenu`, `WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU`, `WS_EX_TOPMOST|WS_EX_TOOLWINDOW`,
+  436×660 at game rect +24/+48 clamped to the screen; shown at start with `SW_SHOWNOACTIVATE`; Ctrl+Alt+D
+  (`RegisterHotKey`, `MOD_CONTROL|MOD_ALT|MOD_NOREPEAT`) toggles it. Status = last 4 `DecompDbg` lines in a
+  static + `decomp_debug.log`.
+- Focus: both windows share the process, so no `WM_ACTIVATEAPP`; `WM_ACTIVATE` calls `PauseGame()`
+  (`CEngine::SetActive(false)`, `ClipCursor(nullptr)`) and `ResumeGame()` (`SetActive(true)`, `CInput::Reset()`,
+  `ClipCursor(game rect)`) — mirrors the game's own inactive-window handling. Buttons return the focus to the
+  game window after queueing.
+- Actions (all Lua chunks, `pcall`, errors go to the status):
+  - `kSpells`: every string key of `Spell` missing from `Unit.Hero.BattleParams.Magic` appended.
+  - `kGold`: `Hero.Inventory.Gold += 100000`.
+  - `OpenBarracks(unit)`: `GUIScene.WorldLevel.scene:ChooseScene('Barrack', {[2]=unit,[3]=100,curCount=100,
+    lastTime=Clock_GetHours()})` → 100 units = 10 troops × `HeroArmy.MaxQnUnitInTroop` (10).
+  - `kTough`: `ArmyPos['DecompTough']`/`Army['DecompTough']` (1×uDragon, 250 units from `WorldHero:GetPos()`),
+    `WorldArmy:new` + `a.ChangeParam={Health=100000}` (WorldArmy:BeginBattle *adds* it → 201+100000), then
+    `Actions['Fight With Army'](Actions,'DecompTough',false,true)` (selfHero=false → normal troop battle;
+    flag=true → no game00 autosave). The game's `RequestBeforeBattle` confirmation starts the fight; AttT has
+    no speed setting, so "speed 1" is the normal 1x.
+- Units list: 115 ids (`uValkyr1` … `uTest`, default selection `uDragon`).
+- Static verification (no game launch): map symbols `_DecompDebugMenuLua/_DecompDebugMenuPaused/
+  _DecompDebugMenuInit/_DecompQueueLua/?MenuProc?/?OpenBarracks?`, the four USER32 imports, embedded wide
+  strings and Lua chunks; build74 verify_relink 0 mismatches, difftest 11/11; build75 (plain) is byte-identical
+  to v51 plain. Caveat: an exclusive-fullscreen swap chain may cover the topmost window — README says to use
+  windowed/borderless if the menu is not visible.

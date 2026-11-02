@@ -1,0 +1,34 @@
+# Bisection scenario: what the script does in every run and what you should watch.
+# Edit this file for the bug you are hunting; toggle_bisect.bat asks one question after every run:
+#
+#     Is the bug present?   y - yes, it happened   n - no, everything worked   r/r... see below
+#
+# so [note] must describe the bug in a way that makes "yes" unambiguous.
+#
+# Sections (a line starting with # is a comment):
+#   [note]   what you do and watch during the run (printed before the game starts)
+#   [input]  testinput.txt lines, exactly as the exe reads them:
+#                MS loadsave NAME    load Saves\NAME.sav ("*" = the first one)
+#                LMS lua CODE        run CODE LMS milliseconds after the save has loaded
+#                MS lua CODE         run CODE MS milliseconds after the first frame
+#                MS click X Y        click at X,Y (game's own cursor)
+#                MS key VK           post a window key   (the game reads DirectInput: MS dik N)
+#                MS dik N            one DirectInput key event
+#                MS hold N MS2       hold that key for MS2 ms
+#            "0 skipintro" (intros) and "0 fastcam" (the camera flyby before a battle) are always added first.
+#   [force]  generated function addresses that must stay on in every step (normally empty: hand-written
+#            code - the engine, src/fixed, the harness - is always on)
+#
+# The example below is the level-up animation bug of v49/v50.  It is FIXED since v51, so Control A of this
+# scenario is expected to fail now ("the bug did not appear") - that is the script working correctly.  Replace
+# the note and the input lines with your own bug before starting a real search.
+
+[note]
+About 4 s after game0 has loaded the hero gets 100000 experience and levels up.  Watch the level-up: does the
+rank-change animation play, or does the screen stay on the world map?  The bug is "the animation does not play".
+
+[input]
+0 loadsave game0
+L4000 lua pcall(function() Actions:Expirience(100000) end)
+
+[force]
