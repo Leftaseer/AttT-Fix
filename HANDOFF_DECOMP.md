@@ -158,7 +158,8 @@ be re-established with the fixed harness.
   `ATThrone_debug.exe` = build78 (7,452,160 B, sha256 74049765…), maps, `toggle_list.txt`, Russian README.
   0 relink mismatches, 10 266 replaced, difftest 12/12 on both; the new `kSpells` chunk also validated in a
   real Lua 5.1 VM (fengari): 40-spell table → 25 on the first click → 40 on the second, FireWall only on the
-  second. Pending in-game confirmation of both v53 and v54; the push is held until then.
+  second. The v53 Wait fix was confirmed in-game on 2026-11-02 and `decomp/continue` was pushed then (v54 is
+  included in that push; the v54 menu changes are debug-build only and still await a playtest).
 
 ## 7. Runtime bisection (`--toggle`)
 
@@ -395,8 +396,8 @@ Done: toolchain, staging, baseline rebuild/relink/difftest, full Ghidra export, 
 fixes, float-return fixes, damage preview (0x50E2D0), Alt+1..4 keys + intro skip, save-load crash fix,
 packages v44 / v45 / v46 + v47 + v48 + v49 + v50 + v51, the level-up animation fix of #13 (confirmed
 in-game 2026-11-02), the v52 debug menu (built + packaged), the v53 battle Wait fix (built + packaged;
-in-game test pending), and v54's debug-menu cursor + two-stage spell learning (built + packaged).
-Open: playtest v53's Wait button and the v54 menu (push held until that); the corrected autoverify sweep
+confirmed in-game 2026-11-02), and v54's debug-menu cursor + two-stage spell learning (built + packaged).
+Open: playtest the v54 menu (pushed with v53's confirmation; debug-build only); the corrected autoverify sweep
 (verify76) must confirm or replace the old "0 differs" claim; shrink the exe (the original .data BSS tail is
 written as zeros — see below); wider differential testing.
 
