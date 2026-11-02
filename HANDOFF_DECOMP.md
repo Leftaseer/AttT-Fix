@@ -1,10 +1,11 @@
 # AttT decomp — handoff / full project context
 
-Written 2026-11-01. Read this first, then `decomp/README.md` (232 lines, accurate and current) for the
-pipeline internals. This file is the *state of the work*, including what is broken right now.
+Updated 2026-11-02. Read `decomp/VERIFICATION.md` for the current, hash-identified checkpoint and verification
+limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
+their status statements and test counts are superseded by the latest checkpoint.
 
-Russian one-liner: проект — декомпиляция AttT в C со сборкой рабочего ATThrone.exe; сейчас открыт один баг —
-пропадает анимация повышения уровня, когда наша замена 0x004B2720 попадает в сборку. Подробности в разделе 8.
+The level-up animation and battle Wait bugs were confirmed fixed in-game. Current work is restoring trustworthy
+verification after the Unicorn cache bug, validating pending hand fixes, and triaging observed differences.
 
 ---
 
@@ -28,13 +29,17 @@ AttTFix (dinput8.dll) keeps working.
   cannot be run locally at all. `tools/rungame.py` exists but needs a Wine prefix that is not installed here.)
 - Do not delete test files / builds / playtest packages without explicit consent.
 - Valkyrie (the second game in this engine family) is **out of scope** for now.
-- Reply to the user in **English** even when the user writes Russian (token economy). Package READMEs are
-  Russian by convention.
-- Push the git branch when the work concludes (the user asks; do not push unprompted mid-work).
+- Reply and write new documentation in **English**, including package instructions (confirmed 2026-11-02).
+- Work primarily in `/home/attt-dev`; put only user-facing deliverables in the Windows folder.
+- Push completed checkpoints periodically to `decomp/continue` (authorized 2026-11-02).
 
 ## 3. Environment
 
-Windows side (this shell is Git Bash, **not** WSL — there is no `/mnt`):
+Current shell: WSL **AttT-Dev**, user `attt-dev`. Active source checkout:
+`/home/attt-dev/work/AttT-Fix`, branch `decomp/continue`. Builds, logs, manifests and scratch work stay in WSL.
+The Windows checkout retains the previous session's files; do not assume its HEAD matches the active checkout.
+
+Windows-side paths (historical context and playtest delivery):
 
 - Repo: `E:\Programs\Qoder_plays\AttT-Fix` (git, branch `decomp/continue`, origin
   `https://github.com/Leftaseer/AttT-Fix.git`).
@@ -44,7 +49,7 @@ Windows side (this shell is Git Bash, **not** WSL — there is no `/mnt`):
 - `E:\Programs\Qoder_plays\AttT-Fix\.att_tmp\` = scratch (gitignored): disassemblies, one-off scripts, build
   scripts. Contains the current investigation artifacts (see section 9).
 
-WSL side (always invoke through a script file, never inline quoting):
+From an external Windows shell, WSL can be invoked through a script file:
 
 ```
 MSYS_NO_PATHCONV=1 wsl.exe -d AttT-Dev -- bash /mnt/e/Programs/Qoder_plays/AttT-Fix/.att_tmp/<script>.sh
@@ -263,7 +268,7 @@ expected to say "the bug did not appear":
 - Tested with the same stubbed harness (`.att_tmp/test_bisect.ps1`): find, stop+resume, confirm, both control
   failures, `[force]`, scenario-change archiving. Never launched the real game from this side.
 
-## 8. OPEN BUG — level-up (rank change) animation disappears
+## 8. Level-up animation investigation — fixed in v51
 
 **Symptom**: with our 0x004B2720 in the build the rank-change animation does not play (user's words: "нет
 анимации"). With the original 0x004B2720 (`--fixed-exclude nofix_4b2720.txt`, i.e. v45 auto) it works.
@@ -400,6 +405,10 @@ confirmed in-game 2026-11-02), and v54's debug-menu cursor + two-stage spell lea
 Open: playtest the v54 menu (pushed with v53's confirmation; debug-build only); the corrected autoverify sweep
 (verify76) must confirm or replace the old "0 differs" claim; shrink the exe (the original .data BSS tail is
 written as zeros — see below); wider differential testing.
+Session 2026-11-02 (see §15): 0x004F6B30 x87/NaN fix landed in build79 (verified on 4 seeds, relink 0
+mismatches, difftest 12/12); the build79 sweep is 393/10266 rows and must be resumed; verify76's backlog is
+10 faultdiff + 9 differs (one already fixed, two are prototype/return artifacts) + 263 "crashed" rows that
+still need individual re-runs. Nothing was packaged or pushed for this fix yet.
 
 ### Exe size (measured 2026-11-02)
 
@@ -502,3 +511,135 @@ build76/77. It only detects this because of the harness fix in §5.1.
 **Still true from the original**: a waited troop is only found on the second pass; if every remaining troop
 has already waited, the round rolls over normally. Wait availability as a UI action is decided elsewhere
 (0x0050C280), not here.
+
+## 15. 0x004F6B30 (three-point frame builder) — x87 precision + NaN branch fix
+
+**Status at session end (2026-11-02)**: fixed in build79
+`sha256 a73b8d70b03223ba3296aaee855659324a3b4a9bdb5368b6b1c67c59dc52b75a`, relink 0 mismatches, difftest
+12/12, 004F6B30 verified on 4 seeds (one documented NaN tail case). Not packaged, not pushed. The full
+autoverify sweep of this build was started and stopped on request at 393/10266 rows.
+
+### 15.1 What the original does (disassembly facts)
+
+The rebuilt body lives at 0xA4C9xx..0xA4CFxx in `.ntext`, reached by the 5-byte jmp at 0x4F6B30.
+
+* **Branch selection** — three `fcomip`+`jbe` at 0x4F6C67, 0x4F6C7F, 0x4F6E3E, all against the double 0.5 at
+  0x00607CE0 (`GV_00607CE0_8`). `jbe` is *taken when unordered*, i.e. on NaN; a C `a <= b` is false on NaN,
+  so the generated branch picked a different edge whenever the frame contained NaN (that was the old seed-1
+  case-6 divergence: all components NaN, original took body1, ours another body, then a later store wrote
+  through a garbage pointer -> `mem 00000005`). Structure: CMP-1 (0x4F6C67) is `if (A <= B)` -> inner CMP-3
+  (0x4F6E3E) `if (C <= D)`, else CMP-2 (0x4F6C7F) `else if (E <= F)`. Bodies: fall-through 0x4F6C89 = body4,
+  0x4F6D56 = body3, 0x4F6E48 = body2 (`param_1[9] - *param_1`), 0x4F6F1D = body1.
+* **Cross products** — first cross (C's `fVar2`/`fStack_84`/`fVar5`) stored as floats to `[esp+0xb8/0xbc/0xc0]`
+  (0x4F703C/0x4F7059/0x4F7068); second cross (`fVar6`/`fVar11`/`fVar3`) to `[esp+0x10/0x14/0x18]`
+  (0x4F7089/0x4F70A3/0x4F70AF); the axis cross is computed from those float slots and stored to
+  0x94/0x98/0x9c (float).
+* **Dot** — 0x4F7148-0x4F7156: three `fmul`/`faddp` in extended precision, `fstps 0x1c` (rounds the *sum* to
+  float), `flds`, `fstps 0x60`. The individual products are NOT rounded: the old C
+  `fVar4 = fVar11 * fStack_84;` rounded one product and gave `acos(0.999999881) = 0.00048828125` where the
+  original had `acos(1) = 0` (seed-1 case 4).
+* **First length** — 0x4F7164-0x4F7178: sum of squares in extended from the cross components, `fstps 0x1c`
+  (sum rounded to float), `flds`, `call 0x5E406A` (CIsqrt), then `fstps 0x1c; flds 0x1c` — the **sqrt result
+  is rounded to float** — and `fstps 0x5c`.
+* **Second length** — 0x4F7189-0x4F71AA: reloads the first-cross components as doubles (`fldl 0x20/0xa4/0x38`,
+  the `fstl` spills), sums squares in extended, rounds sum to float, sqrt, rounds the result to float.
+* **Final** — `fmuls 0x5c` (l1*l2, extended, **not** rounded to float), `fdivrs 0x60` (dot / l1*l2 in
+  extended), `fstps 0x1c; flds`, `call 0x5E4238` (CIacos).
+
+### 15.2 Current source state (`decomp/rebuild/src/fixed/f_004F6B30.c`)
+
+```c
+  if (!((local_dc[1] + fStack_c0) * GV_00607CE0_8 >
+        (local_dc[4] + fStack_b4) * GV_00607CE0_8)) {
+    if (!(fStack_60 > local_7c[1])) { ... } else { ... }
+  }
+  else if (!(fStack_54 > local_7c[4])) { ... } else { ... }
+```
+```c
+  fVar9 = (float10)GH_FROUND(sub_005E406A((float10)GH_FROUND(
+      (fVar3 * fVar3 + fVar6 * fVar6 + fVar11 * fVar11))));
+  fVar10 = (float10)GH_FROUND(sub_005E406A((float10)GH_FROUND(
+      (fVar5 * fVar5 + fStack_84 * fStack_84 + fVar2 * fVar2))));
+  fDot = fVar5 * fVar3 + fVar2 * fVar6 + fVar11 * fStack_84;
+  fVar9 = sub_005E4238((float10)GH_FROUND(
+      (fDot / ((float)fVar10 * (float)fVar9))));
+```
+
+Rules for anyone editing this function again:
+* keep `fDot` as one extended expression stored into `volatile float fDot` (no intermediate float variable);
+* round the sqrt *results* to float, but do **not** wrap `((float)fVar10 * (float)fVar9)` in `GH_FROUND`
+  (the original divides before the product is ever rounded);
+* all three `fcomip` comparisons need the `!(a > b)` form or branch order changes on NaN.
+
+### 15.3 Verification numbers (build79)
+
+* build.py: `4604704 bytes and 86576 pointers checked, 0 mismatches`; 10266 replaced functions.
+* difftest: `12 tests, 0 failed`.
+* autoverify `--only 004F6B30`:
+  * seed 1, n=64: verified, cov 1.00, 13 ok / 51 both faulted
+  * seed 2, n=64: verified, cov 0.97, 9 ok / 55 both faulted
+  * seed 8, n=64: verified, cov 0.97, 16 ok / 48 both faulted
+  * seed 11, n=64: differs, cov 1.00, case 55 (see 15.4)
+  * seeds 3-7, n=16: lowcov (0-2 ok, the rest fault in *both* runs) — no divergence seen, but weak evidence
+* The random case sequence depends on `--n` (case 55 at n=64 is not case 55 at n=58), so always reproduce a
+  reported case with the same `--n` and `--seed`.
+* "both faulted" = the original and the rebuilt faulted identically; it counts as agreement.
+
+### 15.4 Known residual (seed 11, case 55 — degenerate NaN input)
+
+All cross components are NaN (`[esp+0x10]=0x14=0x18=0xbc=0xc0=0xFFFFFFFF`, `[0xb8]=0`). After the branch fix
+both builds take the same path, but one heap byte still differs deterministically (3/3 runs):
+`mem 203F6913: 7f10f03d20465645 / ff10f03d20465645` — the sign bit of a float ~1.9e38 stored in a heap
+object. Not root-caused; the epilogue `/ -fVar11` (0x4F7225 area) or a NaN/±0 sign difference is the
+suspicion. Gameplay data never feeds NaN here; treated as a documented tail risk.
+
+Probe: `.att_tmp/av_probe_stack2.py` (hooks 0x4F7148 / 0x4F7164 / 0x4F7189 in the *original* run and prints
+raw `(m,e)` of st0..st7 plus the float slots; case counter increments on each original entry, 0-based) and
+`.att_tmp/probe4f6s11.sh`. Note `h._fpu_st(i)` decodes 80-bit registers to 53 bits, so equal-to-float values
+prove a value was rounded to float.
+
+### 15.5 Sweep state
+
+* `.att_tmp/sweep79.sh` (24 shards, `--n 30 --shard k/24 --resume --fn-timeout 120`) writes
+  `/home/attt-dev/work/verify79/av_*.tsv`; **393 of 10266 rows done**, all 24 shard files exist.
+* Resume: `cd /mnt/e/Programs/Qoder_plays/AttT-Fix && setsid nohup bash .att_tmp/sweep79.sh >/dev/null 2>&1 </dev/null &`
+  (`--resume` continues from the TSVs; `.cur` records the in-flight function). To stop: `pkill -9 -f sweep79.sh`
+  **first**, then `pkill -9 -f autoverify.py` — otherwise the shard loop respawns the workers.
+* Previous full sweep (build76), `/home/attt-dev/work/verify76`: 9734 rows = 3708 verified, 4797 lowcov,
+  947 unsupported, 263 crashed, 10 faultdiff, 9 differs.
+  * faultdiff (original faults, ours does not): 004E0E50, 004E0E90, 0047BF50, 004402A0, 0051DB90, 00440390,
+    00553260, 00555E80, 004783C0, 00458380.
+  * differs: 005B15B0, 0055B850, 00558520, 0048C980, 0048CC40 (heap mem), 0043F260 (st0 low bits),
+    004FCCB0 (new faults at 0x9A3DC5), 004F6B30 (fixed in build79), 004CC8D0 (new fault at 0x2).
+  * `crashed` rows have cov 0.00 = the process was killed (segfault/hang) and resume recorded it; they are
+    **not** proven code differences and need an individual re-run.
+
+### 15.6 Triage notes already established
+
+* **Uncommitted hand fixes** — `git status` shows five untracked files in `decomp/rebuild/src/fixed/`:
+  `f_0043F260.c`, `f_0048C980.c`, `f_0048CC40.c`, `f_004CC8D0.c`, `f_004F6B30.c`. They are compiled into
+  build79 (build.py picks up `src/fixed/`) and each header explains the original semantics (float rounding of
+  every atan2 step; `fcomi; ja` / `fcomip; jbe` guards treating NaN as equal / scan-left; the vtable tail
+  call). So **6 of the 9 verify76 `differs` rows are probably already fixed by build79** and only need a
+  re-run (`--only 0043F260,0048C980,0048CC40,004CC8D0` etc.). They are still uncommitted — commit them
+  together with the next package.
+* **004CC8D0** — already has a hand fix (writes the vtable tail call as a jmp; see the header comment in
+  `f_004CC8D0.c`). The verify76 row predates it; re-check on build79.
+* **004FCCB0** (`auto_038.c`) — the analysis prototype is wrong (`int param_1, float param_2, int *param_3`)
+  while the real call is `(this, unsigned int *cell, float x, float z)`. The code survives because the float
+  comes in through `BITCAST(float, (param_3))` and the pointer through `*(int *)param_1`. With verifier-random
+  arguments the computed cell index `iVar6` becomes huge and the new code faults on `*pfVar5`; the original's
+  index stays in range. Not a runtime bug; fixing the prototype in the analysis would silence it.
+* **0043F260** — hand fix exists; the diff is `st0 -3.1385693550109863 / -3.1385693009360693`, i.e. a double
+  vs rounded-float return. Check whether the `st0` return needs `GH_FROUND` (same class as the §5 return
+  rounding rule).
+
+### 15.7 Next steps (in order)
+
+1. Finish the verify79 sweep and diff its verdict lists against verify76's; every new `differs` needs a look.
+2. Re-check the 263 `crashed` rows individually (`--only <addr> --n 8` into a separate TSV) to separate
+   harness kills from real hangs.
+3. Triage the 10 `faultdiff` (usually a load the compiler dropped — a real behaviour change, so look at each).
+4. Package v55 (plain + debug) with `README_RU.txt` once the sweep is clean; v54's debug menu is still waiting
+   for an in-game check (visible cursor, second spell click learns all 40).
+5. Still open: task #21 — emit the original `.data` BSS tail as uninitialized (~2.1 MB smaller exe, see §11).

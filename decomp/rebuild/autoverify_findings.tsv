@@ -6,6 +6,10 @@
 #         unsupported the function calls an import the emulator does not model (C++ iostreams, Bink, ...)
 #         differs / faultdiff  a real difference in at least one case
 # Format: VA<TAB>status<TAB>class<TAB>why
+# WARNING (2026-11-02): passing verdicts below predate the Unicorn instruction-cache fix and are invalid.
+# Keep these rows as historical diagnosis notes, not current verification evidence. See ../VERIFICATION.md.
+# lowcov means too few normal returns or insufficient coverage; it need not mean every call faulted.
+# differs/faultdiff are observed discrepancies requiring triage, not automatically gameplay defects.
 
 # --- re-check of every divergence classified in the build35-37 sweeps, against build42 (2026-11-01, 30 cases)
 # 12 verified, 4 lowcov (both sides fault on every fuzz case), 1 unsupported, 0 differs: the later pipeline fixes

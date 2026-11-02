@@ -98,7 +98,7 @@ undefined4 __cdecl f_004F6B30(float * gh_arg0, float gh_arg1, undefined4 gh_arg2
   float fVar11;
   volatile float fDot;
   volatile float negNormal;
-  
+
   local_4 = 0xffffffff;
   puStack_8 = ((void *)G_005F36DB);
   param_1[1] = 0.0;

@@ -171,17 +171,16 @@ python3 decomp/rebuild/build.py --exe ATThrone.exe --out build/ATThrone.exe --au
 стекового кадра, vtable по имени, глобалы без типа, float против целых, скрытые аргументы импортов MSVCP80,
 ячейки старой таблицы импорта.
 
-Состояние AttT: 10 266 из 18 591 функций игры заменены C (9 734 сгенерированы Ghidra, 532 ручные — движок и Lua
-5.1.2), остальные байты — оригинальные. Перелинкованный exe све́рен с оригиналом (`verify_relink.py --replace`):
-4 604 704 байта и 86 576 указателей, 0 расхождений; PE-метка времени и адреса секций сохранены. Полный прогон
-`autoverify.py` по всем 9 734 сгенерированным функциям (30 случайных входов, 24 шарда): 3 613 verified, 4 918
-lowcov, 936 unsupported, 267 crashed и **0 differs/faultdiff**. «Crashed» — функции, где обе стороны уходят в
-длинный цикл по мусорному указателю; пере-прогон с лимитом 300 000 инструкций дал 255 lowcov и 12 verified, тоже
-без расхождений. Разобранные когда-то расхождения (17 штук из прогонов build35-37) на текущей сборке не
-воспроизводятся: 12 verified, 4 lowcov, 1 unsupported. Классы, причины и ручные исправления —
-`rebuild/autoverify_findings.tsv`. Оставшиеся 532 замены (движок, Lua) проверяют 11 тестов `difftest.py` и тесты в
-`rebuild/tests`. С ними игра проходит вступительную сцену так же, как оригинал (те же диалоги и та же сцена через
-5 минут).
+Current AttT state: 10,266 of 18,591 functions replaced (9,734 generated-function addresses plus 532 engine/Lua
+replacements). Original section addresses and PE timestamp are preserved; relink verification checks 4,604,704
+bytes and 86,576 pointers with zero mismatches. The current differential suite has 17 passing tests.
+
+**Verification correction (2026-11-02):** a Unicorn instruction-cache bug caused earlier comparisons to execute
+the original function twice. All earlier passing difftest/autoverify claims, including the former full-sweep
+"0 differences" claim, are invalid. The harness now invalidates rewritten entries explicitly, and a negative
+control detects removal of that fix. Corrected sweeps have found discrepancies requiring investigation.
+See [VERIFICATION.md](VERIFICATION.md) for binary hashes, current results, known gaps and resume commands.
+`rebuild/autoverify_findings.tsv` is historical diagnosis material, not current verification evidence.
 
 ## Полный анализ заново
 
