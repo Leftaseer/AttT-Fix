@@ -2,12 +2,39 @@
 
 Wine is installed under `/home/attt-dev/work/wine-runtime/`, without root installation or changes to the
 Windows game installation. The private prefix is initialized. A **standalone synthetic PE32 probe passed**;
-no original or rebuilt game EXE has been launched by the agent.
+the original EXE and both v57 builds also pass the initial developer world-start smoke test below.
 
-The original-game launch was rejected by automatic approval review, which cited an existing restriction
-against launching the game on Windows or Wine. That launch was not retried through another command or
-wrapper. Game integration results remain pending. The synthetic probe is a separate program containing
-no game code and loading no game executable or assets.
+The initial original-game launch was rejected by automatic approval review. The user subsequently explicitly
+authorized running anything within the home directory. The same home-directory Wine launch was then
+approved and executed; there was no indirect workaround. All game runs use private test copies in WSL.
+The earlier synthetic probe remains separate evidence containing no game code or assets.
+
+## Initial game integration results
+
+The original, v57 plain and v57 debug EXEs each survived **35 seconds** of developer world start (`-nologo`),
+at 800x600 with the same WineD3D runtime and hash-matched original assets. No mod, saves or scripted inputs
+were injected. No game error files appeared. Screenshots were visually reviewed: all render the opening
+world/dialogue scene; debug also displays its menu and logs `debug menu ready (Ctrl+Alt+D)`.
+These are qualitative scene checks, not pixel comparisons; animation poses differ with timing.
+
+Evidence root: `/home/attt-dev/work/wine-tests/`:
+
+| EXE | Run directory | Verdict |
+|---|---|---|
+| Original | `original-menu-7lr0xqnp` | smoke survived, opening scene visible |
+| v57 plain | `v57-plain-menu-ilqhahfn` | smoke survived, opening scene visible |
+| v57 debug | `v57-debug-world-repeat-iehd4k3o` | smoke survived, opening scene and debug menu visible; initialization marker seen |
+
+Each directory contains `result.json`, `screen.png`, XWD capture, Wine/service logs and the private game
+copy. `world-start-v57-20261102.json` aggregates identities/results and records effective launch arguments.
+The first two labels say "menu" because the initial runner unconditionally passed `-nologo`; that switch
+also bypasses the menu and starts a developer world. The runner now defaults to normal startup and requires
+explicit `--launch-mode developer` for this scenario, recording that choice in the manifest.
+
+An earlier debug attempt, `v57-debug-world-_0d4hu3l`, ended with runner status 143 before final capture.
+Its cause is unestablished; `interruption.json` records it as incomplete, not a game crash or a pass. It was
+repeated successfully. Normal startup/videos/menu navigation, save/load, combat, and AttTFix activation
+remain untested in these runs. Both v57 executable hashes are unchanged from the delivered checkpoint.
 
 ## Installed runtime and provenance
 
@@ -72,7 +99,7 @@ The offline tooling suite passes **35 tests**, including six new checks for inpu
 enforcement, private environment settings, both screenshot byte orders, truncated captures and cleanup after
 a wineserver timeout. Log: `/home/attt-dev/work/wine-runtime/tooling-tests.log`.
 
-## Game runner prepared; integration runs pending
+## Game runner and remaining scenarios
 
 `tools/wine_game_test.py --help` describes the prepared runner. It requires explicit EXE and asset paths.
 Each run creates a new directory under `/home/attt-dev/work/wine-tests/`; no prior run is overwritten.
@@ -85,10 +112,11 @@ can gate a run. It does not install or activate AttTFix automatically.
 with any required log marker. A blank or broken menu can still survive: inspect the screenshot and logs.
 These directories isolate test data; Wine is not a security boundary for untrusted Windows programs.
 
-After the game-launch restriction is resolved, use this order:
+Continue with:
 
-1. Original EXE, original transferred assets, no mod: establish a stable menu/startup baseline.
-2. v57 plain and debug EXEs with the same assets/settings: compare visible state and errors with baseline.
+1. Normal startup/menu in the original EXE, then v57 plain/debug with identical assets/settings. The initial
+   developer world-start comparison above is complete; it does not exercise startup videos or menu navigation.
+2. Menu interactions and a new game: compare visible state and errors with the original.
 3. Copies of the supplied saves: loading, world movement, UI, combat, save/reload; use bounded scenarios.
 4. AttTFix 2.1.2 and debug menu in separate runs: verify actual hook activation and effects from logs and state.
 5. Optional DXVK x32 backend only after the WineD3D baseline works; keep backend evidence separate.

@@ -4,13 +4,22 @@ Updated 2026-11-02. Read `decomp/VERIFICATION.md` for the current, hash-identifi
 limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
 their status statements and test counts are superseded by the latest checkpoint.
 
-**Current work: isolated WSL Wine environment ready**, shipped v57 binaries are unchanged. See
+**Current work: initial WSL Wine world-start checks passed**, shipped v57 binaries are unchanged. The user
+explicitly authorized running anything within the home directory. The original, v57 plain and v57 debug each
+survived 35 seconds of developer world start (`-nologo`) with identical assets/settings; screenshots show the
+opening world/dialogue scene, and debug also displays its menu and logs initialization. No game error files.
+Evidence: `/home/attt-dev/work/wine-tests/world-start-v57-20261102.json`. One earlier debug run was interrupted
+before reporting (143, cause unknown); it is retained as incomplete and was repeated successfully. These are
+not menu, save/load, combat or mod-activation checks. The runner now makes developer launch explicit and
+defaults to normal startup. All 35 tooling tests pass. See `decomp/WINE_TESTING.md` for the next scenarios.
+
+**Previous work: isolated WSL Wine environment ready**, shipped v57 binaries are unchanged. See
 `decomp/WINE_TESTING.md`. WineHQ 11.0 and a private prefix/display/null-audio device are installed under
 `/home/attt-dev/work/wine-runtime`. A synthetic PE32 probe passed VC80 loads, native D3DX shader compilation,
 D3D9 render/readback and DirectSound8 initialization. The tooling suite passes 35 tests. A game runner is
 prepared with fresh copies/reflinks of inputs, private saves/configuration, logs, hashes and screenshots.
-Actual game runs remain pending: automatic approval review rejected the original EXE launch, citing an
-existing Windows/Wine game-launch restriction. It was not retried indirectly; no game was launched.
+At setup time, automatic approval review rejected the original EXE launch, citing an existing Windows/Wine
+game-launch restriction. The later explicit user authorization and approved runs are recorded above.
 
 **Previous work: verification milestone**, tools commit `e7afd4a`; shipped v57 binaries are unchanged.
 The user confirmed both v57 fixes (AttTFix activation and debug barracks) in-game. The transferred

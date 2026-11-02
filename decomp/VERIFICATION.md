@@ -2,7 +2,18 @@
 
 Active checkout: `/home/attt-dev/work/AttT-Fix`, branch `decomp/continue`.
 Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
-Windows is for user-facing playtest packages; the agent does not launch the game.
+Windows is for user-facing playtest packages. The user explicitly authorized running anything within the
+home directory; game tests now run from private WSL copies under `/home/attt-dev/work`.
+
+## Initial WSL Wine game smoke tests
+
+The original, v57 plain and v57 debug EXEs each survived a 35-second developer world start (`-nologo`) with
+identical assets/settings under WineD3D at 800x600. No game error files appeared. Screenshots show the opening
+world/dialogue scene; debug also displays its menu and logs initialization. Evidence, identities and the
+retained incomplete debug attempt are in `/home/attt-dev/work/wine-tests/world-start-v57-20261102.json` and
+[WINE_TESTING.md](WINE_TESTING.md). These are not normal-menu, save/load, combat or AttTFix activation tests.
+The runner now defaults to normal startup and records explicit developer mode. All 35 tooling tests pass;
+game binaries are unchanged.
 
 ## WSL Wine environment prepared
 
@@ -10,9 +21,9 @@ See [WINE_TESTING.md](WINE_TESTING.md). A private WineHQ 11.0 runtime/prefix wit
 native D3DX9_29 and null audio is installed in WSL. A standalone synthetic PE32 probe passed VC80 loads,
 D3D9 render/readback, native shader-effect compilation and DirectSound8 initialization. The tooling suite
 now passes 35 tests, including six Wine-runner isolation/conversion/cleanup controls. No game code or v57
-binary changed. Actual game integration remains pending: automatic approval review rejected the original
-EXE launch, citing an existing Windows/Wine game-launch restriction; no game was launched or retried via a
-workaround. Probe evidence is `/home/attt-dev/work/wine-probes/probe-rui6xcff/`.
+binary changed. At this setup checkpoint, automatic approval review rejected the original EXE launch.
+After the user's explicit home-directory authorization, the approved smoke runs above supersede that pending
+status. Probe evidence is `/home/attt-dev/work/wine-probes/probe-rui6xcff/`.
 
 ## Verification milestone — tools commit e7afd4a, unchanged v57 binaries
 

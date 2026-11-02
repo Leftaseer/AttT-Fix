@@ -40,8 +40,8 @@ overrides. An original/rebuilt comparison must use the same asset set and settin
 ## Wine readiness
 
 Update after this review: a new local Wine runtime/prefix and headless services are installed; a synthetic
-PE32 graphics/audio probe passes. Actual game integration is pending. See [WINE_TESTING.md](WINE_TESTING.md)
-for provenance, commands, evidence and the automatic approval rejection of the original-game launch.
+PE32 graphics/audio probe passes. After explicit user authorization, original/v57 developer world-start
+smoke runs also pass. See [WINE_TESTING.md](WINE_TESTING.md) for provenance, commands, evidence and limits.
 
 At the initial review, no Wine executable, wineserver, Xvfb, xdotool or matchbox window manager was found;
 no copied Wine prefix was found in the transferred material. No game was launched during this review.

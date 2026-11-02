@@ -194,6 +194,8 @@ def main():
     parser.add_argument('--runs', type=Path, default=Path.home() / 'work/wine-tests')
     parser.add_argument('--label', default='smoke')
     parser.add_argument('--seconds', type=float, default=30)
+    parser.add_argument('--launch-mode', choices=('normal', 'developer'), default='normal',
+                        help='normal startup, or developer world start (-nologo bypasses the menu)')
     parser.add_argument('--width', type=int, default=800)
     parser.add_argument('--height', type=int, default=600)
     parser.add_argument('--saves', type=Path)
@@ -221,7 +223,7 @@ def main():
     print('Run directory:', output, flush=True)
     services = Services(args.runtime, output, max(1024, args.width + 32), max(768, args.height + 64))
     result = {'exe': str(args.exe), 'exe_sha256': sha256(args.exe), 'assets': str(args.assets),
-              'seconds': args.seconds, 'resolution': [args.width, args.height],
+              'seconds': args.seconds, 'launch_mode': args.launch_mode, 'resolution': [args.width, args.height],
               'renderer': 'DXVK' if args.dxvk else 'WineD3D', 'status': 'preparing'}
     try:
         result['asset_identities'] = stage_game(args.assets, args.exe, output / 'game', args.width, args.height,
@@ -235,7 +237,8 @@ def main():
         version = subprocess.run(['wine', '--version'], env=env, capture_output=True, text=True, check=True)
         result['wine'] = version.stdout.strip()
         result['native_d3dx9_29_sha256'] = sha256(args.runtime / 'prefix/drive_c/windows/syswow64/d3dx9_29.dll')
-        game = services.start_process(['wine', 'ATThrone.exe', '-nologo'], 'wine', cwd=output / 'game')
+        command = ['wine', 'ATThrone.exe'] + (['-nologo'] if args.launch_mode == 'developer' else [])
+        game = services.start_process(command, 'wine', cwd=output / 'game')
         started, next_focus = time.monotonic(), 0
         while time.monotonic() - started < args.seconds:
             if game.poll() is not None or list((output / 'game').glob('__ATThrone__ERRORS*')):
