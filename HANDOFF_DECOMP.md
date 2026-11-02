@@ -4,7 +4,17 @@ Updated 2026-11-02. Read `decomp/VERIFICATION.md` for the current, hash-identifi
 limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
 their status statements and test counts are superseded by the latest checkpoint.
 
-The level-up animation and battle Wait bugs were confirmed fixed in-game. **v55 is now delivered** at
+**Current checkpoint: v56 debug-menu fixes**, source commit `cbab162`, package
+`E:\Programs\Qoder_plays\AttT-Fix\AttT_decomp_exe_v56`. Barracks now opens through the world's army-screen
+GUI container; the tough dragon has unit Speed 1 (an additive correction against its base Speed);
+Ctrl+Alt+D always shows/focuses the menu, while Close/X hide it. The updated debug binary passes 31
+differential tests and relink with zero mismatches; nine tooling tests pass. Additional compiled-handler /
+Lua VM checks cover 115 unit selections, battle stats and menu recall with scene/Win32 mocks. The plain
+binary and map are identical to v55. **Next: user playtest of barracks, dragon stats, focus and cursor.**
+Builds/logs are under `/home/attt-dev/re/v56-20261102/` and `/home/attt-dev/work/debugmenu-v56/`.
+See `decomp/VERIFICATION.md` for hashes and limits. The game has not been launched by the agent.
+
+Previous checkpoint: the level-up animation and battle Wait bugs were confirmed fixed in-game. v55 was delivered at
 `E:\Programs\Qoder_plays\AttT-Fix\AttT_decomp_exe_v55`, source commit `37b6280`, with English instructions,
 plain/debug exes, matching maps, toggle list and hashes. Both binaries pass 31/31 differential tests plus nine
 tooling tests; relink has zero mismatches. Six additional translation defects are fixed (distance sums, NaN
@@ -12,7 +22,7 @@ partitioning, signed grid conversion, two collision guards and the frustum guard
 5 verified / 1 lowcov / 1 allocator-padding differs / 8 classified faultdiff. These retained diagnostics and
 older full-sweep coverage gaps are documented, not hidden. **Next: the user's in-game playtest.** The agent
 has not launched the game or changed its Steam installation. The historical 9,734-row sweep belongs to an
-older binary; do not claim it was rerun on v55 or update its counts with targeted results.
+older binary; do not claim it was rerun on v55/v56 or update its counts with targeted results.
 
 ---
 

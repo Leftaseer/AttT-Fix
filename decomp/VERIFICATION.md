@@ -4,6 +4,42 @@ Active checkout: `/home/attt-dev/work/AttT-Fix`, branch `decomp/continue`.
 Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages; the agent does not launch the game.
 
+## v56 debug-menu playtest package — source commit cbab162
+
+Package: `/mnt/e/Programs/Qoder_plays/AttT-Fix/AttT_decomp_exe_v56/`.
+WSL staging: `/home/attt-dev/work/playtest-packages/AttT_decomp_exe_v56/`.
+All seven files were delivered and checked by SHA-256 against staging; older packages are preserved.
+The plain executable and its map are copied byte-for-byte from v55. Only the debug build changes:
+
+- Barracks opens through `WorldLevel.scene:OnArmyIcon()` and the resulting
+  `GUIScene.ArmyScreen.scene:ChooseScene('Barrack', info)`. The native world object has no `ChooseScene`
+  method, matching the supplied log's repeated error. Native `0053E040` creates the GUI container and
+  loads ArmyScreen synchronously; `00583D70` then schedules the barracks in that container. Stock is 100.
+- `WorldArmy:BeginBattle` adds each `ChangeParam` field to cloned unit stats. The test dragon now receives
+  `Speed = 1 - Unit.uDragon.BattleParams.Speed` alongside `Health = 100000`, producing unit Speed 1.
+  No global unit definition changes. Status reports the dynamic HP total; the stale 100201 label is removed.
+- Ctrl+Alt+D always shows and focuses the menu, including after an action returns focus to the game.
+  Close and the title-bar X hide it. Frame-end action execution and activation-based pausing are retained.
+
+| Binary | Bytes | SHA-256 |
+|---|---:|---|
+| `ATThrone.exe` (unchanged v55) | 4,875,264 | `33eaf4e22b3c55b33a9cde12c429c9542c32715a160288378282dd342d344630` |
+| `ATThrone_debug.exe` | 5,319,680 | `a7ba61ef0dd305e580d7b783c4f32c35ec13cf8b9338752290819c75bab87a81` |
+
+The updated debug build passes **31 differential tests**; **nine tooling tests** pass. Relink checks
+4,604,704 bytes / 86,576 pointers with zero mismatches. Both payloads preserve PE timestamp `0x475EABAF`
+and image base `0x400000`. Replacement/toggle counts remain 10,266 / 10,194.
+`decomp/tools/check_debugmenu.py ORIGINAL_EXE DEBUG_EXE DEBUG_MAP` executes the compiled menu handlers and
+the rebuilt float Lua 5.1.2 VM in Unicorn. It checks all 115 unit selections, stock/scene arguments, dragon
+stats at base speeds 6/1/9, repeated-battle cleanup, unchanged base stats, no-save fight arguments, repeated
+hotkey activation and both close controls. Scene/world objects and Win32 calls are mocked: this does not
+verify real scene rendering, desktop focus or cursor behavior. Those require the user's next playtest.
+No full sweep was rerun; the retained limits in v55 below still apply. The plain binary inherits its v55 checks.
+
+Build and differential log: `/home/attt-dev/re/v56-20261102/debug/`.
+Action/tooling logs, supplied playtest log and source manifest: `/home/attt-dev/work/debugmenu-v56/`.
+The package contains English playtest steps, matching maps, toggle list and payload hashes.
+
 ## v55 playtest package — source commit 37b6280
 
 Delivered to `/mnt/e/Programs/Qoder_plays/AttT-Fix/AttT_decomp_exe_v55/`.
