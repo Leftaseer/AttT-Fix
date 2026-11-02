@@ -4,7 +4,21 @@ Updated 2026-11-02. Read `decomp/VERIFICATION.md` for the current, hash-identifi
 limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
 their status statements and test counts are superseded by the latest checkpoint.
 
-**Current work: WSL Wine normal startup/menu and save-loading milestone**, v57 binaries unchanged. Original
+**Current work: shared original/v57 integration milestone**, v57 binaries unchanged. See
+`decomp/WINE_SHARED_RESULTS.md`; evidence `/home/attt-dev/work/wine-tests/shared-integration-v57-20261102.json`.
+Seven completed smokes compare original/plain with identical Lua overlays (not native engine hooks): game0
+load/world rendering, save/perturb/reload and a game00 N/E/N battle sequence. Both own roundtrip states match
+exactly; original versus v57 differs only at serialized Time.sec/msec (retained, not filtered). Both tactical
+runs reach turn-3 enemy/defeat without errors. AttTFix 2.1.2 installs real hooks in v57 plain and records active
+skin/mipmap counters (sample skin verify=300, bad=0). Widescreen/MSAA/DXVK are outside that mod test.
+42 tooling tests pass, including new fail-closed save-decoder controls. X11/Win32 mouse automation did not
+activate the original Load UI; shared resource fixtures provide the comparison instead. One combat runner
+143 is incomplete, repeated successfully in an attached terminal. New tools: `make_wine_fixture.py`,
+`save_state.py`, `wine_control.py`; runner supports fresh required outputs, per-run mod/INI, overlays and
+interruption records. Source/asset bytes are unchanged; generated PAKs contain original bytecode and stay
+outside Git. Next: expand states/continents, movement/attack/spell/victory scenarios and longer mod transitions.
+
+**Previous work: WSL Wine normal startup/menu and save-loading milestone**, v57 binaries unchanged. Original
 and plain play intro videos (60 s runs) and reach visually matching main menus with external Escape keys at
 5/12/20 s (35 s runs). Debug loads copies of `game0` and `game00` (60 s each), with load selection and a required
 `scenario: world-scene 1` marker; captures show the loaded world/pause menu and tactical "Your turn" screen.

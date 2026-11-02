@@ -4,6 +4,11 @@ Wine is installed under `/home/attt-dev/work/wine-runtime/`, without root instal
 Windows game installation. The private prefix is initialized. A **standalone synthetic PE32 probe passed**;
 the original EXE and both v57 builds also pass the initial developer world-start smoke test below.
 
+The latest milestone compares original/plain save loading, write-save/reload and bounded tactical input
+with identical test-only Lua assets, and checks actual AttTFix activation/runtime counters. See
+[WINE_SHARED_RESULTS.md](WINE_SHARED_RESULTS.md) for the seven completed runs, exact serialized-state
+comparisons, input limitations and reproduction. The tooling suite now passes 42 tests.
+
 The initial original-game launch was rejected by automatic approval review. The user subsequently explicitly
 authorized running anything within the home directory. The same home-directory Wine launch was then
 approved and executed; there was no indirect workaround. All game runs use private test copies in WSL.

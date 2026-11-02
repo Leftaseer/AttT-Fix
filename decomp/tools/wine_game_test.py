@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 import secrets
 import select
+import signal
 import shutil
 import struct
 import subprocess
@@ -217,11 +218,17 @@ def main():
     parser.add_argument('--test-input', type=Path)
     parser.add_argument('--require-log', help='literal marker required in Wine or decomp_debug.log')
     parser.add_argument('--dxvk', type=Path, help='directory containing the 32-bit DXVK d3d9.dll')
+    parser.add_argument('--overlay', type=Path, help='test-only Resource2.pak; copied into the private run')
+    parser.add_argument('--mod-dll', type=Path, help='AttTFix dinput8.dll; copied and enabled only in this run')
+    parser.add_argument('--mod-ini', type=Path, help='explicit test AttTFix.ini to avoid first-start graphics changes')
+    parser.add_argument('--require-file', action='append', default=[], help='nonempty relative output file required for success')
     args = parser.parse_args()
     if not math.isfinite(args.seconds) or not 1 <= args.seconds <= 3600:
         parser.error('seconds must be finite and between 1 and 3600')
     if any(when >= args.seconds for when, _ in args.key_at):
         parser.error('key events must occur before the end of the run')
+    if any(Path(p).is_absolute() or '..' in Path(p).parts for p in args.require_file):
+        parser.error('required files must be relative paths inside the private game directory')
     if not 320 <= args.width <= 4096 or not 200 <= args.height <= 2160:
         parser.error('resolution must be between 320x200 and 4096x2160')
     if not args.label or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_' for c in args.label):
@@ -244,13 +251,35 @@ def main():
               'renderer': 'DXVK' if args.dxvk else 'WineD3D', 'status': 'preparing'}
     result['key_events_requested'], result['key_events_sent'] = sorted(args.key_at), []
     result['required_log_marker'] = args.require_log
+    def interrupted(signum, frame):
+        raise InterruptedError('runner received signal %d' % signum)
+    signal.signal(signal.SIGTERM, interrupted)
+    signal.signal(signal.SIGHUP, interrupted)
     try:
         result['asset_identities'] = stage_game(args.assets, args.exe, output / 'game', args.width, args.height,
                                                args.saves, args.test_input)
         result['save_inputs'] = {p.name: {'bytes': p.stat().st_size, 'sha256': sha256(p)}
                                  for p in sorted((output / 'game/Saves').iterdir()) if p.is_file()}
         result['test_input_sha256'] = sha256(output / 'game/testinput.txt') if args.test_input else None
+        if args.overlay:
+            target = output / 'game/Resource2.pak'
+            if target.exists():
+                raise ValueError('refusing to replace an existing Resource2.pak')
+            shutil.copy2(args.overlay, target)
+            result['test_overlay_sha256'] = sha256(target)
+        if args.mod_dll:
+            shutil.copy2(args.mod_dll, output / 'game/dinput8.dll')
+            result['mod_dll_sha256'] = sha256(output / 'game/dinput8.dll')
+        if args.mod_ini:
+            shutil.copy2(args.mod_ini, output / 'game/AttTFix.ini')
+            result['mod_ini_sha256'] = sha256(output / 'game/AttTFix.ini')
+        if any((output / 'game' / name).exists() for name in args.require_file):
+            raise ValueError('required output file already exists before launch')
         env = services.start()
+        (output / 'session.json').write_text(json.dumps({'DISPLAY': env['DISPLAY'],
+            'XAUTHORITY': env['XAUTHORITY'], 'runtime': str(args.runtime), 'active': True}) + '\n')
+        if args.mod_dll:
+            env['WINEDLLOVERRIDES'] += ';dinput8=n,b'
         if args.dxvk:
             dll = args.dxvk / 'd3d9.dll'
             shutil.copy2(dll, output / 'game/d3d9.dll')
@@ -264,6 +293,9 @@ def main():
         started, next_focus = time.monotonic(), 0
         pending_keys = list(sorted(args.key_at))
         while time.monotonic() - started < args.seconds:
+            if (output / 'finish-request.json').exists():
+                result['finished_by_controller'] = True
+                break
             if game.poll() is not None or list((output / 'game').glob('__ATThrone__ERRORS*')):
                 break
             if time.monotonic() >= next_focus:
@@ -292,16 +324,22 @@ def main():
         debug = output / 'game/decomp_debug.log'
         if debug.exists():
             text += debug.read_text(errors='replace')
+        mod_log = output / 'game/AttTFix.log'
+        if mod_log.exists():
+            text += mod_log.read_text(errors='replace')
         result['required_marker_seen'] = args.require_log is None or args.require_log in text
+        result['required_files'] = {name: {'bytes': p.stat().st_size, 'sha256': sha256(p)} if p.is_file() and p.stat().st_size else None
+                                    for name in args.require_file for p in [output / 'game' / name]}
         result['status'] = 'smoke_survived' if (result['alive_at_end'] and not result['error_files'] and
-                                              result['required_marker_seen']) else 'failed'
+                                              result['required_marker_seen'] and all(result['required_files'].values())) else 'failed'
     except Exception as error:
-        result.update(status='setup_or_runner_error', error=str(error))
+        result.update(status='interrupted' if isinstance(error, InterruptedError) else 'setup_or_runner_error', error=str(error))
         raise
     finally:
         try:
             services.stop()
         finally:
+            (output / 'session.json').write_text(json.dumps({'active': False}) + '\n')
             (output / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
             print(json.dumps(result, indent=2), flush=True)
             lock.close()

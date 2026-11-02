@@ -7,6 +7,15 @@ home directory; game tests now run from private WSL copies under `/home/attt-dev
 
 ## Initial WSL Wine game smoke tests
 
+Latest: [shared original/rebuilt integration results](WINE_SHARED_RESULTS.md), seven completed smokes with
+identical test-only Lua asset fixtures. Original/plain both load game0 and pass save/perturb/reload; decoded
+roundtrip states match exactly within each engine. Across engines only serialized Time.sec/msec differ,
+without filtering. Shared game00 N/E/N tactical input reaches the same turn-3 defeat outcome. AttTFix 2.1.2
+installs hooks and produces active skin/mipmap counters in v57 plain. All 42 tooling tests pass. No engine
+binary changed. Physical mouse UI input remains unresolved; one interrupted combat run is retained/excluded.
+These results exercise real call chains but do not prove all state, combat or mod settings equivalent.
+Evidence: `/home/attt-dev/work/wine-tests/shared-integration-v57-20261102.json`.
+
 The subsequent normal-start/menu/load cohort is documented in [WINE_TESTING.md](WINE_TESTING.md) and
 `/home/attt-dev/work/wine-tests/menu-load-v57-20261102.json`. Original/plain both play intro videos and reach
 visually matching main menus through the same timed Escape keys. Debug loads copied `game0` and `game00`

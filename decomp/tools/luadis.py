@@ -16,6 +16,8 @@ class R:
         s.d, s.p = d, 0
 
     def take(s, n):
+        if n < 0 or s.p + n > len(s.d):
+            raise ValueError('truncated Lua chunk')
         b = s.d[s.p:s.p + n]
         s.p += n
         return b
@@ -36,6 +38,8 @@ def function(r):
     ks = []
     for _ in range(r.u32()):
         t = r.u8()
+        if t not in (0, 1, 3, 4):
+            raise ValueError('unsupported Lua constant tag: %d' % t)
         ks.append(None if t == 0 else bool(r.u8()) if t == 1 else struct.unpack('<f', r.take(4))[0] if t == 3
                   else r.string())
     f['k'] = ks
@@ -86,10 +90,11 @@ def show(f, path, want, out):
         show(p, path + '/' + name, want, out)
 
 
-d = open(sys.argv[1], 'rb').read()
-assert d[:4] == b'\x1bLua' and d[4] == 0x51, 'not Lua 5.1 bytecode'
-r = R(d)
-r.take(12)
-out = []
-show(function(r), 'main', sys.argv[2] if len(sys.argv) > 2 else None, out)
-print('\n'.join(out))
+if __name__ == '__main__':
+    d = open(sys.argv[1], 'rb').read()
+    assert d[:4] == b'\x1bLua' and d[4] == 0x51, 'not Lua 5.1 bytecode'
+    r = R(d)
+    r.take(12)
+    out = []
+    show(function(r), 'main', sys.argv[2] if len(sys.argv) > 2 else None, out)
+    print('\n'.join(out))
