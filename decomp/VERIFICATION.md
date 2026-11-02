@@ -4,7 +4,60 @@ Active checkout: `/home/attt-dev/work/AttT-Fix`, branch `decomp/continue`.
 Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages; the agent does not launch the game.
 
-## Binary identities
+## Latest triage checkpoint — source commit 22e4a17
+
+The four `differs` from the recovered sweep have now been investigated. Three translation defects have hand
+overrides and failing-before/passing-after regression fixtures. The fourth is an allocator-padding artifact
+with a controlled reproduction; it remains visible in the unmodified fuzz harness.
+
+| Function | Change/evidence | Targeted seed-1 result |
+|---|---|---|
+| `00558520` | Restore rounded coordinate differences and `(dx² + dy²) + dz²` order | verified, 5 normal / 25 matching faults |
+| `005B15B0` | Preserve the two `fcomi; ja` unordered/equal partition paths with `!(a > b)` | verified, 28 normal / 2 matching faults |
+| `004FCCB0` | Use signed 32-bit `_ftol2_sse` conversion before unsigned storage; preserve float stores | lowcov, 1 normal / 29 matching faults |
+| `0055B850` | Trace uninitialized empty-allocator byte during lazy filesystem creation | raw differs; initialized-byte control verifies 30/30 |
+
+Distance and partition functions also verify on seeds 2 and 8 (`--n 30`, FPCW `0x27f`), and seed 1 with the game's
+FPCW `0x7f`. Grid lookup remains lowcov on those runs, with 1–2 normal returns and matching faults otherwise.
+Bounded grid fixtures return normally at both precisions for normal coordinates and explicit overflow/NaN
+conversion cases. These are targeted checks; **the 9,734-row sweep below has not been rerun on this binary**.
+
+The distance regression uses finite coordinates `(1, 1, 4096)` at single precision: the original key is
+`0x4B800001`, while the reordered translation produced `0x4B800000`. It also checks actor-radius selection,
+callback/count changes, and empty/small/large buffers (0, 1, 4, 17 entries) at both precisions. The partition test
+compares returned bounds and payload moves on bounded finite, tied and NaN arrays. All three new defect
+fixtures fail on the previous candidate and pass after the fixes.
+
+The grid function's actual stack ABI is `(out_cell, float x, float z)` plus `this` in ECX. Its typed declaration
+now reflects that ABI, keeping the same three stack dwords. `GH_FTOL32` models the CRT's SSE2-enabled branch:
+store double, then signed `cvttsd2si`, including integer-indefinite `0x80000000` on overflow or NaN. Recognized
+32-bit helper calls emitted by `autodecomp.py` now use this primitive; 64-bit helpers retain their width.
+Two tooling tests compile generated macros to x86 and emulate ordinary/negative/out-of-range/NaN values and
+a 64-bit conversion. The existing generated directory was not regenerated. Inlined Ghidra casts still require
+machine-code review; the generator does not blindly rewrite casts.
+
+For `0055B850`, the write trace identifies the same nested `00451430` allocator-copy instruction in both runs.
+`CFileSystem` construction (`00451E00`) passes an uninitialized local byte: the original/rebuilt loader stack
+layouts yield `08` and `E8`, copied to heap address `2035FEB0`. A separate diagnostic initializes only that
+allocator input byte before the two container constructors (`00451430`, `00489710`); the original seed-1
+30-case comparison then verifies (coverage 0.58, 30 normal returns). **No byte masking or suppression was added
+to the production verifier.** A bounded forest-loader fixture with an already initialized filesystem also
+matches, covering 0/2 file entries and both file-state branches using emulated file-access stubs.
+
+Current plain: `/home/attt-dev/re/triage-20261102/final-plain/ATThrone.exe`, 4,875,264 bytes,
+SHA-256 `16f94ba0007d41e91e322a98eb67a0e38ad239fe54e9b2d600c07d66b1a9219c`.
+Current debug: `/home/attt-dev/re/triage-20261102/final-debug/ATThrone_debug.exe`, 5,319,680 bytes,
+SHA-256 `4fde90f16b53c974c83b28d1c06caae9839f55bd596c858ea1436d5c2547aced`.
+Both pass relink verification (4,604,704 bytes / 86,576 pointers, zero mismatches), keep 10,266 replacements,
+and pass **22 differential tests each**. All **nine tooling tests** pass.
+
+Raw evidence and commands: `/home/attt-dev/work/triage-20261102/` (before/after logs, targeted run manifests,
+`allocator-final-raw/zero` logs/TSVs, `source-manifest.json`). Builds and scratch remain in WSL.
+Next: triage the eleven historical fault differences and remaining coverage gaps, then prepare v55 playtests.
+The old aggregate verdict counts below describe the older sweep binary and must not be silently updated with
+these targeted results or the diagnostic allocator control.
+
+## Earlier binary identities and recovered sweep
 
 Build numbers were reused. Identify binaries by SHA-256, not by `build79` or compile timestamps.
 
@@ -166,6 +219,6 @@ Flags: `--toggle -D DECOMP_TEST_INPUT -D DECOMP_DEBUG_LOG -D DECOMP_DEBUG_MENU`.
 Relink verification and all **18 differential tests** pass on the debug candidate as well. Neither candidate
 has been played or delivered. The broad sweep keeps its original binary and manifest unchanged.
 
-Next: triage the four remaining differences, eleven fault differences and interrupted/unsupported cases with
-valid fixtures, then deliver plain/debug v55 for the user's playtest. The smaller candidates are prepared locally.
+This earlier checkpoint waited for triage of the four differences and eleven fault differences. See the
+latest section above for the completed four-function triage and current candidates. The smaller candidates are prepared locally.
 Delivery waits for verification triage; in-game validation will then be the user's step.
