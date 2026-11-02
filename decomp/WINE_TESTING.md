@@ -1,8 +1,11 @@
-# WSL Wine testing — 2026-11-02
+# WSL Wine testing — updated 2026-11-03
 
 Wine is installed under `/home/attt-dev/work/wine-runtime/`, without root installation or changes to the
 Windows game installation. The private prefix is initialized. A **standalone synthetic PE32 probe passed**;
 the original EXE and both v57 builds also pass the initial developer world-start smoke test below.
+
+Newest evidence: [extended save and continent checks](WINE_EXTENDED_RESULTS.md), with ten more passing
+runs across other saves, native timing controls and original/plain/mod-enabled continent-2 transitions.
 
 The latest milestone compares original/plain save loading, write-save/reload and bounded tactical input
 with identical test-only Lua assets, and checks actual AttTFix activation/runtime counters. See

@@ -1,4 +1,4 @@
-# Current verification checkpoint — 2026-11-02
+# Current verification checkpoint — 2026-11-03
 
 Active checkout: `/home/attt-dev/work/AttT-Fix`, branch `decomp/continue`.
 Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
@@ -6,6 +6,15 @@ Windows is for user-facing playtest packages. The user explicitly authorized run
 home directory; game tests now run from private WSL copies under `/home/attt-dev/work`.
 
 ## Initial WSL Wine game smoke tests
+
+Newest: [expanded save/continent results](WINE_EXTENDED_RESULTS.md), ten further passing runs. Three more
+world saves pass original/plain roundtrips with zero own decoded-state differences. Original, plain and
+mod-enabled v57 all transition to continent 2, produce independently decoded destination saves and survive
+120 seconds into a tactical encounter. Cross-engine differences are only clock fields; a repeated original
+game210 run also varies only in those fields. Both g_log cases fail required-output checks because their name
+is absent from the load list, without game errors. No fields are filtered and no fixed-step timing equivalence
+is claimed. All 42 tooling tests pass; EXEs and function-level verification/fuzz counts are unchanged.
+Checkpoint: `/home/attt-dev/work/wine-cohorts/extended-checkpoint-20261103.json`.
 
 Latest: [shared original/rebuilt integration results](WINE_SHARED_RESULTS.md), seven completed smokes with
 identical test-only Lua asset fixtures. Original/plain both load game0 and pass save/perturb/reload; decoded

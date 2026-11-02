@@ -1,10 +1,24 @@
 # AttT decomp — handoff / full project context
 
-Updated 2026-11-02. Read `decomp/VERIFICATION.md` for the current, hash-identified checkpoint and verification
+Updated 2026-11-03. Read `decomp/VERIFICATION.md` for the current, hash-identified checkpoint and verification
 limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
 their status statements and test counts are superseded by the latest checkpoint.
 
-**Current work: shared original/v57 integration milestone**, v57 binaries unchanged. See
+**Current work: expanded world-save and continent-transition verification**, v57 EXEs unchanged. See
+`decomp/WINE_EXTENDED_RESULTS.md`; checkpoint `/home/attt-dev/work/wine-cohorts/extended-checkpoint-20261103.json`.
+Ten more runs pass: original/plain roundtrips of game1/game209/game210 (zero own decoded-state differences),
+original/plain/mod-enabled v57 transitions to continent 2 (fresh destination saves independently decoded),
+and a repeated original game210 timing control. Cross-engine differences remain only serialized clock
+fields; the native repeat also varies only in those fields. This is timing variation evidence, not a fixed-step
+equivalence verdict. Both g_log attempts stay in the Load list because the name is unavailable; required
+outputs correctly fail, with no game errors. All supplied regular world saves are continent 1; the shared
+Move Object fixture covers actual continent-2 loading and a subsequent tactical encounter. Mod logs show
+smoothing cache clears on scene changes; all three transition runs survive 120 seconds. The fixture builder's
+new `--continent2` mode reproduces the tested PAK exactly. 42 tooling tests pass. Evidence cohorts are
+`world-roundtrips-j3o_enr_` and `continent2-ohw7akaw`; old tool sources/hashes are retained. Next: deterministic
+world/combat contracts, attack/spell/victory cases, fixed-step clocks and repeated mod-enabled transitions.
+
+**Previous work: shared original/v57 integration milestone**, v57 binaries unchanged. See
 `decomp/WINE_SHARED_RESULTS.md`; evidence `/home/attt-dev/work/wine-tests/shared-integration-v57-20261102.json`.
 Seven completed smokes compare original/plain with identical Lua overlays (not native engine hooks): game0
 load/world rendering, save/perturb/reload and a game00 N/E/N battle sequence. Both own roundtrip states match
