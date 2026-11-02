@@ -114,7 +114,7 @@ be re-established with the fixed harness.
 
 ## 6. Playtest packages (gitignored folders in the repo root)
 
-`AttT_decomp_exe_v42 … v52`, each with a Russian `README_RU.txt` (+ `maps/`). History:
+`AttT_decomp_exe_v42 … v53`, each with a Russian `README_RU.txt` (+ `maps/`). History:
 
 - v42/v43/v44 — auto / auto_debug / coverage / hand + `toggle_bisect.bat|ps1` + `toggle_list.txt`.
   v42 was the save-load crash (fixed in 635a126: the ABI adapter must forward every stack dword the original
