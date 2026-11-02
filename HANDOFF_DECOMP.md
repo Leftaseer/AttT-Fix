@@ -587,6 +587,10 @@ Rules for anyone editing this function again:
 
 ### 15.4 Known residual (seed 11, case 55 — degenerate NaN input)
 
+**Resolved by the current checkpoint:** clang moved a negation through division/addition. Preserving the
+original `fchs / fdiv / fadd` order removes the discrepancy; see `decomp/VERIFICATION.md`. The following is
+historical investigation evidence.
+
 All cross components are NaN (`[esp+0x10]=0x14=0x18=0xbc=0xc0=0xFFFFFFFF`, `[0xb8]=0`). After the branch fix
 both builds take the same path, but one heap byte still differs deterministically (3/3 runs):
 `mem 203F6913: 7f10f03d20465645 / ff10f03d20465645` — the sign bit of a float ~1.9e38 stored in a heap
@@ -634,7 +638,7 @@ prove a value was rounded to float.
   vs rounded-float return. Check whether the `st0` return needs `GH_FROUND` (same class as the §5 return
   rounding rule).
 
-### 15.7 Next steps (in order)
+### 15.7 Previous session's next steps (superseded by decomp/VERIFICATION.md)
 
 1. Finish the verify79 sweep and diff its verdict lists against verify76's; every new `differs` needs a look.
 2. Re-check the 263 `crashed` rows individually (`--only <addr> --n 8` into a separate TSV) to separate

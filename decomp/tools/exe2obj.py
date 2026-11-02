@@ -17,7 +17,8 @@ import sys, os, struct, argparse, pefile
 
 IMAGE_REL_I386_DIR32 = 6
 IMAGE_REL_I386_REL32 = 0x14
-SCN = {'.text': 0x60000020, '.rdata': 0x40000040, '.data': 0xC0000040, '.ndata': 0xC0000040}
+SCN = {'.text': 0x60000020, '.rdata': 0x40000040, '.data': 0xC0000040, '.ndata': 0xC0000040,
+       '.bss': 0xC0000080}
 ALIGN_4096 = 0x00D00000
 NRELOC_OVFL = 0x01000000
 
@@ -46,8 +47,18 @@ def main():
         size = s.Misc_VirtualSize     # not the raw size: the rest of the last page is free for linker thunks
         size = (size + 15) & ~15
         b = bytearray(raw[s.PointerToRawData:s.PointerToRawData + min(s.SizeOfRawData, size)])
-        b += bytes(size - len(b))
-        secs.append([n, base + s.VirtualAddress, size, b, []])
+        # Keep the original .data tail uninitialized. /merge:.bss=.data below
+        # places it immediately after the initialized prefix at the same VA;
+        # relocations and public symbols within the tail belong to that section.
+        # Do not trim arbitrary zero bytes: SizeOfRawData defines the boundary.
+        if n == '.data' and len(b) < size:
+            initialized = len(b)
+            secs.append([n, base + s.VirtualAddress, initialized, b, []])
+            secs.append(['.bss', base + s.VirtualAddress + initialized, size - initialized,
+                         bytearray(size - initialized), []])
+        else:
+            b += bytes(size - len(b))
+            secs.append([n, base + s.VirtualAddress, size, b, []])
     first_va = min(s[1] for s in secs)
 
     def find_sec(va, prefer=None):
@@ -300,10 +311,17 @@ def write_coff(path, secs, symtab):
     shdrs = []
     for n, va, size, data, rel in secs:
         rel.sort()
-        ptr = len(out); out += data
+        uninitialized = n == '.bss'
+        if uninitialized and (any(data) or rel):
+            raise ValueError('uninitialized section contains data or relocations')
+        ptr = 0 if uninitialized else len(out)
+        if not uninitialized:
+            out += data
         while len(out) % 4: out += b'\0'
         rptr = len(out); nrel = len(rel)
-        flags = SCN[n] | ALIGN_4096
+        # The tail must follow the initialized prefix without added padding,
+        # even when SizeOfRawData is not page-aligned.
+        flags = SCN[n] | (0x00100000 if uninitialized else ALIGN_4096)
         if nrel > 0xFFFF:
             flags |= NRELOC_OVFL
             out += struct.pack('<IIH', nrel + 1, 0, 0); nrel_field = 0xFFFF
@@ -319,7 +337,8 @@ def write_coff(path, secs, symtab):
     out += strtab
     struct.pack_into('<HHIIIHH', out, 0, 0x14C, len(secs), 0, symptr, len(symtab), 0, 0)
     for i, h in enumerate(shdrs): out[20 + 40 * i:60 + 40 * i] = h
-    open(path, 'wb').write(out)
+    with open(path, 'wb') as f:
+        f.write(out)
 
 def write_res(pe, path):
     out = bytearray(struct.pack('<IIHHHHIHHII', 0, 32, 0xFFFF, 0, 0xFFFF, 0, 0, 0, 0, 0, 0))

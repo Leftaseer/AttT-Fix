@@ -181,6 +181,9 @@ the original function twice. All earlier passing difftest/autoverify claims, inc
 control detects removal of that fix. Corrected sweeps have found discrepancies requiring investigation.
 See [VERIFICATION.md](VERIFICATION.md) for binary hashes, current results, known gaps and resume commands.
 `rebuild/autoverify_findings.tsv` is historical diagnosis material, not current verification evidence.
+The original `.data` virtual tail is now emitted as uninitialized COFF data; the plain candidate is 4,875,264
+bytes (2,132,480 bytes smaller), with original section addresses preserved. Plain and debug candidates pass
+17 differential tests each; three synthetic linker/guard tests check the BSS encoding.
 
 ## Полный анализ заново
 

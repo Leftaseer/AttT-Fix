@@ -11,9 +11,11 @@ Build numbers were reused. Identify binaries by SHA-256, not by `build79` or com
 | Binary | SHA-256 |
 |---|---|
 | Inherited plain baseline | `a73b8d70b03223ba3296aaee855659324a3b4a9bdb5368b6b1c67c59dc52b75a` |
-| Current plain checkpoint | `ab4eff34c0d842d349a458832a25209cf3b0d4b6d239024e9f46d2c923d6e17d` |
+| Corrected plain binary used by the full sweep | `ab4eff34c0d842d349a458832a25209cf3b0d4b6d239024e9f46d2c923d6e17d` |
+| Smaller plain candidate (BSS split) | `70abad38d0db5f0b644b0a035e89325ef7c93ae3c944a93b8dcc55043c58b288` |
+| Smaller debug candidate (BSS split) | `0ef29b8f548f7e65d49d3c42c5a9351b2845095b9156899907278d78ae015ed0` |
 
-Current binary: `/home/attt-dev/re/checkpoint-20261102/frame/ATThrone.exe`.
+Full-sweep binary: `/home/attt-dev/re/checkpoint-20261102/frame/ATThrone.exe`.
 Original input: `/home/attt-dev/work/attt/bin/attt.exe`.
 Generated sources: `/home/attt-dev/work/attty_test/auto_fix4` (not committed).
 Build: plain `--auto`, no exclusions or debug defines. Replacements remain **10,266 of 18,591 functions**.
@@ -89,5 +91,37 @@ The runner rejects changed inputs/settings on resume. Its initial-run, resume-wi
 changed-seed rejection paths were exercised with two focused functions. A completed runner means all shards
 finished, not that all functions were verified; inspect `summary.json` verdicts.
 
+## BSS size reduction (separate candidates)
+
+`exe2obj.py` now splits the original `.data` at its PE `SizeOfRawData` boundary and emits the virtual tail as
+uninitialized COFF `.bss`, merged back into `.data` by the existing linker option. Symbols and relocations into
+the tail use that section. Its alignment is one byte to avoid adding a gap after non-page-aligned prefixes.
+The writer rejects nonzero bytes or relocations in an uninitialized section rather than silently dropping them.
+
+Plain candidate: `/home/attt-dev/re/checkpoint-20261102/bss/ATThrone.exe`.
+Size: **7,007,744 -> 4,875,264 bytes** (2,132,480 bytes removed, approximately 30%).
+`.data` raw size: 2,173,440 -> 40,960 bytes; virtual size stays 2,173,136 bytes.
+The 17 differential tests pass, and relink verification reports zero mismatches.
+
+The synthetic linker test uses a 0x600-byte initialized prefix, an uninitialized tail and a relocation targeting
+a symbol deep in that tail. It checks address continuity, loader-visible zero fill and the reduced raw size.
+Two guard tests reject nonzero tail data and tail relocations. All three pass:
+
+```sh
+python3 -I -m unittest discover -s decomp/tools/tests -v
+```
+
+Compared with the full-sweep binary, section virtual addresses, sizes, memory permissions, entry point, timestamp
+and import/directory layout are unchanged. Mapped section bytes match except for 16 bytes within unused partial
+instructions immediately following replacement jumps (entry+5 through entry+8, already ignored by relink
+verification). All new-code/data sections match byte-for-byte. Evidence: `bss-equivalence.json` in the checkpoint
+directory. This is a structural comparison, not a new full autoverify sweep of the smaller binary.
+
+Debug candidate: `/home/attt-dev/re/checkpoint-20261102/debug-bss/ATThrone_debug.exe`, 5,319,680 bytes.
+Flags: `--toggle -D DECOMP_TEST_INPUT -D DECOMP_DEBUG_LOG -D DECOMP_DEBUG_MENU`.
+Relink verification and all **17 differential tests** pass on the debug candidate as well. Neither candidate
+has been played or delivered. The broad sweep keeps its original binary and manifest unchanged.
+
 Next: finish the sweep, compare its discrepancy lists with verify76, triage remaining differences with valid
-fixtures, then prepare plain/debug v55 for the user's playtest. The BSS-size reduction follows stabilization.
+fixtures, then deliver plain/debug v55 for the user's playtest. The smaller candidates are prepared locally.
+Delivery waits for verification triage; in-game validation will then be the user's step.
