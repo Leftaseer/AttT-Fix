@@ -2,8 +2,8 @@
 """Hash-pinned, resumable autoverify shards (Linux/WSL).
 
 Arguments match autoverify.py: ORIG REBUILT MAP AUTO WORK OUTDIR.
-Each worker retries a killed shard; autoverify records its interrupted function
-as crashed before proceeding. A manifest prevents mixing binaries or settings.
+Each worker retries a killed shard, recording timeout/emulator-crash metadata for the interrupted function.
+A manifest prevents mixing binaries, tools, floating-point filtering or other settings.
 """
 import argparse
 from collections import Counter
@@ -12,6 +12,7 @@ import csv
 import fcntl
 import hashlib
 import json
+import os
 from pathlib import Path
 import signal
 import subprocess
@@ -38,6 +39,16 @@ def positive(value):
     return value
 
 
+def interruption_record(address, returncode, limit):
+    if returncode == 3:
+        status, detail = 'timeout', 'function exceeded the %d-second wall-clock limit' % limit
+    elif returncode in (-signal.SIGSEGV, -signal.SIGABRT):
+        status, detail = 'emulator_crash', 'worker terminated by ' + signal.Signals(-returncode).name
+    else:
+        status, detail = 'interrupted', 'worker exited with code %d' % returncode
+    return {'address': address, 'status': status, 'detail': detail, 'returncode': returncode}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     for key in ('orig', 'rebuilt', 'map', 'auto', 'work', 'outdir'):
@@ -58,13 +69,14 @@ def main():
     if only is not None:
         options += ['--only', ','.join('%08X' % x for x in only)]
     identity = {
-        'format': 1,
+        'format': 2,
         'inputs': {str(p): digest(p) for p in (a.orig, a.rebuilt, a.map, a.work / 'replace.txt')},
         'tools': {p.name: digest(p) for p in (HERE / 'autoverify.py', HERE / 'difftest.py', HERE / 'pe.py', Path(__file__))},
         'symbols': fingerprint_tree(HERE.parent / 'symbols'),
         'auto': {'path': str(a.auto), 'files': fingerprint_tree(a.auto)},
         'options': options, 'shards': a.shards,
         'python': sys.version, 'unicorn': unicorn.__version__,
+        'environment': {'AV_NONAN': os.environ.get('AV_NONAN', '')},
     }
     a.outdir.mkdir(parents=True, exist_ok=True)
     lock = (a.outdir / 'run.lock').open('a')
@@ -101,6 +113,8 @@ def main():
                 if rc not in (3, -signal.SIGSEGV, -signal.SIGABRT) or not progress[1] or progress == previous:
                     print('shard %d stopped, exit %d' % (k, rc), flush=True)
                     return rc
+                Path(str(cur) + '.reason.json').write_text(json.dumps(
+                    interruption_record(progress[1].strip(), rc, a.fn_timeout), indent=2) + '\n')
                 previous = progress
 
     with ThreadPoolExecutor(max_workers=a.jobs) as pool:

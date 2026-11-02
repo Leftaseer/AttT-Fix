@@ -14,7 +14,8 @@ usage (from a test file):
     h = Harness(orig_exe, rebuilt_exe, rebuilt_map)
     h.compare(0x004064D0, args=[L], setup=lambda m: ...)      # AttT address of the replaced function
 """
-import os, sys, struct, math, re, random
+import os, sys, struct, math, re, random, json, hashlib
+from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pe import PE
 from unicorn import Uc, UcError, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_PROT_ALL
@@ -67,7 +68,7 @@ class Harness:
         self.orig = PE(orig_exe)
         self.rb = PE(rebuilt_exe)
         self.starts = {}
-        for l in open(rebuilt_map):
+        for l in Path(rebuilt_map).read_text().splitlines():
             m = re.search(r'__orig_(\w+)_start\s+([0-9a-fA-F]+)', l)
             if m:
                 self.starts['.' + m.group(1)] = int(m.group(2), 16)
@@ -768,7 +769,7 @@ class Harness:
         if not hasattr(self, '_clob'):
             game = 'valk' if self.orig.pe.FILE_HEADER.TimeDateStamp == 0x4883FB4F else 'attt'
             self._clob = {}
-            for l in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'symbols', game + '_functions.tsv')):
+            for l in Path(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'symbols', game + '_functions.tsv')).read_text().splitlines():
                 if l[0] != '#':
                     q = l.rstrip('\n').split('\t')
                     self._clob[int(q[0], 16)] = set(x.lower() for x in q[4].split(',') if x)
@@ -777,7 +778,8 @@ class Harness:
     def compare(self, attt_addr, args=(), regs=None, setup=None, ret='eax', mem=True, game_addr=None, check_st0=None):
         """Run original and replacement from the same state; return a list of differences (empty = equal).
         ret: registers holding the result ('eax', 'eax:edx', 'al', 'st0' or None for void); volatile registers
-        the original leaves unchanged are compared as well (callers compiled with /LTCG may rely on them)."""
+        the original leaves unchanged are compared as well (callers compiled with /LTCG may rely on them).
+        This restores the entry under test, not its entire dependency graph: both runs share callees."""
         if check_st0 is not None and ret == 'eax':
             ret = 'eax' if not check_st0 else 'eax'
 
@@ -827,18 +829,35 @@ class Harness:
                     i = next(j for j in range(len(d1)) if d1[j] != d2[j])
                     diffs.append('memory differs at %08X: orig %s new %s' % (b + i, d1[i:i + 8].hex(), d2[i:i + 8].hex()))
                     break
+        observer = getattr(self, 'comparison_observer', None)
+        if observer is not None:
+            observer(va, r1, r2, diffs)
         return diffs
 
 
-def run_tests(test_files, orig, rebuilt, mapf):
+def run_tests(test_files, orig, rebuilt, mapf, report_path=None):
     h = Harness(orig, rebuilt, mapf)
+    records = {}
+    current = ['']
+    if report_path:
+        def record(address, reference, replacement, differences):
+            row = records.setdefault('%08X' % address, {'comparisons': 0, 'normal_return_pairs': 0,
+                                     'fault_pairs': 0, 'one_sided_faults': 0, 'mismatches': 0, 'tests': set()})
+            row['comparisons'] += 1
+            row['normal_return_pairs'] += int(not reference['fault'] and not replacement['fault'])
+            row['fault_pairs'] += int(bool(reference['fault']) and bool(replacement['fault']))
+            row['one_sided_faults'] += int(bool(reference['fault']) != bool(replacement['fault']))
+            row['mismatches'] += int(bool(differences))
+            row['tests'].add(current[0])
+        h.comparison_observer = record
     total = bad = 0
     for tf in test_files:
         ns = {'h': h, 'random': random, 'struct': struct}
-        exec(compile(open(tf).read(), tf, 'exec'), ns)
+        exec(compile(Path(tf).read_text(), tf, 'exec'), ns)
         for name, fn in ns.items():
             if name.startswith('test_') and callable(fn):
                 total += 1
+                current[0] = '%s:%s' % (os.path.basename(tf), name)
                 res = fn(h)
                 if res:
                     bad += 1
@@ -846,11 +865,24 @@ def run_tests(test_files, orig, rebuilt, mapf):
                 else:
                     print('ok   %s:%s' % (os.path.basename(tf), name))
     print('%d tests, %d failed' % (total, bad))
+    if report_path:
+        for row in records.values():
+            row['tests'] = sorted(row['tests'])
+        report = {'format': 1, 'scope': 'entry comparison; dependencies shared between both runs',
+                  'tests': total, 'failed': bad, 'functions': dict(sorted(records.items())),
+                  'inputs': {str(Path(p).resolve()): hashlib.sha256(Path(p).read_bytes()).hexdigest()
+                             for p in (orig, rebuilt, mapf, __file__, *test_files)}}
+        Path(report_path).write_text(json.dumps(report, indent=2) + '\n')
     return bad == 0
 
 
 if __name__ == '__main__':
     import glob
     orig, rebuilt, mapf = sys.argv[1:4]
-    files = sys.argv[4:] or sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rebuild', 'tests', '*.py')))
-    sys.exit(0 if run_tests(files, orig, rebuilt, mapf) else 1)
+    extra, report = sys.argv[4:], None
+    if '--report' in extra:
+        index = extra.index('--report')
+        report = extra[index + 1]
+        del extra[index:index + 2]
+    files = extra or sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'rebuild', 'tests', '*.py')))
+    sys.exit(0 if run_tests(files, orig, rebuilt, mapf, report_path=report) else 1)

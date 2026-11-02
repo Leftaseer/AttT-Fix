@@ -5,13 +5,17 @@ For each function: N random calls built from its prototype (pointers get random 
 dwords are partly pointers to further random objects), run once as the original (entry bytes restored) and once
 through the replacement, from the same memory.  Compared: the result register(s), the volatile registers the
 original keeps, callee-saved registers, ESP, and the writable memory (.data, the test objects, the caller's
-stack).  Coverage of the original code is measured with block hooks.
+stack).  Block coverage used for verification counts only original calls that returned normally;
+coverage reached before faults is retained separately as coverage_all in the detail field.
 
     verified    at least MIN_OK calls returned normally, all calls behaved the same, coverage >= MIN_COV
     lowcov      the same behaviour, but too few normal returns or too little code covered
     differs     some call behaved differently (result, memory, or the new code crashed and the original not)
     faultdiff   the original crashed and the new code not (often only a load the compiler dropped)
     unsupported the code reached an import the emulator does not provide
+    timeout     the supervising sweep observed the function wall-clock limit
+    emulator_crash the worker process terminated with SIGSEGV/SIGABRT
+    interrupted the previous worker stopped without a known termination cause
 
 usage: autoverify.py ORIG.exe REBUILT.exe REBUILT.map AUTO_DIR WORK_DIR OUT.tsv [--n 16] [--only ADDR,...]"""
 import argparse, os, re, struct, sys, random, json, time
@@ -59,12 +63,15 @@ class FastHarness(Harness):
         self.stack_lo = STACK
         self.stack0 = bytes(self.uc.mem_read(self.stack_lo, STACK + STACK_SIZE - self.stack_lo))
         self.cov = set()
+        self.normal_cov = set()
+        self.case_cov = set()
         self.cov_on = False
         self.uc.hook_add(UC_HOOK_BLOCK, self._on_block)
 
     def _on_block(self, uc, addr, size, user):
         if self.cov_on and self.cov_lo <= addr < self.cov_hi:
             self.cov.add((addr, size))
+            self.case_cov.add((addr, size))
 
     def run_case(self, entry, head, args, regs, ret, arg_bytes, va):
         """one call as original (head bytes) and one as replacement from the same memory and heap state;
@@ -80,9 +87,13 @@ class FastHarness(Harness):
             if h is not None:
                 self.uc.mem_write(entry, h)
             self.cov_on = h is not None
+            if self.cov_on:
+                self.case_cov = set()
             if getattr(self, 'watching', False):
                 print(' run', 'orig' if h is not None else 'new')
             r = self.call(entry, args, regs)
+            if self.cov_on and not r['fault']:
+                self.normal_cov.update(self.case_cov)
             self.cov_on = False
             if h is not None:
                 self.uc.mem_write(entry, self.new_head)
@@ -137,9 +148,8 @@ NONAN = bool(os.environ.get('AV_NONAN'))   # (triage: no -1 either, a NaN as a f
 
 
 def no_nan(v):
-    """a random dword read as a float is no NaN or infinity: the decompiled comparisons differ from the x87/SSE
-    ones only there ('comiss; jb' takes a NaN as less, C's '<' not), which drowned the real differences"""
-    return v & ~0x00800000 if (v >> 23) & 0xFF == 0xFF else v
+    """Finite-only filtering is an explicit AV_NONAN triage option, never the default verification policy."""
+    return v & ~0x00800000 if NONAN and (v >> 23) & 0xFF == 0xFF else v
 
 
 def make_object(h, rnd, size, depth):
@@ -170,7 +180,10 @@ def make_arg(h, rnd, t, sizes):
             return [h.alloc(max(64, len(s)), s + bytes(64))]
         return [make_object(h, rnd, size, 2)]
     if t in ('float',):
-        return [struct.unpack('<I', struct.pack('<f', rnd.choice([0.0, 1.0, -1.0, 0.5, 2.0, rnd.uniform(-1000, 1000)])))[0]]
+        values = [0.0, -0.0, 1.0, -1.0, 0.5, 2.0, rnd.uniform(-1000, 1000)]
+        if not NONAN:
+            values += [float('nan'), float('inf'), -float('inf'), 1e30]
+        return [struct.unpack('<I', struct.pack('<f', rnd.choice(values)))[0]]
     if t in ('double', 'float10'):
         return list(struct.unpack('<II', struct.pack('<d', rnd.choice([0.0, 1.0, -1.0, rnd.uniform(-1000, 1000)]))))
     if t in ('longlong', 'ulonglong', 'undefined8', 'qword'):
@@ -189,6 +202,32 @@ def ret_kind(t):
     if t in ('bool', 'char', 'uchar', 'byte', 'undefined1', 'sbyte'): return 'al'
     if t in ('short', 'ushort', 'word', 'undefined2', 'wchar16', 'wchar_t'): return 'ax'
     return 'eax'
+
+
+def select_targets(replaced, autos, only=None):
+    """Never let --only turn a native/native comparison into a replacement verification result."""
+    eligible = set(replaced) & set(autos)
+    if only is None:
+        return sorted(eligible)
+    requested = set(only)
+    missing = requested - eligible
+    if missing:
+        raise ValueError('requested functions are not active generated replacements: ' +
+                         ', '.join('%08X' % address for address in sorted(missing)))
+    return sorted(requested)
+
+
+def interruption_details(cur, address):
+    """Only the supervising process can distinguish a timeout from a crashed emulator or an external stop."""
+    try:
+        with open(cur + '.reason.json') as source:
+            record = json.load(source)
+        if int(record.get('address', '0'), 16) == address and record.get('status') in (
+                'timeout', 'emulator_crash', 'interrupted'):
+            return record['status'], record['detail']
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return 'interrupted', 'previous run ended without a result; termination cause is unknown'
 
 
 def main():
@@ -243,9 +282,15 @@ def main():
         if fn.startswith('auto_') and fn.endswith('.c'):
             for m in re.finditer(r'^/\* @func ([0-9A-F]{8})', open(os.path.join(a.auto, fn), encoding='utf-8').read(), re.M):
                 autos.add(int(m.group(1), 16))
-    todo = [x for x in replaced if x in autos]
-    if a.only:
-        todo = [int(x, 16) for x in a.only.split(',')]
+    try:
+        todo = select_targets(replaced, autos, [int(x, 16) for x in a.only.split(',')] if a.only else None)
+    except ValueError as error:
+        ap.error(str(error))
+    if not todo:
+        ap.error('no active generated replacements found; check that AUTO and WORK match this binary')
+    for address in todo:
+        if bytes(h.uc.mem_read(h.to_rebuilt(address), 1)) != b'\xE9':
+            ap.error('%08X has no active replacement jump in this binary' % address)
     if a.shard:
         k, n = map(int, a.shard.split('/'))
         todo = sorted(todo)[k::n]
@@ -275,7 +320,8 @@ def main():
     if a.resume and os.path.exists(cur):
         c = int(open(cur).read().strip() or '0', 16)
         if c and c not in done:
-            out.write('%08X\tcrashed\t0.00\tthe run died or hung in this function\n' % c)
+            status, detail = interruption_details(cur, c)
+            out.write('%08X\t%s\t0.00\t%s\n' % (c, status, detail))
             out.flush()     # (a Unicorn segfault kills the process without unwinding)
             done.add(c)
     import signal
@@ -305,6 +351,7 @@ def main():
             head = h.orig.read(va, max(5, size))          # the whole body: the build changes more than the jmp
             h.new_head = bytes(h.uc.mem_read(entry, len(head)))
             h.cov = set()
+            h.normal_cov = set()
             h.cov_lo, h.cov_hi = entry, entry + size
             n_ok = n_same_fault = 0
             status, detail = None, ''
@@ -373,10 +420,11 @@ def main():
                     status, detail = 'differs', 'case %d: %s' % (case, ', '.join(diff))
                     break
                 n_ok += 1
-            cov = sum(s for _, s in h.cov) / max(1, size)
+            cov = sum(s for _, s in h.normal_cov) / max(1, size)
             if status is None:
                 status = 'verified' if n_ok >= MIN_OK and cov >= MIN_COV else 'lowcov'
-                detail = '%d ok, %d both faulted' % (n_ok, n_same_fault)
+                detail = '%d ok, %d both faulted; coverage_all=%.2f' % (
+                    n_ok, n_same_fault, min(1.0, sum(s for _, s in h.cov) / max(1, size)))
         stats[status] = stats.get(status, 0) + 1
         out.write('%08X\t%s\t%.2f\t%s\n' % (va, status, min(cov, 1.0), detail))
         out.flush()

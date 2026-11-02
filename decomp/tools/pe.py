@@ -3,7 +3,8 @@ import pefile, struct, functools
 class PE:
     def __init__(s, path):
         s.pe = pefile.PE(path, fast_load=False)
-        s.data = open(path, 'rb').read()
+        with open(path, 'rb') as source:
+            s.data = source.read()
         s.base = s.pe.OPTIONAL_HEADER.ImageBase
         s.secs = [(x.Name.rstrip(b'\0').decode(), s.base + x.VirtualAddress, x.Misc_VirtualSize, x.PointerToRawData, x.SizeOfRawData) for x in s.pe.sections]
         s.relocs = []
