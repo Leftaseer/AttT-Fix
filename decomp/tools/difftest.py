@@ -201,7 +201,13 @@ class Harness:
             return float('-inf') if e & 0x8000 else float('inf')
         if not m:
             return -0.0 if e & 0x8000 else 0.0
-        v = math.ldexp(float(m), exp - 16383 - 63)               # float(m) rounds to 53 bits, like fst qword
+        try:
+            v = math.ldexp(float(m), exp - 16383 - 63)           # float(m) rounds to 53 bits, like fst qword
+        except OverflowError:
+            # Finite x87 values can exceed binary64's exponent range. Reading
+            # an unused ST0 after a fuzz call must not terminate the shard;
+            # narrowing such a value produces signed infinity, as fst qword does.
+            v = math.inf
         return -v if e & 0x8000 else v
 
     def _cstr(self, p):
