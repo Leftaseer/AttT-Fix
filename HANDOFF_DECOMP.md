@@ -4,11 +4,20 @@ Updated 2026-11-02. Read `decomp/VERIFICATION.md` for the current, hash-identifi
 limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
 their status statements and test counts are superseded by the latest checkpoint.
 
-**Current work: verification milestone**, tools commit `e7afd4a`; shipped v57 binaries are unchanged.
+**Current work: isolated WSL Wine environment ready**, shipped v57 binaries are unchanged. See
+`decomp/WINE_TESTING.md`. WineHQ 11.0 and a private prefix/display/null-audio device are installed under
+`/home/attt-dev/work/wine-runtime`. A synthetic PE32 probe passed VC80 loads, native D3DX shader compilation,
+D3D9 render/readback and DirectSound8 initialization. The tooling suite passes 35 tests. A game runner is
+prepared with fresh copies/reflinks of inputs, private saves/configuration, logs, hashes and screenshots.
+Actual game runs remain pending: automatic approval review rejected the original EXE launch, citing an
+existing Windows/Wine game-launch restriction. It was not retried indirectly; no game was launched.
+
+**Previous work: verification milestone**, tools commit `e7afd4a`; shipped v57 binaries are unchanged.
 The user confirmed both v57 fixes (AttTFix activation and debug barracks) in-game. The transferred
 `/home/attt-dev/AttT-decomp` archive was reviewed without replacing current code; see
 `decomp/ARTIFACTS_REVIEW.md`. It supplies real resource archives, six saves, original Lua and a 2.1.2 DLL
-matching the v57 profile. The older source checkouts identify as 2.1.0. Wine/prefix/display tools were not found.
+matching the v57 profile. The older source checkouts identify as 2.1.0. Wine/prefix/display tools were absent
+at the archive review; the later Wine setup is described above.
 New verifier controls reject deliberately broken replacements, native/native selections and mismatched report
 identities; nonfinite filtering is explicit, normal-return coverage determines verification, and sweep timeouts
 are distinguished from emulator crashes. Both v57 binaries pass 32 differential tests (599 normal comparison

@@ -39,7 +39,11 @@ overrides. An original/rebuilt comparison must use the same asset set and settin
 
 ## Wine readiness
 
-No Wine executable, wineserver, Xvfb, xdotool or matchbox window manager was found in the current environment;
+Update after this review: a new local Wine runtime/prefix and headless services are installed; a synthetic
+PE32 graphics/audio probe passes. Actual game integration is pending. See [WINE_TESTING.md](WINE_TESTING.md)
+for provenance, commands, evidence and the automatic approval rejection of the original-game launch.
+
+At the initial review, no Wine executable, wineserver, Xvfb, xdotool or matchbox window manager was found;
 no copied Wine prefix was found in the transferred material. No game was launched during this review.
 The existing active-project scenario documentation (`tools/gametests/README.md`, `tools/rungame.py`) describes
 the previous `/opt/re` setup, 32-bit Wine, a native `d3dx9_29.dll`, software graphics and an isolated prefix.

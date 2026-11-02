@@ -4,6 +4,16 @@ Active checkout: `/home/attt-dev/work/AttT-Fix`, branch `decomp/continue`.
 Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages; the agent does not launch the game.
 
+## WSL Wine environment prepared
+
+See [WINE_TESTING.md](WINE_TESTING.md). A private WineHQ 11.0 runtime/prefix with Xvfb, software graphics,
+native D3DX9_29 and null audio is installed in WSL. A standalone synthetic PE32 probe passed VC80 loads,
+D3D9 render/readback, native shader-effect compilation and DirectSound8 initialization. The tooling suite
+now passes 35 tests, including six Wine-runner isolation/conversion/cleanup controls. No game code or v57
+binary changed. Actual game integration remains pending: automatic approval review rejected the original
+EXE launch, citing an existing Windows/Wine game-launch restriction; no game was launched or retried via a
+workaround. Probe evidence is `/home/attt-dev/work/wine-probes/probe-rui6xcff/`.
+
 ## Verification milestone — tools commit e7afd4a, unchanged v57 binaries
 
 The user confirmed the v57 AttTFix activation and debug-barracks fixes in-game. The next work is verification;
@@ -62,8 +72,8 @@ snapshot and `checkpoint.json`. Earlier runs in this directory are retained with
 the final cohort above is the authoritative 20-row result. No historical full-sweep totals were updated.
 
 Next: expand valid world/combat/object-lifetime fixtures and compare complete call chains against an unmodified
-original image. Recreate an isolated WSL Wine environment before reusing the old integration scenarios;
-the transferred assets/saves are available, but the runtime/prefix is not currently installed.
+original image. The WSL Wine runtime/prefix has since been installed and probed; game integration using the
+transferred assets/saves remains pending as described above.
 
 ## v57 AttTFix compatibility / barracks candidate — source commit c9d773e
 
