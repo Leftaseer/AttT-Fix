@@ -178,7 +178,14 @@ python3 decomp/rebuild/build.py --exe ATThrone.exe --out build/ATThrone.exe --au
 стекового кадра, vtable по имени, глобалы без типа, float против целых, скрытые аргументы импортов MSVCP80,
 ячейки старой таблицы импорта.
 
-Current AttT state: 10,266 of 18,591 functions replaced (9,734 generated-function addresses plus 532 engine/Lua
+The current verification milestone is recorded in [VERIFICATION.md](VERIFICATION.md), including exact-build
+replacement inventories, normal-return coverage, rejection controls and the reviewed WSL artifact archive.
+Use `tools/difftest.py ORIGINAL REBUILT MAP --report REPORT.json` for per-function direct-fixture evidence,
+then `tools/verification_inventory.py ORIGINAL REBUILT MAP AUTO WORK INVENTORY.json --report REPORT.json`.
+The inventory rejects evidence for other binaries. These reports describe entry-level tests with shared
+callees; they are not end-to-end correctness or branch-coverage claims.
+
+Earlier full replacement checkpoint: 10,266 of 18,591 functions replaced (9,734 generated-function addresses plus 532 engine/Lua
 replacements). Original section addresses and PE timestamp are preserved; relink verification checks 4,604,704
 bytes and 86,576 pointers with zero mismatches. The current differential suite has 31 passing tests.
 

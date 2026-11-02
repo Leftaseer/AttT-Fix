@@ -4,6 +4,67 @@ Active checkout: `/home/attt-dev/work/AttT-Fix`, branch `decomp/continue`.
 Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages; the agent does not launch the game.
 
+## Verification milestone — tools commit e7afd4a, unchanged v57 binaries
+
+The user confirmed the v57 AttTFix activation and debug-barracks fixes in-game. The next work is verification;
+no executable, shipped package, Steam file or mod configuration was changed for this milestone.
+Transferred `/home/attt-dev/AttT-decomp` material was reviewed; see [ARTIFACTS_REVIEW.md](ARTIFACTS_REVIEW.md).
+
+Verifier changes:
+
+- Synthetic linked x86 programs provide a positive control and deliberately wrong return values, missing
+  memory writes, callee-saved register corruption, incorrect stack cleanup and wrong float results. The real
+  differential harness detects these defects. A boolean control permits unused upper return-register bits;
+  the existing instruction-cache negative control is retained.
+- `autoverify --only` must select active generated replacements from this exact build. Native reservations
+  are rejected instead of allowing an original/original comparison. Every selected entry must have its
+  replacement jump. An actual `--only 0044A9C0` run is rejected before writing a verdict file.
+- NaN/Infinity bit filtering is now conditional on explicit `AV_NONAN` triage mode. Previously the random
+  object path called the filter unconditionally. Typed float generation includes nonfinite and boundary
+  values. Sweep manifests now pin `AV_NONAN`; resuming with a changed float policy was tested and rejected.
+- Coverage used for a `verified` verdict now comes only from original calls that return normally. All-call
+  coverage remains diagnostic `coverage_all`. A synthetic branching fixture proves fault-only blocks cannot
+  increase the normal-return coverage used by the verdict.
+- The sweep supervisor records termination metadata. A wall-clock limit is `timeout`, SIGSEGV/SIGABRT of
+  the worker is `emulator_crash`, and an unexplained prior stop is `interrupted`. They are not conflated with
+  emulated game faults or normal successful calls.
+- `difftest.py ... --report FILE.json` records per-function comparisons/normal returns/faults, test names and
+  input/test hashes. It explicitly identifies the comparison scope: only the entry is restored; callees are
+  shared. `verification_inventory.py ORIGINAL REBUILT MAP AUTO WORK OUTPUT --report FILE.json` validates
+  the input identities before attaching evidence. A report for a different binary was tested and rejected.
+
+Both v57 binaries now pass **32 differential tests** (599 normal-return comparison pairs across 32 function
+addresses). **29 tooling tests** pass. The added direction-delta contract tests axis changes, crossing -pi/pi,
+large finite vectors and signed zero at x87 control words `0x27F` and `0x7F`, with an independent shortest-turn
+range/expected-angle check. All 20 addresses in the focused cohort have normal-return contract fixtures.
+Several dependencies in these fixtures are mocked; this is not an end-to-end equivalence claim.
+
+The exact-build inventory finds **10,167 active replacements**, of which **9,661 addresses** are associated
+with generated sources and eligible for autoverify, including hand overrides. Direct fixtures exercise 32
+addresses, 20 of them in that generated-source group; 9,641 eligible addresses have no direct fixture yet.
+These are evidence counts, not branch coverage or a count of all functions verified by other methods.
+
+A fresh hash-pinned 20-function run on v57 plain completed with `--n 30 --seed 1 --fpcw 0x27F`, a 20-second
+function limit and default nonfinite input policy: **7 verified, 8 faultdiff, 3 timeout, 1 lowcov, 1 differs**.
+It is a focused run, not a new full sweep:
+
+- Verified: `0043F260`, `004402A0`, `00440390`, `004CC8D0`, `004F6B30`, `00558520`, `005B15B0`.
+- Timeout: `00458380`, `0048C980`, `0048CC40`; their bounded normal-state fixtures pass. A separate three-address
+  interruption audit also confirmed wall-clock timeouts rather than worker crashes.
+- `004FCCB0`: zero normal fuzz returns, normal-return coverage 0.00 versus all-call coverage 1.00. It remains
+  lowcov; its 16 bounded normal comparison pairs pass. This illustrates why fault-only coverage is insufficient.
+- The eight raw fault differences and the allocation mismatch at `0055B850` remain visible. Normal-state
+  contracts pass; this run does not close or reclassify those raw discrepancies as universally safe.
+
+Evidence: `/home/attt-dev/work/verification-v57-20261102/`: exact-build inventory, plain/debug differential
+reports, tooling logs, `targeted20-final/` manifest/results, interruption audit, rejection controls, a tool-source
+snapshot and `checkpoint.json`. Earlier runs in this directory are retained with their own tool identities;
+the final cohort above is the authoritative 20-row result. No historical full-sweep totals were updated.
+
+Next: expand valid world/combat/object-lifetime fixtures and compare complete call chains against an unmodified
+original image. Recreate an isolated WSL Wine environment before reusing the old integration scenarios;
+the transferred assets/saves are available, but the runtime/prefix is not currently installed.
+
 ## v57 AttTFix compatibility / barracks candidate — source commit c9d773e
 
 Package: `/mnt/e/Programs/Qoder_plays/AttT-Fix/AttT_decomp_exe_v57/`.
