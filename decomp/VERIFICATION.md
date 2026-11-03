@@ -5,6 +5,18 @@ Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages. The user explicitly authorized running anything within the
 home directory; game tests now run from private WSL copies under `/home/attt-dev/work`.
 
+## Tactical damage and normal game input
+
+Original and v57 plain each deal 250 displayed Fireball damage to the gladiator in copied `game00`.
+Victory saves match byte-for-byte. A separate live health probe checks an exact seven-point loss and
+restoration. The emulated `005640F0` contract adds 12 normal cases for fractional inputs and clamps.
+Both v57 builds pass 33 differential tests and 611 normal comparison pairs. All 42 tooling tests pass.
+
+Relative XTEST motion drives the game’s DirectInput cursor. Original and v57 plain now load `game0`
+through their normal menu, quicksave with F5, move, and restore the saved position and heading using
+the pause menu. See [combat and input evidence](WINE_COMBAT_RESULTS.md) for the matching outcomes,
+camera differences, and reproduction details.
+
 ## Fixed-step clock contract
 
 `tools/verify_clock.py ORIGINAL REBUILT MAP REPORT` runs the `CClock::Update` virtual slot in independent

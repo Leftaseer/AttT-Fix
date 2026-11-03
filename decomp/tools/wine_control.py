@@ -20,9 +20,10 @@ def main():
     sub.add_parser('capture').add_argument('label')
     sub.add_parser('key').add_argument('key')
     sub.add_parser('finish')
-    click = sub.add_parser('click')
-    click.add_argument('x', type=int)
-    click.add_argument('y', type=int)
+    for action in ('click', 'move-relative', 'click-relative'):
+        mouse = sub.add_parser(action)
+        mouse.add_argument('x', type=int)
+        mouse.add_argument('y', type=int)
     args = parser.parse_args()
     session = json.loads((args.run / 'session.json').read_text())
     if not session['active']:
@@ -65,14 +66,19 @@ def main():
                 finally:
                     xdo('keyup', args.key)
             else:
-                record['client_xy'] = [args.x, args.y]
-                xdo('mousemove', '--window', window, args.x, args.y)
+                if args.action == 'click':
+                    record['client_xy'] = [args.x, args.y]
+                    xdo('mousemove', '--window', window, args.x, args.y)
+                else:
+                    record['delta'] = [args.x, args.y]
+                    xdo('mousemove_relative', '--', args.x, args.y)
                 time.sleep(.4)
-                try:
-                    xdo('mousedown', 1)
-                    time.sleep(.6)
-                finally:
-                    xdo('mouseup', 1)
+                if args.action != 'move-relative':
+                    try:
+                        xdo('mousedown', 1)
+                        time.sleep(.6)
+                    finally:
+                        xdo('mouseup', 1)
         record['status'] = 'completed'
     except Exception as error:
         record.update(status='failed', error=str(error))

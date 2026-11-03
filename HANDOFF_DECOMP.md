@@ -4,7 +4,14 @@ Updated 2026-11-03. Read `decomp/VERIFICATION.md` for the current, hash-identifi
 limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
 their status statements and test counts are superseded by the latest checkpoint.
 
-**Current work: fixed-step clock and spellbook verification.** Both v57 builds pass all 24 clock cases in
+**Current work: tactical damage and normal input verification.** Original and v57 plain produce identical
+victory saves after casting Fireball for 250 displayed damage. Both also pass exact seven-point damage
+and healing assertions in a live battle. The emulated numeric health cases bring both v57 suites to 33
+tests and 611 normal comparison pairs. Relative XTEST motion drives the game’s DirectInput cursor.
+Both engines load the copied quicksave from the menus and restore its position and heading after
+movement. See `decomp/WINE_COMBAT_RESULTS.md` and `/home/attt-dev/work/combat-verification/`.
+
+**Previous work: fixed-step clock and spellbook verification.** Both v57 builds pass all 24 clock cases in
 independent original/rebuilt PE mappings, including fractional updates and calendar rollover. A deliberately
 broken minute carry fails 12 cases. The original and v57 plain also render matching learned-spell pages
 with the shared world spellbook fixture. Reports live in `/home/attt-dev/work/clock-verification/`.

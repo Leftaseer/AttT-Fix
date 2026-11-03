@@ -49,6 +49,8 @@ def main():
     mode.add_argument('--roundtrip', action='store_true', help='save, perturb gold, reload, assert gold/army restoration, save evidence')
     mode.add_argument('--continent2', action='store_true', help='use the original story Move Object route to continent 2 and save evidence there')
     mode.add_argument('--spellbook', action='store_true', help='open the world spellbook with the loaded hero’s spells')
+    mode.add_argument('--health', action='store_true', help='assert damage and healing for the hero in a battle save')
+    mode.add_argument('--fireball', action='store_true', help='open the tactical spellbook and save evidence on victory')
     args = parser.parse_args()
     if not re.fullmatch('[A-Za-z0-9_]+', args.save):
         parser.error('save name must use letters, digits or underscores')
@@ -132,10 +134,48 @@ function GUIScene.WorldLevel:Load(...)
   end
 end
 '''
+    if args.health:
+        driver += b'''
+local tacticUpdate = GUIScene.TacticLevel.Update
+local checked = false
+function GUIScene.TacticLevel:Update(...)
+  tacticUpdate(self, ...)
+  local troop = TacticLevel.CurrentTroop
+  if checked or not troop or troop.Type ~= "Hero" or #troop.Unit ~= 1 then return end
+  checked = true
+  assert(self.tai:IsHeroTroop(1) and self.tai:QnLive(1) == 1, "expected the single hero in slot 1")
+  local before = self.tai:FactHealth(1)
+  assert(before > 7, "insufficient hero health")
+  troop.Unit[1]:SubHealth(7)
+  assert(self.tai:FactHealth(1) == before - 7, "expected seven damage")
+  troop.Unit[1]:SubHealth(-7)
+  assert(self.tai:FactHealth(1) == before, "expected restored health")
+  Serializator:Save("scenario_health_checked")
+end
+'''
+    if args.fireball:
+        driver += b'''
+local tacticUpdate = GUIScene.TacticLevel.Update
+local opened = false
+function GUIScene.TacticLevel:Update(...)
+  tacticUpdate(self, ...)
+  if not opened and TacticLevel.CurrentTroop.Type == "Hero" then
+    opened = true
+    self:OnOpenSpellBook()
+  end
+end
+
+local victoryLoad = GUIScene.TacticalEndVictory.Load
+function GUIScene.TacticalEndVictory:Load(...)
+  victoryLoad(self, ...)
+  Serializator:Save("scenario_fireball_victory")
+end
+'''
     write_pak(args.output, {'guiscenes.lua': driver, 'scenario_original_guiscenes.lua': original})
     manifest = {'source': str(args.resource0.resolve()), 'original_script_sha256': hashlib.sha256(original).hexdigest(),
                 'driver_sha256': hashlib.sha256(driver).hexdigest(), 'overlay_sha256': hashlib.sha256(args.output.read_bytes()).hexdigest(),
                 'save': args.save, 'roundtrip': args.roundtrip, 'continent2': args.continent2, 'spellbook': args.spellbook,
+                'health': args.health, 'fireball': args.fireball,
                 'scope': 'shared test asset; original EXE is not patched'}
     args.output.with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps(manifest, indent=2))
