@@ -25,6 +25,20 @@ values. Using the earlier diagnostic to initialize just the constructor input by
 returns at seed 1 and FPCW `0x027f`. Raw verdict and control are separate. Evidence is in
 `/home/attt-dev/work/combat-verification/allocator-v57/`.
 
+## Focused timeout recheck
+
+The three v57 plain timeout addresses were rerun with the same seed, case count and x87 mode as the
+20-address sweep and a 120-second wall-clock limit. Frustum lookup `00458380` returned 7 normal pairs
+and 23 matching faults with 1.00 normal-return coverage. Angular partition `0048C980` returned 26 normal
+pairs and 4 matching faults with 0.95 coverage. Both now verify in this focused run.
+
+Angular insertion `0048CC40` still timed out at the original 5,000,000-instruction limit. With a separate
+10,000-instruction limit, all 30 random pairs faulted, giving zero normal-return coverage. Bounded
+begin/end spans in independent PE mappings produced 2,000 normal pairs per v57 build with identical
+output bytes, intact buffer guards and preserved x87 control words. The spans contained 0–32 vectors
+with finite angles, signed zeros, infinities and NaNs. The emulator supplies the shared `_CIatan2` model.
+Both raw verdicts are retained alongside the structured result in `/home/attt-dev/work/grid-verification/`.
+
 ## Debug actions in Wine
 
 The v57 debug build opened the in-game Barrack scene with dragon stacks through its Win32 menu.
@@ -33,13 +47,17 @@ Both runs reached the tough battle through the same menu. In the second run,
 update. It required one enemy troop with one unit, speed 1 and 100,836 health, with the base dragon
 parameters unchanged. The runner required the resulting success marker.
 
-The first run captured the debug window active again after Ctrl+Alt+D while the barracks was open.
-Focus readings varied in the second run, and the menu stayed visible after both Close control attempts.
-Those inputs leave desktop focus and closing unverified in the private Wine display. The second run
-used `--manual-focus` to stop the runner from repeatedly refocusing the game after the intro keys.
-Both runs finished without game error files. Captures, input logs and manifests live in
+In a third run, an external Win32 probe recorded foreground window, keyboard focus, menu visibility
+and cursor visibility. The barracks action returned focus to the game and left the menu visible.
+Ctrl+Alt+D restored menu focus and showed the system cursor. Both the Close button and the title-bar X
+hid the menu and returned focus to the game. Root X11 captures retained the menu even after Win32
+reported it hidden, so the X11 observations from the first two runs were inconclusive.
+The last two runs used `--manual-focus` to stop the runner from refocusing the game after the intro keys.
+All three runs finished without game error files. Captures, input logs and manifests live in
 `/home/attt-dev/work/wine-tests/v57-debug-actions-jvw8b7nk/` and
-`/home/attt-dev/work/wine-tests/v57-debug-verified-z0hxbmed/`.
+`/home/attt-dev/work/wine-tests/v57-debug-verified-z0hxbmed/`, with the Win32 log in
+`/home/attt-dev/work/wine-tests/v57-debug-win-focus-8e_lxjg7/win32-focus.log`.
+The probe source is in `/home/attt-dev/work/grid-verification/win-focus/`.
 
 ## Tactical damage and normal game input
 

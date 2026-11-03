@@ -156,6 +156,10 @@ only when requested. Shared prefix use is locked. The runner records executable 
 runtime/backend, elapsed time, exit/crash status, logs and a PNG screenshot. A required literal log marker
 can gate a run. It does not install or activate AttTFix automatically.
 
+Use `--manual-focus` for multiwindow interaction. After the scheduled keys are sent, the runner leaves
+focus to the game and the input controller. With zero scheduled keys, the controller can focus a target
+from startup.
+
 `smoke_survived` means the process stayed alive for the requested interval without a game error file and
 with any required log marker. A blank or broken menu can still survive: inspect the screenshot and logs.
 These directories isolate test data; Wine is not a security boundary for untrusted Windows programs.

@@ -8,8 +8,8 @@ their status statements and test counts are superseded by the latest checkpoint.
 structured grid queries each and pass 34 differential tests with 653 normal comparison pairs. The raw
 allocator byte difference reproduces in v57 plain; the diagnostic constructor-input control matches 30/30.
 In Wine the debug menu opens the Barrack scene and starts a battle with one dragon at speed 1 and 100,836
-HP, checked from the live unit. Wine focus and Close controls remain inconclusive. See
-`decomp/VERIFICATION.md` for the exact-build evidence.
+HP, checked from the live unit. A Win32 probe confirms focus and cursor restoration with Ctrl+Alt+D and
+both Close controls, despite stale X11 captures. See `decomp/VERIFICATION.md` for the exact-build evidence.
 
 **Previous work: tactical damage and normal input verification.** Original and v57 plain produce identical
 victory saves after casting Fireball for 250 displayed damage. Both also pass exact seven-point damage
