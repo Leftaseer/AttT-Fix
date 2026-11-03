@@ -5,6 +5,42 @@ Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages. The user explicitly authorized running anything within the
 home directory; game tests now run from private WSL copies under `/home/attt-dev/work`.
 
+## Structured grid lookup and allocator recheck
+
+Both v57 builds match the original on 77,000 structured coordinate lookups each, using independent
+PE mappings. The experiment initializes five bounded staggered grids based on `004FD520`'s cell layout.
+It samples cell interiors, negative coordinates, translated origins and exact or adjacent float32 boundary
+values at x87 control words `0x007f` and `0x027f`. Every call returns a bounded cell index, with zero index
+differences and 23 distinct original block starts observed at each precision. The historical random-object
+sweep still classifies `004FCCB0` as low coverage.
+
+The checked-in grid test exercises all four lookup return paths and samples both sides of an edge. It checks
+expected indices and pointers from `004FCCB0`, `00523440` and `00523470`. Both v57 builds now pass
+**34 differential tests and 653 normal comparison pairs**. The entry tests share callees as usual.
+Reproduction script, search logs and suite reports are in `/home/attt-dev/work/grid-verification/`.
+
+The v57 plain allocator recheck reproduces the `0055B850` raw mismatch at `2035FEB0` (original `08`,
+rebuilt `E8`). The first mismatching input reaches both empty-allocator constructors with those same
+values. Using the earlier diagnostic to initialize just the constructor input byte yields 30 matching normal
+returns at seed 1 and FPCW `0x027f`. Raw verdict and control are separate. Evidence is in
+`/home/attt-dev/work/combat-verification/allocator-v57/`.
+
+## Debug actions in Wine
+
+The v57 debug build opened the in-game Barrack scene with dragon stacks through its Win32 menu.
+Both runs reached the tough battle through the same menu. In the second run,
+`tools/scenarios/debug-dragon-stats.txt` inspected the spawned enemy's battle parameters from a tactical
+update. It required one enemy troop with one unit, speed 1 and 100,836 health, with the base dragon
+parameters unchanged. The runner required the resulting success marker.
+
+The first run captured the debug window active again after Ctrl+Alt+D while the barracks was open.
+Focus readings varied in the second run, and the menu stayed visible after both Close control attempts.
+Those inputs leave desktop focus and closing unverified in the private Wine display. The second run
+used `--manual-focus` to stop the runner from repeatedly refocusing the game after the intro keys.
+Both runs finished without game error files. Captures, input logs and manifests live in
+`/home/attt-dev/work/wine-tests/v57-debug-actions-jvw8b7nk/` and
+`/home/attt-dev/work/wine-tests/v57-debug-verified-z0hxbmed/`.
+
 ## Tactical damage and normal game input
 
 Original and v57 plain each deal 250 displayed Fireball damage to the gladiator in copied `game00`.

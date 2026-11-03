@@ -4,7 +4,14 @@ Updated 2026-11-03. Read `decomp/VERIFICATION.md` for the current, hash-identifi
 limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
 their status statements and test counts are superseded by the latest checkpoint.
 
-**Current work: tactical damage and normal input verification.** Original and v57 plain produce identical
+**Current work: grid lookup and debug action verification.** Both v57 builds match the original on 77,000
+structured grid queries each and pass 34 differential tests with 653 normal comparison pairs. The raw
+allocator byte difference reproduces in v57 plain; the diagnostic constructor-input control matches 30/30.
+In Wine the debug menu opens the Barrack scene and starts a battle with one dragon at speed 1 and 100,836
+HP, checked from the live unit. Wine focus and Close controls remain inconclusive. See
+`decomp/VERIFICATION.md` for the exact-build evidence.
+
+**Previous work: tactical damage and normal input verification.** Original and v57 plain produce identical
 victory saves after casting Fireball for 250 displayed damage. Both also pass exact seven-point damage
 and healing assertions in a live battle. The emulated numeric health cases bring both v57 suites to 33
 tests and 611 normal comparison pairs. Relative XTEST motion drives the game’s DirectInput cursor.

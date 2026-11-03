@@ -212,6 +212,8 @@ def main():
                         help='normal startup, or developer world start (-nologo bypasses the menu)')
     parser.add_argument('--key-at', action='append', type=key_event, default=[], metavar='SECONDS:KEY',
                         help='hold an X11 key for 0.5 seconds; repeat to drive original and rebuilt EXEs alike')
+    parser.add_argument('--manual-focus', action='store_true',
+                        help='stop refocusing the game after scheduled keys are sent')
     parser.add_argument('--width', type=int, default=800)
     parser.add_argument('--height', type=int, default=600)
     parser.add_argument('--saves', type=Path)
@@ -250,6 +252,7 @@ def main():
               'seconds': args.seconds, 'launch_mode': args.launch_mode, 'resolution': [args.width, args.height],
               'renderer': 'DXVK' if args.dxvk else 'WineD3D', 'status': 'preparing'}
     result['key_events_requested'], result['key_events_sent'] = sorted(args.key_at), []
+    result['manual_focus'] = args.manual_focus
     result['required_log_marker'] = args.require_log
     def interrupted(signum, frame):
         raise InterruptedError('runner received signal %d' % signum)
@@ -298,7 +301,7 @@ def main():
                 break
             if game.poll() is not None or list((output / 'game').glob('__ATThrone__ERRORS*')):
                 break
-            if time.monotonic() >= next_focus:
+            if (pending_keys or not args.manual_focus) and time.monotonic() >= next_focus:
                 windows = subprocess.run(['xdotool', 'search', '--onlyvisible', '--name', 'Ascension|ATThrone|Throne'],
                                          env=env, capture_output=True, text=True, timeout=5)
                 for window in windows.stdout.split():
