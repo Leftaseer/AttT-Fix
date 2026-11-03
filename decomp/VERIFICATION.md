@@ -5,7 +5,32 @@ Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages. The user explicitly authorized running anything within the
 home directory; game tests now run from private WSL copies under `/home/attt-dev/work`.
 
+## Fixed-step clock contract
+
+`tools/verify_clock.py ORIGINAL REBUILT MAP REPORT` runs the `CClock::Update` virtual slot in independent
+original and rebuilt PE mappings. It seeds the clock object with explicit dates and supplies float32 frame
+deltas. Each call follows the callees in its own image, including the millisecond, minute and calendar
+rollover routines at `0043B280`, `0043AFF0` and `0043AB30`.
+
+Both v57 builds pass 24 cases each. The 12 input sequences run at x87 control words `0x027f` and `0x007f`.
+They check zero and fractional advances, consecutive frames, second/minute/hour carries and the game's
+30-day month and year rollover. Each case checks expected calendar fields, stack cleanup, restoration of
+the x87 control word and preservation of the rest of the guarded clock object.
+
+A disposable plain EXE with the minute carry entry at `0043AFF0` replaced by `ret 4` fails 12 of 24 cases.
+That control exercises detection of a broken callee through the same virtual entry. The reports record
+EXE/map hashes, the inputs and expected and observed fields. Evidence lives in
+`/home/attt-dev/work/clock-verification/`. Coverage is bounded to these clock inputs. Frame scheduling and
+the simulation-time differences in the Wine save captures remain separate measurements.
+
 ## Initial WSL Wine game smoke tests
+
+`make_wine_fixture.py RESOURCE0 OUTPUT --spellbook` loads copied `game0` and opens the world spellbook
+through the normal `OnSpellBook` handler. The shared overlay and timed Escape inputs were identical for
+original and v57 plain. Both 40-second runs survived, and both final captures show Fireball and Triple
+Fireball with matching layout, descriptions and intelligence requirements. Coverage is limited to opening
+and rendering the learned-spell pages. The capture hashes and run manifests are in
+`/home/attt-dev/work/clock-verification/spellbook-comparison.json`. All 42 tooling tests pass.
 
 Newest: [expanded save/continent results](WINE_EXTENDED_RESULTS.md), ten further passing runs. Three more
 world saves pass original/plain roundtrips with zero own decoded-state differences. Original, plain and

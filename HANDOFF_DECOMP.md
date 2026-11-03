@@ -4,7 +4,13 @@ Updated 2026-11-03. Read `decomp/VERIFICATION.md` for the current, hash-identifi
 limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
 their status statements and test counts are superseded by the latest checkpoint.
 
-**Current work: expanded world-save and continent-transition verification**, v57 EXEs unchanged. See
+**Current work: fixed-step clock and spellbook verification.** Both v57 builds pass all 24 clock cases in
+independent original/rebuilt PE mappings, including fractional updates and calendar rollover. A deliberately
+broken minute carry fails 12 cases. The original and v57 plain also render matching learned-spell pages
+with the shared world spellbook fixture. Reports live in `/home/attt-dev/work/clock-verification/`.
+See `decomp/VERIFICATION.md` for scope and reproduction. All 42 tooling tests pass.
+
+**Previous work: expanded world-save and continent-transition verification**, v57 EXEs unchanged. See
 `decomp/WINE_EXTENDED_RESULTS.md`; checkpoint `/home/attt-dev/work/wine-cohorts/extended-checkpoint-20261103.json`.
 Ten more runs pass: original/plain roundtrips of game1/game209/game210 (zero own decoded-state differences),
 original/plain/mod-enabled v57 transitions to continent 2 (fresh destination saves independently decoded),

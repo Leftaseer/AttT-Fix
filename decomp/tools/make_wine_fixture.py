@@ -48,6 +48,7 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--roundtrip', action='store_true', help='save, perturb gold, reload, assert gold/army restoration, save evidence')
     mode.add_argument('--continent2', action='store_true', help='use the original story Move Object route to continent 2 and save evidence there')
+    mode.add_argument('--spellbook', action='store_true', help='open the world spellbook with the loaded hero’s spells')
     args = parser.parse_args()
     if not re.fullmatch('[A-Za-z0-9_]+', args.save):
         parser.error('save name must use letters, digits or underscores')
@@ -116,10 +117,25 @@ function GUIScene.WorldLevel:Load(...)
   end
 end
 '''
+    if args.spellbook:
+        driver += b'''
+local worldLoad = GUIScene.WorldLevel.Load
+local openedSpellbook = false
+function GUIScene.WorldLevel:Load(...)
+  worldLoad(self, ...)
+  if not openedSpellbook then
+    openedSpellbook = true
+    WorldLevel.SaveLoad = function()
+      assert(#Unit.Hero.BattleParams.Magic > 0, "spellbook fixture requires known spells")
+      self:OnSpellBook()
+    end
+  end
+end
+'''
     write_pak(args.output, {'guiscenes.lua': driver, 'scenario_original_guiscenes.lua': original})
     manifest = {'source': str(args.resource0.resolve()), 'original_script_sha256': hashlib.sha256(original).hexdigest(),
                 'driver_sha256': hashlib.sha256(driver).hexdigest(), 'overlay_sha256': hashlib.sha256(args.output.read_bytes()).hexdigest(),
-                'save': args.save, 'roundtrip': args.roundtrip, 'continent2': args.continent2,
+                'save': args.save, 'roundtrip': args.roundtrip, 'continent2': args.continent2, 'spellbook': args.spellbook,
                 'scope': 'shared test asset; original EXE is not patched'}
     args.output.with_suffix('.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(json.dumps(manifest, indent=2))
