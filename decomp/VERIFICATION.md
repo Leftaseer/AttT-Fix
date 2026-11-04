@@ -5,6 +5,22 @@ Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages. The user explicitly authorized running anything within the
 home directory; game tests now run from private WSL copies under `/home/attt-dev/work`.
 
+## Recommended full sweep
+
+Start with 16 workers and native coverage. With the original seed and instruction cap, use
+30 seconds per function for the first pass. Run selected timeouts separately with a 120-second
+limit. Keep the manifests and verdicts from both passes so that each result retains its budget.
+
+```sh
+python3 -I decomp/tools/verify_sweep.py ORIGINAL REBUILT MAP AUTO WORK OUTDIR \
+    --native-coverage --jobs 16 --shards 96 --n 30 --seed 1 \
+    --steps 5000000 --fpcw 0x27f --fn-timeout 30
+```
+
+Use a fresh output directory for a different budget. To measure the sweep separately from report
+generation, prefix the command with `/usr/bin/time -p -o OUTDIR/timing.txt` after creating
+`OUTDIR`. The timing file gives elapsed wall time and aggregate user and system CPU time.
+
 ## Float edge candidate
 
 The v57 sweep exposed a translation error in the three-coordinate integer bounds function

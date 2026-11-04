@@ -4,6 +4,10 @@ Updated 2026-11-04. Read `decomp/VERIFICATION.md` for the current, hash-identifi
 limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
 their status statements and test counts are superseded by the latest checkpoint.
 
+For a new full sweep, start with `--native-coverage --jobs 16 --shards 96 --fn-timeout 30`.
+Keep the first pass and any selected 120-second retries in separate output directories. The
+complete command and the worker timings are in `decomp/VERIFICATION.md`.
+
 **Current work: full v57 plain sweep and float edge fixes.** The 9,661-address baseline sweep is under
 `/home/attt-dev/work/v57-full-sweep-20261104/`. The inventory tool can attach its completed verdicts
 after reconciling all shards against the exact build. Seven confirmed mismatches in integer coordinate
