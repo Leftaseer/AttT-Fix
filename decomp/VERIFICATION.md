@@ -21,6 +21,18 @@ Use a fresh output directory for a different budget. To measure the sweep separa
 generation, prefix the command with `/usr/bin/time -p -o OUTDIR/timing.txt` after creating
 `OUTDIR`. The timing file gives elapsed wall time and aggregate user and system CPU time.
 
+The full v57 first pass with these settings took **29 minutes 9 seconds** of wall time
+(1,748.52 seconds) and 24,985.40 aggregate CPU seconds, equivalent to about 14.3 logical CPUs
+on average. The inventory reconciled all 96 shards and all 9,661 addresses. Compared with the
+earlier 70-minute run, all 9,173 rows that avoided a timeout in both runs match byte for byte.
+The first pass recorded 488 timeouts, including the 285 from the earlier run. Among the
+203 additional timeouts, the earlier run recorded 78 verified, 124 low coverage and one
+unsupported verdict. The two runs used different time limits and worker counts, so the
+2.4× wall-time improvement measures the entire first-pass configuration.
+
+The timing, manifest, raw rows and reconciled inventory are under
+`/home/attt-dev/work/v57-native-first-pass-20261104/`.
+
 ## Float edge candidate
 
 The v57 sweep exposed a translation error in the three-coordinate integer bounds function
