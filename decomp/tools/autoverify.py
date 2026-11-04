@@ -19,6 +19,7 @@ coverage reached before faults is retained separately as coverage_all in the det
 
 usage: autoverify.py ORIG.exe REBUILT.exe REBUILT.map AUTO_DIR WORK_DIR OUT.tsv [--n 16] [--only ADDR,...]"""
 import argparse, ctypes, os, re, struct, sys, random, json, time
+import weakref
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from difftest import Harness, STOP, HEAP, HEAP_SIZE, STACK, STACK_SIZE
 from unicorn import UcError, UC_HOOK_BLOCK, UC_HOOK_MEM_WRITE, UC_PROT_ALL
@@ -27,6 +28,47 @@ from unicorn.x86_const import *
 REGS = {'ECX': UC_X86_REG_ECX, 'EAX': UC_X86_REG_EAX, 'EDX': UC_X86_REG_EDX, 'EBX': UC_X86_REG_EBX,
         'ESI': UC_X86_REG_ESI, 'EDI': UC_X86_REG_EDI}
 MIN_OK, MIN_COV = 3, 0.5
+
+
+class NativeCoverage:
+    """Collect the same (address, size) pairs without a Python call for each block."""
+
+    def __init__(self, engine, path):
+        from unicorn.unicorn_py3.unicorn import uc_hook_h, uclib
+
+        self.lib = ctypes.CDLL(path)
+        self.lib.coverage_new.argtypes = []
+        self.lib.coverage_new.restype = ctypes.c_void_p
+        self.lib.coverage_free.argtypes = [ctypes.c_void_p]
+        self.lib.coverage_free.restype = None
+        self.lib.coverage_begin.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint64]
+        self.lib.coverage_begin.restype = None
+        self.lib.coverage_end.argtypes = [ctypes.c_void_p]
+        self.lib.coverage_end.restype = ctypes.c_size_t
+        self.lib.coverage_copy.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint64)]
+        self.lib.coverage_copy.restype = None
+        self.state = self.lib.coverage_new()
+        if not self.state:
+            raise MemoryError('could not allocate native sweep coverage')
+        weakref.finalize(engine, self.lib.coverage_free, self.state)
+
+        # Uc.hook_add wraps a Python callable. Register the C callback directly.
+        hook = uc_hook_h()
+        status = uclib.uc_hook_add(engine._uch, ctypes.byref(hook), UC_HOOK_BLOCK,
+                                   self.lib.coverage_block, self.state, 1, 0)
+        if status:
+            raise UcError(status)
+
+    def begin(self, lo, hi):
+        self.lib.coverage_begin(self.state, lo, hi)
+
+    def end(self, lo):
+        count = self.lib.coverage_end(self.state)
+        if count == ctypes.c_size_t(-1).value:
+            raise MemoryError('could not grow native sweep coverage')
+        keys = (ctypes.c_uint64 * count)()
+        self.lib.coverage_copy(self.state, keys)
+        return {(lo + (key >> 32), key & 0xffffffff) for key in keys}
 
 
 class FastHarness(Harness):
@@ -38,7 +80,7 @@ class FastHarness(Harness):
         self.heap_buffer = (ctypes.c_char * HEAP_SIZE)()
         self.uc.mem_map_ptr(HEAP, HEAP_SIZE, UC_PROT_ALL, ctypes.addressof(self.heap_buffer))
 
-    def setup_regions(self):
+    def setup_regions(self, native_coverage=None):
         self.regions = []
         for s in self.rb.pe.sections:
             n = s.Name.rstrip(b'\0')
@@ -72,7 +114,9 @@ class FastHarness(Harness):
         self.normal_cov = set()
         self.case_cov = set()
         self.cov_on = False
-        self.uc.hook_add(UC_HOOK_BLOCK, self._on_block)
+        self.native_coverage = NativeCoverage(self.uc, native_coverage) if native_coverage else None
+        if self.native_coverage is None:
+            self.uc.hook_add(UC_HOOK_BLOCK, self._on_block)
 
     def _on_block(self, uc, addr, size, user):
         if self.cov_on and self.cov_lo <= addr < self.cov_hi:
@@ -92,11 +136,16 @@ class FastHarness(Harness):
                 self.uc.mem_write(entry, h)
             self.cov_on = h is not None
             if self.cov_on:
-                self.case_cov = set()
+                if self.native_coverage:
+                    self.native_coverage.begin(self.cov_lo, self.cov_hi)
+                else:
+                    self.case_cov = set()
             if getattr(self, 'watching', False):
                 print(' run', 'orig' if h is not None else 'new')
             r = self.call(entry, args, regs)
             if self.cov_on:
+                if self.native_coverage:
+                    self.case_cov = self.native_coverage.end(self.cov_lo)
                 self.cov.update(self.case_cov)
                 if not r['fault']:
                     self.normal_cov.update(self.case_cov)
@@ -255,6 +304,7 @@ def main():
     ap.add_argument('--fpcw', type=lambda x: int(x, 0), default=0x27F,
                     help='x87 control word at each call (0x7F in the game: Direct3D 9 sets single precision, CreateDevice at 0x44F4EE passes no D3DCREATE_FPU_PRESERVE)')
     ap.add_argument('--steps', type=int, default=5_000_000, help='instructions per call before it counts as not returning')
+    ap.add_argument('--coverage-library', help='shared library built from sweep_coverage.c')
     ap.add_argument('--watch', type=lambda x: int(x, 16), help='debugging: print the writes to this address (hex)')
     ap.add_argument('--resume', action='store_true',
                     help='append to OUT, skipping the functions it has; the one a killed run was in is written as crashed')
@@ -269,7 +319,7 @@ def main():
         h.uc.hook_add(UC_HOOK_MEM_WRITE, lambda uc, acc, addr, size, val, u: print(
             '  write %08X <- %0*X at %08X' % (addr, 2 * size, val & ((1 << 8 * size) - 1), uc.reg_read(UC_X86_REG_EIP))),
             begin=a.watch - 7, end=a.watch + 7)
-    h.setup_regions()
+    h.setup_regions(a.coverage_library)
     sizes = parse_sizes(os.path.join(a.auto, 'auto_pre.h'))
     jsonl = [f for f in os.listdir(os.path.dirname(os.path.abspath(a.auto))) if False]
     protos = load_protos(a.protos) if hasattr(a, 'protos') else None

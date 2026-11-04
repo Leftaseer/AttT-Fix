@@ -9,8 +9,8 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from difftest import HEAP, HEAP_SIZE, Harness
-from autoverify import FastHarness
-from unicorn import UC_HOOK_CODE
+from autoverify import FastHarness, NativeCoverage
+from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_ECX
 from exe2obj import write_coff, IMAGE_REL_I386_DIR32
 
@@ -86,9 +86,30 @@ class HarnessControlTests(unittest.TestCase):
         self.assertTrue(h.compare(self.ENTRY, ret='eax'))
 
     def test_fault_only_blocks_do_not_count_as_normal_coverage(self):
+        self.check_fault_only_coverage()
+
+    @unittest.skipUnless(shutil.which('cc') or shutil.which('clang'), 'C compiler required')
+    def test_native_coverage_matches_python_on_fault_and_normal_return(self):
+        source = Path(__file__).resolve().parents[1] / 'sweep_coverage.c'
+        library = self.root / 'sweep_coverage.so'
+        self.run_tool(shutil.which('cc') or shutil.which('clang'), '-O3', '-shared', '-fPIC',
+                      '-ffreestanding', '-nostdlib', source, '-o', library)
+        self.assertEqual(self.check_fault_only_coverage(str(library)), self.check_fault_only_coverage())
+
+        engine = Uc(UC_ARCH_X86, UC_MODE_32)
+        start, blocks = 0x1000, 180
+        stop = start + 2 * blocks
+        engine.mem_map(start, 0x1000)
+        engine.mem_write(start, b'\xeb\0' * blocks)
+        coverage = NativeCoverage(engine, str(library))
+        coverage.begin(start, stop)
+        engine.emu_start(start, stop)
+        self.assertEqual(coverage.end(start), {(start + 2 * i, 2) for i in range(blocks)})
+
+    def check_fault_only_coverage(self, library=None):
         code = bytes.fromhex('85c9 7406 a10000adde c3 b801000000 c3')
         h = self.harness(code, code, FastHarness)
-        h.setup_regions()
+        h.setup_regions(library)
         h.cov_lo, h.cov_hi = self.ENTRY, self.ENTRY + len(code)
         h.new_head = bytes(h.uc.mem_read(self.ENTRY, len(code)))
         first, second = h.run_case(self.ENTRY, code, [], {UC_X86_REG_ECX: 0}, 'eax', 0, self.ENTRY)
@@ -100,6 +121,7 @@ class HarnessControlTests(unittest.TestCase):
         self.assertIsNotNone(second[0]['fault'])
         self.assertEqual(h.normal_cov, successful)
         self.assertGreater(sum(n for _, n in h.cov), sum(n for _, n in h.normal_cov))
+        return h.cov, h.normal_cov
 
     def test_heap_snapshots_capture_guest_and_host_writes_across_pages(self):
         # A guest store crosses the last two heap pages, well beyond the input allocator.

@@ -1,8 +1,10 @@
 # Minimal PE helper: sections, VA<->offset, relocations, strings.
 import pefile, struct, functools
 class PE:
-    def __init__(s, path):
-        s.pe = pefile.PE(path, fast_load=False)
+    def __init__(s, path, *, imports_only=False):
+        s.pe = pefile.PE(path, fast_load=imports_only)
+        if imports_only:
+            s.pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_IMPORT']])
         with open(path, 'rb') as source:
             s.data = source.read()
         s.base = s.pe.OPTIONAL_HEADER.ImageBase

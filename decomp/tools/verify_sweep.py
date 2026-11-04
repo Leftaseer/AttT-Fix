@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import sys
@@ -60,6 +61,7 @@ def main():
     ap.add_argument('--steps', type=positive, default=5_000_000)
     ap.add_argument('--fpcw', type=lambda s: int(s, 0), default=0x27f)
     ap.add_argument('--fn-timeout', type=positive, default=30)
+    ap.add_argument('--native-coverage', action='store_true', help='build and use the native block coverage collector')
     ap.add_argument('--only', help='comma-separated function addresses for focused runs')
     ap.add_argument('--resume', action='store_true')
     a = ap.parse_args()
@@ -85,6 +87,20 @@ def main():
     except BlockingIOError:
         ap.error('another sweep is using this output directory')
     manifest = a.outdir / 'manifest.json'
+    if a.native_coverage:
+        source = HERE / 'sweep_coverage.c'
+        library = a.outdir / 'sweep_coverage.so'
+        if not a.resume and not manifest.exists() and not any(a.outdir.glob('av_*.tsv*')):
+            compiler = shutil.which('cc') or shutil.which('clang')
+            if not compiler:
+                ap.error('--native-coverage requires cc or clang on PATH')
+            subprocess.run([compiler, '-O3', '-shared', '-fPIC', '-ffreestanding', '-nostdlib',
+                            str(source), '-o', str(library)], check=True)
+        if not library.is_file():
+            ap.error('missing native coverage library in the output directory')
+        options.extend(['--coverage-library', str(library)])
+        identity['tools'][source.name] = digest(source)
+        identity['tools'][library.name] = digest(library)
     if manifest.exists():
         if not a.resume:
             ap.error('output already has a manifest; use --resume or a new directory')

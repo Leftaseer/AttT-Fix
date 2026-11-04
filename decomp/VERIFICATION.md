@@ -71,6 +71,43 @@ wall limit per function. The controlled comparison went from 126.82 to 58.40 sec
 time and from 676.65 to 307.29 aggregate CPU seconds. All 324 TSV rows match byte for byte after
 sorting. The full v57 sweep used higher limits, so these timings apply to the sample.
 
+## Native sweep coverage and worker count
+
+The emulator now parses the PE headers and imports it uses to load each image. An independent
+comparison found identical mapped image bytes and import tables for the original and v57.
+Other PE tools retain relocation parsing.
+
+`verify_sweep.py --native-coverage` builds a Linux shared library once per run with `cc` or
+`clang`. Unicorn invokes the collector directly in C. It records the same distinct block
+address and size pairs, and merges them into the same all-call and normal-return coverage sets.
+The sweep manifest pins both the C source and the built library. The Python collector remains
+the default. All 47 tooling tests pass, including native coverage equality on normal and faulting
+calls and table growth on a sequence of 180 distinct blocks.
+
+With 12 workers and the full sweep limits of five million instructions and 120 seconds per
+function, a 68-address v57 sample took 42.10 seconds on `beea142`, 40.27 seconds with
+imports-only PE loading and Python coverage, and 11.33 seconds with imports-only loading and
+native coverage. All 68 rows match byte for byte in all three runs. This sample includes
+long guest loops where the Python callback runs many times.
+
+The separate 324-address sample used a 300,000-instruction cap and 32 shards. All worker
+counts produced identical rows.
+
+| Workers | Wall seconds with native coverage | Aggregate CPU seconds |
+|---:|---:|---:|
+| 16 | 43.35 | 595.41 |
+| 24 | 44.82 | 879.93 |
+| 32 | 47.38 | 1,285.06 |
+
+A seed-selected sample of 16 of the original v57 timeouts was replayed with the same case count,
+seed and limits as the full sweep. Thirteen still timed out, two returned low coverage and one
+verified. A completed native run also resumed with four workers, reused its pinned library and
+retained all 68 result rows. The full 9,661-address runtime with the native collector remains
+unmeasured.
+
+Timing logs, input lists, manifests and raw rows are under
+`/home/attt-dev/work/sweep-performance-v2/`.
+
 ## Structured grid lookup and allocator recheck
 
 Both v57 builds match the original on 77,000 structured coordinate lookups each, using independent

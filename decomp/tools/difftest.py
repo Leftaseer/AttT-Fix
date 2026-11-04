@@ -65,8 +65,9 @@ STRING_ALIAS = {
 
 class Harness:
     def __init__(self, orig_exe, rebuilt_exe, rebuilt_map):
-        self.orig = PE(orig_exe)
-        self.rb = PE(rebuilt_exe)
+        # The emulator maps both images at their preferred bases and binds imports itself.
+        self.orig = PE(orig_exe, imports_only=True)
+        self.rb = PE(rebuilt_exe, imports_only=True)
         self.starts = {}
         for l in Path(rebuilt_map).read_text().splitlines():
             m = re.search(r'__orig_(\w+)_start\s+([0-9a-fA-F]+)', l)
