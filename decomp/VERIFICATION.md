@@ -1,9 +1,21 @@
-# Current verification checkpoint — 2026-11-03
+# Current verification checkpoint — 2026-11-04
 
 Active checkout: `/home/attt-dev/work/AttT-Fix`, branch `decomp/continue`.
 Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages. The user explicitly authorized running anything within the
 home directory; game tests now run from private WSL copies under `/home/attt-dev/work`.
+
+## Full v57 plain sweep
+
+The current 9,661-address run is under `/home/attt-dev/work/v57-full-sweep-20261104/`. It uses seed 1,
+30 cases per entry, FPCW `0x027f`, a five-million-instruction call limit and a 120-second function limit.
+The 96 shards share one manifest that identifies the v57 plain binary, map, generated sources and tools.
+
+`verification_inventory.py --sweep DIR` attaches raw verdicts from a completed run. It checks the input
+hashes and generated sources, then reconciles the exact expected address list in each shard and the final
+summary. A timeout or other limited verdict stays visible beside any direct fixture evidence. The completed
+three-address timeout recheck exercised the importer. Controls for a different build, missing addresses
+and duplicate addresses pass, and the tooling suite now has 44 passing tests.
 
 ## Structured grid lookup and allocator recheck
 

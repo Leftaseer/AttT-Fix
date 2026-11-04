@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import autoverify
-from verify_sweep import interruption_record
+from verification_inventory import read_sweep
+from verify_sweep import fingerprint_tree, interruption_record
 
 
 class SelectionTests(unittest.TestCase):
@@ -74,6 +75,46 @@ class InterruptionTests(unittest.TestCase):
             Path(cur + '.reason.json').write_text(json.dumps(interruption_record('00458380', 3, 20)))
             self.assertEqual(autoverify.interruption_details(cur, 0x458380)[0], 'timeout')
             self.assertEqual(autoverify.interruption_details(cur, 0x48C980)[0], 'interrupted')
+
+
+class InventorySweepTests(unittest.TestCase):
+    def setUp(self):
+        root = tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        self.sweep = Path(root.name) / 'sweep'
+        self.auto = Path(root.name) / 'auto'
+        self.sweep.mkdir()
+        self.auto.mkdir()
+        self.inputs = {'rebuilt.exe': 'a' * 64}
+        manifest = {'format': 2, 'inputs': self.inputs, 'options': [], 'shards': 2,
+                    'auto': {'path': str(self.auto), 'files': fingerprint_tree(self.auto)}}
+        (self.sweep / 'manifest.json').write_text(json.dumps(manifest))
+        summary = {'complete': True, 'shard_exit_codes': [0, 0], 'rows': 2,
+                   'verdicts': {'verified': 1, 'timeout': 1}}
+        (self.sweep / 'summary.json').write_text(json.dumps(summary))
+        (self.sweep / 'av_0.tsv').write_text('004402A0\tverified\t0.75\t30 ok\n')
+        (self.sweep / 'av_1.tsv').write_text('0048CC40\ttimeout\t0.00\twall-clock limit\n')
+
+    def load(self, inputs):
+        return read_sweep(self.sweep, inputs, self.auto, {0x4402A0, 0x48CC40})
+
+    def test_preserves_raw_verdicts_only_for_the_matching_build(self):
+        rows, sweep = self.load(self.inputs)
+        self.assertEqual(rows['0048CC40']['verdict'], 'timeout')
+        self.assertEqual(rows['004402A0']['normal_coverage'], 0.75)
+        self.assertEqual(sweep['rows'], 2)
+        with self.assertRaisesRegex(ValueError, 'different build inputs'):
+            self.load({'rebuilt.exe': 'b' * 64})
+
+    def test_summary_cannot_hide_an_incomplete_or_duplicate_shard(self):
+        shard = self.sweep / 'av_0.tsv'
+        row = shard.read_text()
+        shard.write_text('')
+        with self.assertRaisesRegex(ValueError, 'missing 1 expected addresses'):
+            self.load(self.inputs)
+        shard.write_text(row * 2)
+        with self.assertRaisesRegex(ValueError, 'duplicate address 004402A0'):
+            self.load(self.inputs)
 
 
 if __name__ == '__main__':
