@@ -8,8 +8,9 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from difftest import Harness
+from difftest import HEAP, HEAP_SIZE, Harness
 from autoverify import FastHarness
+from unicorn import UC_HOOK_CODE
 from unicorn.x86_const import UC_X86_REG_ECX
 from exe2obj import write_coff, IMAGE_REL_I386_DIR32
 
@@ -99,6 +100,27 @@ class HarnessControlTests(unittest.TestCase):
         self.assertIsNotNone(second[0]['fault'])
         self.assertEqual(h.normal_cov, successful)
         self.assertGreater(sum(n for _, n in h.cov), sum(n for _, n in h.normal_cov))
+
+    def test_heap_snapshots_capture_guest_and_host_writes_across_pages(self):
+        # A guest store crosses the last two heap pages, well beyond the input allocator.
+        address = HEAP + HEAP_SIZE - 0x1002
+        original = b'\xc7\x05' + struct.pack('<II', address, 0x12345678) + b'\xc3'
+        replacement = b'\xc3'
+        h = self.harness(original, replacement, FastHarness)
+        h.setup_regions()
+        h.cov_lo, h.cov_hi = self.ENTRY, self.ENTRY + len(original)
+        h.new_head = bytes(h.uc.mem_read(self.ENTRY, len(original)))
+        h.uc.mem_write(address, b'abcdefgh')
+
+        def write_in_import(uc, pc, size, user):
+            uc.mem_write(address + 2, b'XY')
+
+        h.uc.hook_add(UC_HOOK_CODE, write_in_import, begin=self.ENTRY + 0x100, end=self.ENTRY + 0x100)
+        (_, first), (_, second) = h.run_case(self.ENTRY, original, [], {}, None, 0, self.ENTRY)
+        offset = address - HEAP
+        self.assertEqual(first[-2][offset:offset + 8], b'xV4\x12efgh')
+        self.assertEqual(second[-2][offset:offset + 8], b'abXYefgh')
+        self.assertEqual(bytes(h.uc.mem_read(address, 8)), b'abcdefgh')
 
 
 if __name__ == '__main__':

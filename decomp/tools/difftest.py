@@ -78,7 +78,8 @@ class Harness:
         self.uc.mem_map(self.rb.base, size, UC_PROT_ALL)
         self.uc.mem_write(self.rb.base, img)
         self.img_range = (self.rb.base, self.rb.base + size)
-        for base, sz in ((HEAP, HEAP_SIZE), (STACK, STACK_SIZE), (IMPBASE, 0x10000), (STOP, 0x1000), (TEB, 0x1000)):
+        self._map_heap()
+        for base, sz in ((STACK, STACK_SIZE), (IMPBASE, 0x10000), (STOP, 0x1000), (TEB, 0x1000)):
             self.uc.mem_map(base, sz, UC_PROT_ALL)
         self.uc.mem_write(STOP, b'\xf4')
         # TEB: fs:[0] = end of SEH chain, fs:[0x18] = TEB
@@ -104,6 +105,9 @@ class Harness:
                     self.uc.mem_write(self.to_rebuilt(i.address), struct.pack('<I', fake))
         self.uc.hook_add(UC_HOOK_CODE, self._on_import, begin=IMPBASE, end=IMPBASE + 0x10000)
         self.heap_ptr = HEAP + 0x10
+
+    def _map_heap(self):
+        self.uc.mem_map(HEAP, HEAP_SIZE, UC_PROT_ALL)
 
     def _setup_fs(self):
         """flat code/data segments and FS -> TEB through a GDT (SEH frames read fs:[0])"""

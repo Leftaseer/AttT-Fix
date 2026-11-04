@@ -18,10 +18,10 @@ coverage reached before faults is retained separately as coverage_all in the det
     interrupted the previous worker stopped without a known termination cause
 
 usage: autoverify.py ORIG.exe REBUILT.exe REBUILT.map AUTO_DIR WORK_DIR OUT.tsv [--n 16] [--only ADDR,...]"""
-import argparse, os, re, struct, sys, random, json, time
+import argparse, ctypes, os, re, struct, sys, random, json, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from difftest import Harness, STOP, HEAP, HEAP_SIZE, STACK, STACK_SIZE
-from unicorn import UcError, UC_HOOK_BLOCK, UC_PROT_ALL
+from unicorn import UcError, UC_HOOK_BLOCK, UC_HOOK_MEM_WRITE, UC_PROT_ALL
 from unicorn.x86_const import *
 
 REGS = {'ECX': UC_X86_REG_ECX, 'EAX': UC_X86_REG_EAX, 'EDX': UC_X86_REG_EDX, 'EBX': UC_X86_REG_EBX,
@@ -30,7 +30,13 @@ MIN_OK, MIN_COV = 3, 0.5
 
 
 class FastHarness(Harness):
-    """Harness that saves/compares only the writable regions (data section, used heap, stack)."""
+    """Compare writable image data, the heap and the caller's stack."""
+
+    def _map_heap(self):
+        # Keep the backing allocation alive for the engine's lifetime. Snapshot it
+        # directly to avoid the intermediate buffer and copy in Unicorn's mem_read.
+        self.heap_buffer = (ctypes.c_char * HEAP_SIZE)()
+        self.uc.mem_map_ptr(HEAP, HEAP_SIZE, UC_PROT_ALL, ctypes.addressof(self.heap_buffer))
 
     def setup_regions(self):
         self.regions = []
@@ -70,16 +76,14 @@ class FastHarness(Harness):
 
     def _on_block(self, uc, addr, size, user):
         if self.cov_on and self.cov_lo <= addr < self.cov_hi:
-            self.cov.add((addr, size))
             self.case_cov.add((addr, size))
 
     def run_case(self, entry, head, args, regs, ret, arg_bytes, va):
         """one call as original (head bytes) and one as replacement from the same memory and heap state;
-        returns [(registers, memory), (registers, memory)] (memory: writable regions, heap, caller's stack)"""
+        returns [(registers, memory), (registers, memory)], with snapshots for normal returns."""
         hp0 = self.heap_ptr
-        # the whole heap, not just the used part: the callees allocate past it (0x555070's chain took another
-        # ~240 KiB) and what the first run leaves up there changes what the second reads
-        heap0 = bytes(self.uc.mem_read(HEAP, HEAP_SIZE))
+        # Callees may allocate beyond the input objects, so snapshot the entire heap.
+        heap0 = bytes(self.heap_buffer)
         runs = []
         for h in (head, None):
             self.heap_ptr = hp0
@@ -92,15 +96,19 @@ class FastHarness(Harness):
             if getattr(self, 'watching', False):
                 print(' run', 'orig' if h is not None else 'new')
             r = self.call(entry, args, regs)
-            if self.cov_on and not r['fault']:
-                self.normal_cov.update(self.case_cov)
+            if self.cov_on:
+                self.cov.update(self.case_cov)
+                if not r['fault']:
+                    self.normal_cov.update(self.case_cov)
             self.cov_on = False
             if h is not None:
                 self.uc.mem_write(entry, self.new_head)
-            mem = [bytes(self.uc.mem_read(b, n)) for b, n in self.regions]
-            mem.append(bytes(self.uc.mem_read(HEAP, HEAP_SIZE)))
-            keep = STACK + STACK_SIZE - self.arg_sp
-            mem.append(bytes(self.uc.mem_read(self.arg_sp, keep)))
+            mem = None
+            if not r['fault']:
+                mem = [bytes(self.uc.mem_read(b, n)) for b, n in self.regions]
+                mem.append(bytes(self.heap_buffer))
+                keep = STACK + STACK_SIZE - self.arg_sp
+                mem.append(bytes(self.uc.mem_read(self.arg_sp, keep)))
             runs.append((r, mem))
             for b, n in self.regions:
                 self.uc.mem_write(b, self.pristine[b])
@@ -154,12 +162,19 @@ def no_nan(v):
 
 def make_object(h, rnd, size, depth):
     size = max(16, min(size, 0x2000))
-    data = bytearray(rnd.getrandbits(8) for _ in range(size))
-    for o in range(0, size - 3, 4):
-        struct.pack_into('<I', data, o, no_nan(struct.unpack_from('<I', data, o)[0]))
+    if sys.implementation.name == 'cpython' and type(rnd) is random.Random:
+        # CPython consumes one MT word for each getrandbits(8), taking its high byte.
+        # Draw the same words in bulk and keep those bytes without changing the seeded inputs.
+        data = bytearray(rnd.getrandbits(32 * size).to_bytes(4 * size, 'little')[3::4])
+    else:
+        data = bytearray(rnd.getrandbits(8) for _ in range(size))
+    if NONAN:
+        for o in range(0, size - 3, 4):
+            struct.pack_into('<I', data, o, no_nan(struct.unpack_from('<I', data, o)[0]))
+    pointer_rate = 0.15 + PTR_RATE[0] / 2 if depth > 0 else 0.0
     for o in range(0, size - 3, 4):
         c = rnd.random()
-        if c < 0.15 + PTR_RATE[0] / 2 and depth > 0:
+        if c < pointer_rate:
             struct.pack_into('<I', data, o, make_object(h, rnd, 256, depth - 1))
         elif c < 0.45:
             struct.pack_into('<I', data, o, rand_dword(rnd))
@@ -251,7 +266,6 @@ def main():
     h.steps = a.steps
     if a.watch:
         h.watching = True
-        from unicorn import UC_HOOK_MEM_WRITE
         h.uc.hook_add(UC_HOOK_MEM_WRITE, lambda uc, acc, addr, size, val, u: print(
             '  write %08X <- %0*X at %08X' % (addr, 2 * size, val & ((1 << 8 * size) - 1), uc.reg_read(UC_X86_REG_EIP))),
             begin=a.watch - 7, end=a.watch + 7)
@@ -412,7 +426,7 @@ def main():
                     diff.append('st0 %r %r' % (r1['st0'], r2['st0']))
                 for i, (x, y) in enumerate(zip(m1, m2)):
                     if x != y:
-                        j = next(j for j in range(len(x)) if x[j] != y[j])
+                        j = next(j for j, (a, b) in enumerate(zip(x, y)) if a != b)
                         base = (h.regions + [(HEAP, 0), (h.arg_sp, 0)])[i][0]
                         diff.append('mem %08X: %s / %s' % (base + j, x[j:j + 8].hex(), y[j:j + 8].hex()))
                         break

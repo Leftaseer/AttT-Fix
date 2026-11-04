@@ -42,15 +42,34 @@ reproduction. The fixture and both generations of focused sweep results are unde
 
 ## Full v57 plain sweep
 
-The current 9,661-address run is under `/home/attt-dev/work/v57-full-sweep-20261104/`. It uses seed 1,
-30 cases per entry, FPCW `0x027f`, a five-million-instruction call limit and a 120-second function limit.
-The 96 shards share one manifest that identifies the v57 plain binary, map, generated sources and tools.
+The v57 plain sweep completed all 9,661 addresses in 70 minutes with 24 workers and 96 shards. It used
+seed 1, 30 cases per entry, FPCW `0x027f`, a five-million-instruction call limit and a 120-second
+function limit. Its final inventory reconciles 3,622 verified, 4,736 low coverage, 998 unsupported,
+285 timeout, 13 differs and 7 faultdiff verdicts. The manifest, rows and inventory are under
+`/home/attt-dev/work/v57-full-sweep-20261104/`.
 
 `verification_inventory.py --sweep DIR` attaches raw verdicts from a completed run. It checks the input
 hashes and generated sources, then reconciles the exact expected address list in each shard and the final
 summary. A timeout or other limited verdict stays visible beside any direct fixture evidence. The completed
 three-address timeout recheck exercised the importer. Controls for a different build, missing addresses
 and duplicate addresses pass, and the tooling suite now has 44 passing tests.
+
+## Sweep performance
+
+The verifier now draws the original PRNG words in bulk and keeps the same seeded input bytes.
+The emulator uses a host backed heap, allowing direct snapshots without Unicorn's intermediate
+read buffer. It still restores the entire heap before the next call and compares the entire heap
+on normal returns. Block coverage merges once per call, keeping separate totals for all calls and
+normal returns. The test suite checks the original generator's byte hashes and RNG state, and
+verifies guest and host writes across a heap page boundary. All 46 tooling tests pass.
+
+Benchmark evidence is under `/home/attt-dev/work/sweep-performance/`. It uses the archived
+`0cddb4d` verifier and the current verifier on the exact v57 plain binary. The six-worker sample
+contains 324 addresses, including the 20 original `differs` and `faultdiff` addresses. Both
+runs use 30 cases, seed 1, FPCW `0x027f`, 300,000 instructions per call, and a 60-second
+wall limit per function. The controlled comparison went from 126.82 to 58.40 seconds of wall
+time and from 676.65 to 307.29 aggregate CPU seconds. All 324 TSV rows match byte for byte after
+sorting. The full v57 sweep used higher limits, so these timings apply to the sample.
 
 ## Structured grid lookup and allocator recheck
 

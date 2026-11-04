@@ -1,4 +1,5 @@
 """Replacement selection and floating-point input policy must not create false verification claims."""
+import hashlib
 from pathlib import Path
 import random
 import json
@@ -31,6 +32,33 @@ class SelectionTests(unittest.TestCase):
 
 
 class FloatingInputTests(unittest.TestCase):
+    def test_object_generation_preserves_seeded_bytes_and_rng_position(self):
+        class Heap:
+            def __init__(self):
+                self.data = bytearray()
+
+            def alloc(self, size, data):
+                self.data.extend(bytes(-len(self.data) % 16))
+                address = 0x20000000 + len(self.data)
+                self.data.extend(data)
+                return address
+
+        # Captured with the original byte-at-a-time generator at seed 5714.
+        expected = {
+            False: '832cd0acc532c95b7507badfa515ea39764413030207f451a63c03ca1dcb1a9c',
+            True: '92739da9d1416bfe9392820f8a75ea86a096af5562cb474f697d65caa31b07e1',
+        }
+        for finite_only, digest in expected.items():
+            with (
+                self.subTest(finite_only=finite_only),
+                patch.object(autoverify, 'NONAN', finite_only),
+                patch.object(autoverify, 'PTR_RATE', [0.6]),
+            ):
+                heap, rnd = Heap(), random.Random(5714)
+                self.assertEqual(autoverify.make_object(heap, rnd, 1027, 2), 0x200bd200)
+                self.assertEqual(hashlib.sha256(heap.data).hexdigest(), digest)
+                self.assertEqual(rnd.getrandbits(32), 3638602131)
+
     def test_default_keeps_nan_infinity_and_payload_bits(self):
         with patch.object(autoverify, 'NONAN', False):
             for bits in (0x7FC00001, 0x7F800001, 0xFFFFFFFF, 0x7F800000, 0xFF800000, 0x80000000):
