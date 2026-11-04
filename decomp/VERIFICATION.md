@@ -5,7 +5,7 @@ Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages. The user explicitly authorized running anything within the
 home directory; game tests now run from private WSL copies under `/home/attt-dev/work`.
 
-## VC8 formatting coverage
+## VC8 formatting and string append coverage
 
 The verifier models a bounded subset of narrow C-locale `_vsnprintf` and `sprintf`.
 It covers the common file-and-line and name-and-pointer formats, basic strings and
@@ -25,6 +25,32 @@ and instruction limits, the replay took 13 seconds and yielded four verified,
 39 low coverage and 222 unsupported verdicts, with no mismatches or timeouts.
 Of the remaining unsupported addresses, 213 reached VC8 `std::string::operator+=(const char*)`.
 The original and focused verdicts, trace and native probe are under
+`/home/attt-dev/work/verify-format-20261104/`.
+
+The append model writes in place when capacity permits, handles self-appends across
+reallocation, and uses VC8 capacity rounding and growth. It uses the verifier's deterministic heap
+and leaves invalid objects and allocations beyond its limits unsupported. A second
+probe executed the 32-bit MSVCP80 append export with the same deterministic allocator
+and matched all 17 cases, including full object and heap bytes, growth sizes, return
+registers and stack cleanup.
+
+The combined replay covered those 265 addresses and eight that originally stopped
+at the append import. The first pass took 49 seconds and returned **54 verified**,
+193 low coverage, 23 unsupported, two fault differences and one timeout.
+The timed-out address, `00489790`, finished with low coverage in 33 seconds
+on the separate 120-second retry.
+
+The fault differences are forest setters `005531A0` and `00553320`. Both random
+inputs have a nonzero array start and zero end. The original interprets the reversed
+ranges as unsigned counts of 4,159,863,164 and 4,159,865,788, then runs beyond the
+instruction limit in its empty loop. The compiled replacements omit that loop.
+The raw verdicts are retained. A separate fixture runs both versions on initialized
+forest objects with valid ranges of zero, three and sixteen entries and verifies
+their stored values, including a quiet NaN in the float setter.
+
+All **57 tooling tests** pass. Both existing candidates pass **46 differential tests
+and 820 normal comparison pairs**. The changes affect the verifier and fixtures only.
+The first pass, timeout retry, native append probe and forest traces are under
 `/home/attt-dev/work/verify-format-20261104/`.
 
 ## Import coverage and original entry restoration

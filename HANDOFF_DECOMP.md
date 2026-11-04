@@ -9,7 +9,13 @@ Keep the first pass and any selected 120-second retries in separate output direc
 first pass covered all 9,661 addresses in 29 minutes 9 seconds, with 488 timeouts. See
 `decomp/VERIFICATION.md` for the complete command and the comparison with the earlier run.
 
-**Current work: import coverage and original entry restoration.** Six import models were
+**Current work: VC8 formatting and string append coverage.** Windows DLL probes
+checked the new formatting and append models. A 273-address replay verified 54
+previously unsupported functions and exposed two raw forest setter fault differences
+from reversed synthetic ranges. Both setters match with valid initialized objects.
+See `decomp/VERIFICATION.md` for the models' limits and evidence.
+
+**Previous work: import coverage and original entry restoration.** Six import models were
 checked against their 32-bit Windows exports. The focused replay verified 18 previously
 unsupported addresses. A new string fixture exposed a partial instruction restore in the
 bounded harness. After the restore fix, both existing builds pass 45 differential tests and

@@ -158,6 +158,7 @@ class ImportModelTests(unittest.TestCase):
     SP = 0x1800
     LEFT, RIGHT = 0x2000, 0x2040
     SWAP = '?swap@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXAAV12@@Z'
+    APPEND = '??Y?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAAV01@PBD@Z'
 
     def setUp(self):
         self.h = Harness.__new__(Harness)
@@ -197,6 +198,34 @@ class ImportModelTests(unittest.TestCase):
             with self.subTest(other=other):
                 self.call('msvcp80.dll', self.SWAP, [other], self.LEFT)
                 self.assertIn('unsupported', self.h.fault)
+
+    def test_string_append_preserves_inline_storage_until_growth(self):
+        self.uc.mem_map(HEAP, 0x1000)
+        self.h.heap_ptr = HEAP
+        self.uc.mem_write(self.LEFT, b'AAAA' + b'a' * 14 + b'\0?' + struct.pack('<II', 14, 15))
+        self.uc.mem_write(self.RIGHT, b'Z\0')
+        self.assertEqual(self.call('msvcp80.dll', self.APPEND, [self.RIGHT], self.LEFT), self.LEFT)
+        self.assertIsNone(self.h.fault)
+        self.assertEqual(self.uc.mem_read(self.LEFT + 4, 16), b'a' * 14 + b'Z\0')
+        self.assertEqual(self.h.heap_ptr, HEAP)
+        self.call('msvcp80.dll', self.APPEND, [self.LEFT + 4 + 13], self.LEFT)
+        self.assertIsNone(self.h.fault)
+        self.assertEqual(self.uc.mem_read(self.LEFT, 8), b'AAAA' + struct.pack('<I', HEAP))
+        self.assertEqual(struct.unpack('<II', self.uc.mem_read(self.LEFT + 20, 8)), (17, 31))
+        self.assertEqual(self.uc.mem_read(HEAP, 18), b'a' * 14 + b'ZaZ\0')
+        self.assertEqual(self.h.heap_ptr, HEAP + 32)
+
+    def test_string_append_uses_vc8_capacity_growth_for_heap_strings(self):
+        self.uc.mem_map(HEAP, 0x1000)
+        self.h.heap_ptr = HEAP
+        old = 0x2100
+        self.uc.mem_write(self.LEFT, b'AAAA' + struct.pack('<I', old) + b'?' * 12 + struct.pack('<II', 63, 63))
+        self.uc.mem_write(old, b'a' * 63 + b'\0')
+        self.call('msvcp80.dll', self.APPEND, [old + 62], self.LEFT)
+        self.assertIsNone(self.h.fault)
+        self.assertEqual(struct.unpack('<II', self.uc.mem_read(self.LEFT + 20, 8)), (64, 94))
+        self.assertEqual(self.uc.mem_read(HEAP, 65), b'a' * 64 + b'\0')
+        self.assertEqual(self.h.heap_ptr, HEAP + 95)
 
     def test_rectangle_writes_preserve_signed_bits_and_wrap(self):
         for name, args, expected in [

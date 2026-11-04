@@ -106,3 +106,25 @@ def test_bounded_position_setter(h):
         h.uc.mem_write(address, saved)
         h.uc.ctl_remove_cache(address, address + len(saved))
     return diffs
+
+
+def test_initialized_forest_scalar_setters(h):
+    from unicorn.x86_const import UC_X86_REG_ECX
+    diffs = []
+    for count in (0, 3, 16):
+        data = h.alloc(count * 4, bytes(count * 4)) if count else 0
+        for address, offset, value, ret in [
+            (0x005531A0, 0x12c, struct.pack('<f', 1.25), None),
+            (0x005531A0, 0x12c, struct.pack('<I', 0x7fc00000), None),
+            (0x00553320, 0x11d, b'\x01', 'eax'),
+        ]:
+            obj = h.alloc(0x130, bytes(0x130))
+            h.uc.mem_write(obj + 0x11c, b'\x01')
+            h.uc.mem_write(obj + 0x68, struct.pack('<II', data, data + count * 4))
+            args = [int.from_bytes(value, 'little')]
+            regs = {UC_X86_REG_ECX: obj}
+            diffs += h.compare(address, args=args, regs=regs, ret=ret)
+            result = h.call(h.to_rebuilt(address), args=args, regs=regs)
+            if result['fault'] or h.uc.mem_read(obj + offset, len(value)) != value:
+                diffs.append('%08X failed for %d forest entries: %r' % (address, count, result))
+    return diffs

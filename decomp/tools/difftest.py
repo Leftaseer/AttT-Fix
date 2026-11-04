@@ -30,7 +30,7 @@ STACK = 0x30000000
 STACK_SIZE = 0x00100000
 TEB = 0x7FFD0000
 SSE2_AVAILABLE = 0x008D18C0   # AttT's __sse2_available, set by __cpu_features_init before main
-PRINTF_LIMIT = 0x10000
+IMPORT_STRING_LIMIT = 0x10000
 PRINTF_SPEC = re.compile(rb'%(?:[%scp]|[0-9]{0,3}[diuxXo])')
 
 
@@ -49,6 +49,7 @@ STRING_ALIAS = {
     '?data@' + _S + 'QBEPBDXZ': 'str_cstr',
     '?size@' + _S + 'QBEIXZ': 'str_size', '?length@' + _S + 'QBEIXZ': 'str_size',
     '?swap@' + _S + 'QAEXAAV12@@Z': 'str_swap',
+    '??Y' + _S + 'QAEAAV01@PBD@Z': 'str_append_cstr',
     '?substr@' + _S + 'QBE?AV12@II@Z': 'str_substr', '?find@' + _S + 'QBEIDI@Z': 'str_find_char',
     # (free operators, __cdecl: a result string through a hidden pointer first)
     _OP + '?HDU' + _T + 'YA?AV' + _B + 'ABV10@PBD@Z': 'str_plus_cstr',
@@ -296,6 +297,49 @@ class Harness:
         self.uc.mem_write(other + 4, a)
         self._ret(other, 4)
 
+    def crt_str_append_cstr(self):
+        this, source = self._ecx(), self._arg(0)
+        try:
+            if not this or not source:
+                raise Unsupported('null object or source')
+            size, cap = struct.unpack('<II', self.uc.mem_read(this + 20, 8))
+            if not 15 <= cap <= IMPORT_STRING_LIMIT or size > cap:
+                raise Unsupported('invalid or oversized object')
+            data = this + 4
+            if cap >= 16:
+                data, = struct.unpack('<I', self.uc.mem_read(data, 4))
+            if not data or self.uc.mem_read(data + size, 1) != b'\0':
+                raise Unsupported('invalid string storage')
+            if data + size < source <= data + cap:
+                raise Unsupported('source points past the end of the string')
+            # Read before reallocating. For an internal source, VC8 retains its offset
+            # across a grow, so a suffix can be appended to the same object.
+            suffix = self._bounded_cstr(source)
+            new_size = size + len(suffix)
+            if new_size > IMPORT_STRING_LIMIT:
+                raise Unsupported('output exceeds verifier limit')
+            if new_size > cap:
+                new_cap = new_size | 15
+                if new_cap // 3 < cap // 2:
+                    new_cap = cap + cap // 2
+                if new_cap > IMPORT_STRING_LIMIT:
+                    raise Unsupported('capacity exceeds verifier limit')
+                allocation = (self.heap_ptr + 15) & ~15
+                if allocation + new_cap + 1 > HEAP + HEAP_SIZE:
+                    raise Unsupported('verifier heap exhausted')
+                prefix = bytes(self.uc.mem_read(data, size))
+                data = self.alloc(new_cap + 1, prefix)
+                self.uc.mem_write(this + 4, struct.pack('<I', data))
+                self.uc.mem_write(this + 24, struct.pack('<I', new_cap))
+            if suffix:
+                self.uc.mem_write(data + size, suffix + b'\0')
+                self.uc.mem_write(this + 20, struct.pack('<I', new_size))
+        except (Unsupported, UcError) as error:
+            self.uc.emu_stop()
+            self.fault = 'unsupported std::string::append: %s' % error
+            return
+        self._ret(this, 4)
+
     def crt_str_substr(self):
         def go(t):
             ret, pos, n = self._arg(0), self._arg(1), self._arg(2)
@@ -381,10 +425,10 @@ class Harness:
         self.uc.mem_write(d, bytes(self.uc.mem_read(src, n)))
         self._ret(0)
 
-    def _printf_string(self, addr):
+    def _bounded_cstr(self, addr):
         data = bytearray()
-        while len(data) < PRINTF_LIMIT:
-            n = min(64, PRINTF_LIMIT - len(data), 0x1000 - (addr & 0xfff))
+        while len(data) < IMPORT_STRING_LIMIT:
+            n = min(64, IMPORT_STRING_LIMIT - len(data), 0x1000 - (addr & 0xfff))
             chunk = self.uc.mem_read(addr, n)
             end = chunk.find(0)
             if end >= 0:
@@ -412,7 +456,7 @@ class Harness:
             value, = struct.unpack('<I', self.uc.mem_read(args, 4))
             args += 4
             if code == ord('s'):
-                out.extend(self._printf_string(value) if value else b'(null)')
+                out.extend(self._bounded_cstr(value) if value else b'(null)')
             elif code == ord('p'):
                 out.extend(b'%08X' % value)
             elif code == ord('c'):
@@ -421,10 +465,10 @@ class Harness:
                 if code in b'di' and value >= 0x80000000:
                     value -= 0x100000000
                 out.extend(spec[0] % value)
-            if len(out) >= PRINTF_LIMIT:
+            if len(out) >= IMPORT_STRING_LIMIT:
                 raise Unsupported('output exceeds verifier limit')
         out.extend(fmt[pos:])
-        if len(out) >= PRINTF_LIMIT:
+        if len(out) >= IMPORT_STRING_LIMIT:
             raise Unsupported('output exceeds verifier limit')
         return out
 
@@ -434,7 +478,7 @@ class Harness:
                 raise Unsupported('invalid buffer or format pointer')
             if cap >= 0x80000000:
                 raise Unsupported('capacity outside modeled range')
-            out = self._format_printf(self._printf_string(fmt), args)
+            out = self._format_printf(self._bounded_cstr(fmt), args)
             if dst and len(out) >= cap:
                 # The native runtime writes errno on a full buffer. The verifier has no errno state.
                 raise Unsupported('output buffer fills before terminator')
