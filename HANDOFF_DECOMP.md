@@ -9,7 +9,14 @@ Keep the first pass and any selected 120-second retries in separate output direc
 first pass covered all 9,661 addresses in 29 minutes 9 seconds, with 488 timeouts. See
 `decomp/VERIFICATION.md` for the complete command and the comparison with the earlier run.
 
-**Current work: full v57 plain sweep and float edge fixes.** The 9,661-address baseline sweep is under
+**Current work: sound and geometry candidate.** Seven further translations have bounded
+regressions, including Sound3D volume and terrain transform translation. The plain and debug
+builds pass 43 differential tests and 795 normal comparison pairs. The plain build passes a
+Wine save roundtrip with AttTFix 2.1.2. The 21-address rerun retains four raw differences and
+six fault differences with separate diagnostic and valid-input evidence. Build hashes and
+evidence are in `decomp/VERIFICATION.md`.
+
+**Previous work: full v57 plain sweep and float edge fixes.** The 9,661-address baseline sweep is under
 `/home/attt-dev/work/v57-full-sweep-20261104/`. The inventory tool can attach its completed verdicts
 after reconciling all shards against the exact build. Seven confirmed mismatches in integer coordinate
 bounds and mesh position setters are corrected in the local candidate, with the raw v57 results preserved.

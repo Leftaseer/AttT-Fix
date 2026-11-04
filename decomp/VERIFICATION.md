@@ -5,6 +5,49 @@ Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages. The user explicitly authorized running anything within the
 home directory; game tests now run from private WSL copies under `/home/attt-dev/work`.
 
+## Sound and geometry candidate
+
+The 20 v57 mismatch addresses were replayed on the float edge candidate. Six verified and
+14 retained their raw differences. The next candidate corrects seven translations.
+
+| Address | Restored behavior |
+|---|---|
+| `004C2C00` | Sound volume takes the original conversion path for an unordered input, passes the same signed volume bits to DirectSound, and retains the input's raw float bits. |
+| `0042AC80` | The track guard compares integer indices and rounds the angle, segment difference and trigonometric results as in the original. |
+| `00456B20` | The plane-height calculation negates the denominator before dividing, preserving the NaN sign. |
+| `005201B0` | The track delta is rounded to float32 before either axis is scaled. |
+| `0058F2B0` | The triangle-side test rounds each difference and the final cross product to float32 and accepts unordered values. |
+| `004ACB80` | The turn update takes the same unordered branches and writes the same state. |
+| `0052CDF0` | The terrain transform copies all 16 matrix entries, including the final three translation coordinates. |
+
+Both candidate builds pass **43 differential tests and 795 normal comparison pairs**. All 47
+tooling tests pass. Both builds retain 10,167 replacements, pass relink verification with zero
+mismatches, and preserve all 110 native functions required by AttTFix. The plain candidate
+completed a Wine save roundtrip with AttTFix 2.1.2 active, with zero decoded save-state
+differences and no game error files. The volume fixture mocks DirectSound, and the terrain
+fixture uses synthetic heights and the verifier's D3DX implementation.
+
+| Binary under `/home/attt-dev/re/sweep-candidate-20261104/` | SHA-256 |
+|---|---|
+| `plain/ATThrone.exe` | `78a926ed0024614f92d12ed3bf225ae835b5395781dbb1d3f4899a266e54a45d` |
+| `debug/ATThrone_debug.exe` | `8e02ed28d2beef357bec6bf46a38d7e0936051b6aa10dd95c4d018a83f7ec1a4` |
+
+The 21-address rerun covers the 20 v57 mismatches plus the sound setter. It yields 10 verified,
+four differs, six faultdiff and one low coverage verdict. The sound setter returns normally
+in eight random pairs, with 0.11 normal-return coverage. The four raw `differs` are retained.
+
+- `00430850` and `0055B850` copy one allocator byte from differently laid out stack storage.
+  Initializing only the traced constructor input verifies 30/30 for each in diagnostic runs.
+- `004ACB80` and `0052CDF0` retain differences in EAX pointers into their temporary stack
+  frames. A separate diagnostic compares the remaining registers and memory after neutralizing
+  only those two temporary pointers. It yields 20 and seven matching normal pairs respectively.
+- The six `faultdiff` addresses have existing valid-input contracts. Their random inputs use
+  invalid graphics targets, empty selection ranges, invalid unit pointers or a range that exceeds
+  the emulator's instruction limit. See the [v55 contract table](#v55-recheck-of-the-15-previously-flagged-addresses).
+
+Reports and controls are under `/home/attt-dev/work/sound-and-sweep-20261104/`. The Wine
+run is `/home/attt-dev/work/wine-tests/sweep-candidate-attfix-roundtrip-k2dc5q5o/`.
+
 ## Recommended full sweep
 
 Start with 16 workers and native coverage. With the original seed and instruction cap, use
