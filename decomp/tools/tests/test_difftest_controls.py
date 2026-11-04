@@ -166,7 +166,7 @@ class ImportModelTests(unittest.TestCase):
         self.uc.mem_write(self.ENTRY, b'\xc3')
         self.uc.hook_add(UC_HOOK_CODE, self.h._on_import, begin=self.ENTRY, end=self.ENTRY)
 
-    def call(self, dll, name, args, this=0):
+    def call(self, dll, name, args, this=0, cdecl=False):
         self.h.imp_by_addr = {self.ENTRY: (dll, name)}
         self.h.fault = None
         self.uc.reg_write(UC_X86_REG_ECX, this)
@@ -174,7 +174,8 @@ class ImportModelTests(unittest.TestCase):
         self.uc.mem_write(self.SP, struct.pack('<' + 'I' * (len(args) + 1), self.STOP, *args))
         self.uc.emu_start(self.ENTRY, self.STOP, count=2)
         if self.h.fault is None:
-            self.assertEqual(self.uc.reg_read(UC_X86_REG_ESP), self.SP + 4 * (1 + len(args)))
+            popped = 1 if cdecl else 1 + len(args)
+            self.assertEqual(self.uc.reg_read(UC_X86_REG_ESP), self.SP + 4 * popped)
         return self.uc.reg_read(UC_X86_REG_EAX)
 
     def test_string_swap_keeps_allocators_and_moves_the_full_union(self):
@@ -216,6 +217,45 @@ class ImportModelTests(unittest.TestCase):
                 args = [self.LEFT, x & 0xffffffff, y & 0xffffffff]
                 self.assertEqual(self.call('user32.dll', 'PtInRect', args), expected)
         self.assertEqual(self.call('user32.dll', 'PtInRect', [0, 0, 0]), 0)
+
+    def test_printf_models_use_vc8_values_and_cdecl_stack_cleanup(self):
+        fmt = self.LEFT
+        dst = self.RIGHT
+        va_list = 0x2080
+        self.uc.mem_write(fmt, b'%s %p %04d %u %%\0')
+        words = (0, 0xabc, 0xffffffff, 0xffffffff)
+        self.uc.mem_write(va_list, struct.pack('<4I', *words))
+        expected = b'(null) 00000ABC -001 4294967295 %'
+        for name, args in [
+            ('_vsnprintf', [dst, 64, fmt, va_list]),
+            ('sprintf', [dst, fmt, *words]),
+        ]:
+            with self.subTest(name=name):
+                self.uc.mem_write(dst, b'?' * 64)
+                self.assertEqual(self.call('msvcr80.dll', name, args, cdecl=True), len(expected))
+                self.assertIsNone(self.h.fault)
+                self.assertEqual(self.uc.mem_read(dst, len(expected) + 2), expected + b'\0?')
+
+    def test_vsnprintf_handles_count_query_and_page_boundary(self):
+        fmt = 0x2ffe
+        self.uc.mem_write(fmt, b'x\0')
+        self.assertEqual(self.call('msvcr80.dll', '_vsnprintf', [0, 0, fmt, 0], cdecl=True), 1)
+        self.assertIsNone(self.h.fault)
+        self.assertEqual(self.call('msvcr80.dll', '_vsnprintf', [self.LEFT, 2, fmt, 0], cdecl=True), 1)
+        self.assertEqual(self.uc.mem_read(self.LEFT, 2), b'x\0')
+
+    def test_vsnprintf_stops_on_truncation_and_unsupported_conversions(self):
+        fmt = self.LEFT
+        dst = self.RIGHT
+        for text, cap, reason in [(b'abc', 3, 'terminator'), (b'abc', 2, 'terminator'),
+                                  (b'%.2f', 32, 'conversion'), (b'%n', 32, 'conversion')]:
+            with self.subTest(text=text, cap=cap):
+                self.uc.mem_write(fmt, text + b'\0')
+                self.uc.mem_write(dst, b'?' * 32)
+                self.call('msvcr80.dll', '_vsnprintf', [dst, cap, fmt, 0], cdecl=True)
+                self.assertIn('unsupported import msvcr80.dll!_vsnprintf', self.h.fault)
+                self.assertIn(reason, self.h.fault)
+                self.assertEqual(self.uc.mem_read(dst, 32), b'?' * 32)
 
 
 if __name__ == '__main__':

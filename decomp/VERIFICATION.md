@@ -5,6 +5,28 @@ Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages. The user explicitly authorized running anything within the
 home directory; game tests now run from private WSL copies under `/home/attt-dev/work`.
 
+## VC8 formatting coverage
+
+The verifier models a bounded subset of narrow C-locale `_vsnprintf` and `sprintf`.
+It covers the common file-and-line and name-and-pointer formats, basic strings and
+characters, 32-bit integers with width and zero padding, and literal percent signs.
+Truncation and an exactly full non-null buffer stay unsupported because VC8 sets
+`errno` and the verifier has no `errno` state. Floating-point conversions and
+other unmodeled formats also stop the comparison.
+
+A probe executed the 32-bit Windows MSVCR80 exports with C-locale thread data and
+compared 99 supported cases, including cdecl stack cleanup, nonvolatile registers,
+the return value and output buffer. Three separate controls confirmed the native
+`errno` write on a full buffer. All 55 tooling tests pass.
+
+The focused plain-candidate replay selected all 265 addresses that first stopped
+at either formatting import in the full sweep. With the original case count, seed
+and instruction limits, the replay took 13 seconds and yielded four verified,
+39 low coverage and 222 unsupported verdicts, with no mismatches or timeouts.
+Of the remaining unsupported addresses, 213 reached VC8 `std::string::operator+=(const char*)`.
+The original and focused verdicts, trace and native probe are under
+`/home/attt-dev/work/verify-format-20261104/`.
+
 ## Import coverage and original entry restoration
 
 The verifier now models VC8 `std::string::swap` and five User32 rectangle APIs

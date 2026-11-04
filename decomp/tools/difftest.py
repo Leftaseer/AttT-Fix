@@ -30,6 +30,8 @@ STACK = 0x30000000
 STACK_SIZE = 0x00100000
 TEB = 0x7FFD0000
 SSE2_AVAILABLE = 0x008D18C0   # AttT's __sse2_available, set by __cpu_features_init before main
+PRINTF_LIMIT = 0x10000
+PRINTF_SPEC = re.compile(rb'%(?:[%scp]|[0-9]{0,3}[diuxXo])')
 
 
 class Unsupported(Exception):
@@ -378,6 +380,78 @@ class Harness:
             self._ret(22); return
         self.uc.mem_write(d, bytes(self.uc.mem_read(src, n)))
         self._ret(0)
+
+    def _printf_string(self, addr):
+        data = bytearray()
+        while len(data) < PRINTF_LIMIT:
+            n = min(64, PRINTF_LIMIT - len(data), 0x1000 - (addr & 0xfff))
+            chunk = self.uc.mem_read(addr, n)
+            end = chunk.find(0)
+            if end >= 0:
+                return bytes(data + chunk[:end])
+            data.extend(chunk)
+            addr += n
+        raise Unsupported('string exceeds verifier limit')
+
+    def _format_printf(self, fmt, args):
+        # Only the single-byte C locale and selected conversions of the x86 VC8 runtime.
+        out = bytearray()
+        pos = 0
+        while (start := fmt.find(b'%', pos)) >= 0:
+            out.extend(fmt[pos:start])
+            spec = PRINTF_SPEC.match(fmt, start)
+            if not spec:
+                raise Unsupported('conversion outside modeled subset')
+            pos = spec.end()
+            code = fmt[pos - 1]
+            if code == ord('%'):
+                out.append(code)
+                continue
+            if not args:
+                raise Unsupported('null argument list')
+            value, = struct.unpack('<I', self.uc.mem_read(args, 4))
+            args += 4
+            if code == ord('s'):
+                out.extend(self._printf_string(value) if value else b'(null)')
+            elif code == ord('p'):
+                out.extend(b'%08X' % value)
+            elif code == ord('c'):
+                out.append(value & 0xff)
+            else:
+                if code in b'di' and value >= 0x80000000:
+                    value -= 0x100000000
+                out.extend(spec[0] % value)
+            if len(out) >= PRINTF_LIMIT:
+                raise Unsupported('output exceeds verifier limit')
+        out.extend(fmt[pos:])
+        if len(out) >= PRINTF_LIMIT:
+            raise Unsupported('output exceeds verifier limit')
+        return out
+
+    def _crt_printf(self, name, dst, cap, fmt, args):
+        try:
+            if not fmt or (not dst and cap != 0):
+                raise Unsupported('invalid buffer or format pointer')
+            if cap >= 0x80000000:
+                raise Unsupported('capacity outside modeled range')
+            out = self._format_printf(self._printf_string(fmt), args)
+            if dst and len(out) >= cap:
+                # The native runtime writes errno on a full buffer. The verifier has no errno state.
+                raise Unsupported('output buffer fills before terminator')
+        except (Unsupported, UcError) as error:
+            self.uc.emu_stop()
+            self.fault = 'unsupported import msvcr80.dll!%s: %s' % (name, error)
+            return
+        if dst:
+            self.uc.mem_write(dst, bytes(out) + b'\0')
+        self._ret(len(out))
+
+    def crt_vsnprintf(self):
+        self._crt_printf('_vsnprintf', *(self._arg(i) for i in range(4)))
+
+    def crt_sprintf(self):
+        args = self.uc.reg_read(UC_X86_REG_ESP) + 12
+        self._crt_printf('sprintf', self._arg(0), 0x7fffffff, self._arg(1), args)
 
     def crt_malloc(self):
         self._ret(self.alloc(self._arg(0)))
