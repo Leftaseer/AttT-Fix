@@ -5,6 +5,38 @@ Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages. The user explicitly authorized running anything within the
 home directory; game tests now run from private WSL copies under `/home/attt-dev/work`.
 
+## Import coverage and original entry restoration
+
+The verifier now models VC8 `std::string::swap` and five User32 rectangle APIs
+(`SetRect`, `SetRectEmpty`, `OffsetRect`, `InflateRect` and `PtInRect`). A separate
+Unicorn probe executed the matching 32-bit Windows exports and checked 39 cases against the
+models. It compared EAX, stack cleanup, nonvolatile registers and complete object bytes.
+The cases include inline and heap-backed strings, self-swap, null rectangle pointers,
+coordinate overflow and signed point bounds. The string model leaves calls with null
+or overlapping objects classified as unsupported.
+
+The focused replay selected all 46 addresses whose first unsupported import in the
+full candidate sweep was one of these six exports. It used the same plain binary,
+seed, case count and instruction cap. The 30-second pass took 46 seconds and yielded
+18 verified, six low coverage, 16 unsupported and six timeouts. The 120-second replay
+of those six timeouts took 103 seconds and yielded four low coverage and two unsupported. The combined
+results have no mismatch verdicts. The remaining unsupported rows stop at
+`_decode_pointer` or at calls to `swap` with null or overlapping objects.
+
+The new string fixtures also exposed an error in the bounded differential harness.
+It restored only five bytes at the entry even when the relinker had changed the
+remaining bytes of a longer instruction. At `005A1D40` that corrupted the original's
+import address. The harness now restores whole instructions through the end of the
+jump span. The broad sweep already restores the whole function body.
+
+Both existing binaries pass **45 differential tests and 811 normal comparison pairs**
+after the fix, including 16 valid comparisons for the string median and partition
+helpers `005A1D40`, `005A2020` and `005A2780`. All **52 tooling tests** pass.
+The executable hashes below still identify both candidates. The original full sweep,
+the focused replay, and the retry each retain their own raw verdicts and manifest.
+The DLL identities, probe, logs and current differential reports are under
+`/home/attt-dev/work/verify-imports-20261104/`.
+
 ## Sound and geometry candidate
 
 The 20 v57 mismatch addresses were replayed on the float edge candidate. Six verified and

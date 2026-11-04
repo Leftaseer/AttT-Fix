@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from difftest import HEAP, HEAP_SIZE, Harness
 from autoverify import FastHarness, NativeCoverage
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE
-from unicorn.x86_const import UC_X86_REG_ECX
+from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_ESP
 from exe2obj import write_coff, IMAGE_REL_I386_DIR32
 
 
@@ -54,6 +54,14 @@ class HarnessControlTests(unittest.TestCase):
     def test_equal_implementations_pass(self):
         code = bytes.fromhex('b801000000 c3')
         self.assertEqual(self.harness(code, code).compare(self.ENTRY), [])
+
+    def test_original_entry_restores_the_entire_instruction_crossed_by_the_jump(self):
+        code = b'\x90\x8b\x05' + struct.pack('<I', self.VALUE) + b'\xc3'
+        h = self.harness(code, code)
+        h.uc.mem_write(self.VALUE, struct.pack('<I', 7))
+        h.uc.mem_write(self.ENTRY + 5, b'\0\0')
+        self.assertEqual(h.compare(self.ENTRY), [])
+        self.assertEqual(h.uc.mem_read(self.ENTRY + 5, 2), b'\0\0')
 
     def test_wrong_return_is_detected(self):
         h = self.harness(bytes.fromhex('b801000000 c3'), bytes.fromhex('b802000000 c3'))
@@ -143,6 +151,71 @@ class HarnessControlTests(unittest.TestCase):
         self.assertEqual(first[-2][offset:offset + 8], b'xV4\x12efgh')
         self.assertEqual(second[-2][offset:offset + 8], b'abXYefgh')
         self.assertEqual(bytes(h.uc.mem_read(address, 8)), b'abcdefgh')
+
+
+class ImportModelTests(unittest.TestCase):
+    ENTRY, STOP = 0x1000, 0x1100
+    SP = 0x1800
+    LEFT, RIGHT = 0x2000, 0x2040
+    SWAP = '?swap@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEXAAV12@@Z'
+
+    def setUp(self):
+        self.h = Harness.__new__(Harness)
+        self.uc = self.h.uc = Uc(UC_ARCH_X86, UC_MODE_32)
+        self.uc.mem_map(self.ENTRY, 0x2000)
+        self.uc.mem_write(self.ENTRY, b'\xc3')
+        self.uc.hook_add(UC_HOOK_CODE, self.h._on_import, begin=self.ENTRY, end=self.ENTRY)
+
+    def call(self, dll, name, args, this=0):
+        self.h.imp_by_addr = {self.ENTRY: (dll, name)}
+        self.h.fault = None
+        self.uc.reg_write(UC_X86_REG_ECX, this)
+        self.uc.reg_write(UC_X86_REG_ESP, self.SP)
+        self.uc.mem_write(self.SP, struct.pack('<' + 'I' * (len(args) + 1), self.STOP, *args))
+        self.uc.emu_start(self.ENTRY, self.STOP, count=2)
+        if self.h.fault is None:
+            self.assertEqual(self.uc.reg_read(UC_X86_REG_ESP), self.SP + 4 * (1 + len(args)))
+        return self.uc.reg_read(UC_X86_REG_EAX)
+
+    def test_string_swap_keeps_allocators_and_moves_the_full_union(self):
+        short = b'AAAA' + b'x\0' + b'!' * 14 + struct.pack('<II', 1, 15)
+        long = b'BBBB' + struct.pack('<I', 0x2080) + b'?' * 12 + struct.pack('<II', 20, 31)
+        heap = b'abcdefghijklmnopqrst\0'
+        self.uc.mem_write(self.LEFT, short)
+        self.uc.mem_write(self.RIGHT, long)
+        self.uc.mem_write(0x2080, heap)
+        self.call('msvcp80.dll', self.SWAP, [self.RIGHT], self.LEFT)
+        self.assertEqual(self.uc.mem_read(self.LEFT, 28), short[:4] + long[4:])
+        self.assertEqual(self.uc.mem_read(self.RIGHT, 28), long[:4] + short[4:])
+        self.assertEqual(self.uc.mem_read(0x2080, len(heap)), heap)
+        self.call('msvcp80.dll', self.SWAP, [self.LEFT], self.LEFT)
+        self.assertEqual(self.uc.mem_read(self.LEFT, 28), short[:4] + long[4:])
+
+    def test_string_swap_rejects_null_and_overlapping_objects(self):
+        for other in (0, self.LEFT + 4):
+            with self.subTest(other=other):
+                self.call('msvcp80.dll', self.SWAP, [other], self.LEFT)
+                self.assertIn('unsupported', self.h.fault)
+
+    def test_rectangle_writes_preserve_signed_bits_and_wrap(self):
+        for name, args, expected in [
+            ('SetRect', [0x7fffffff, 0x80000000, 0xffffffff, 0], (0x7fffffff, -0x80000000, -1, 0)),
+            ('OffsetRect', [1, 0xffffffff], (-0x80000000, 0x7fffffff, 0, -1)),
+            ('InflateRect', [0xffffffff, 2], (-0x7fffffff, 0x7ffffffd, -1, 1)),
+            ('SetRectEmpty', [], (0, 0, 0, 0)),
+        ]:
+            with self.subTest(name=name):
+                self.assertEqual(self.call('user32.dll', name, [self.LEFT, *args]), 1)
+                self.assertEqual(struct.unpack('<4i', self.uc.mem_read(self.LEFT, 16)), expected)
+                self.assertEqual(self.call('user32.dll', name, [0, *args]), 0)
+
+    def test_point_in_rectangle_uses_signed_half_open_bounds(self):
+        self.uc.mem_write(self.LEFT, struct.pack('<4i', -2, -3, 4, 5))
+        for x, y, expected in [(-2, -3, 1), (3, 4, 1), (-3, 0, 0), (0, -4, 0), (4, 0, 0), (0, 5, 0)]:
+            with self.subTest(x=x, y=y):
+                args = [self.LEFT, x & 0xffffffff, y & 0xffffffff]
+                self.assertEqual(self.call('user32.dll', 'PtInRect', args), expected)
+        self.assertEqual(self.call('user32.dll', 'PtInRect', [0, 0, 0]), 0)
 
 
 if __name__ == '__main__':

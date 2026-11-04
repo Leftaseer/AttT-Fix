@@ -3,8 +3,8 @@
 
 The rebuilt exe holds both versions of a replaced function: the new code, and the original body behind the
 5-byte jmp that build.py placed at its entry.  The harness maps the rebuilt image once, then runs the function
-twice from the same memory snapshot: once as original (entry bytes restored from the original exe) and once
-through the jmp.  It compares EAX, EDX, ST0 and every byte of writable memory (data, heap, stack).
+twice from the same memory snapshot: once with the original entry instructions restored and once through
+the jmp.  It compares EAX, EDX, ST0 and every byte of writable memory (data, heap, stack).
 
 Imports are emulated by small Python versions of the C runtime functions (CRT_IMPL); a test that reaches any
 other import stops with 'unsupported import'.
@@ -17,6 +17,7 @@ usage (from a test file):
 import os, sys, struct, math, re, random, json, hashlib
 from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 from pe import PE
 from unicorn import Uc, UcError, UC_ARCH_X86, UC_MODE_32, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_PROT_ALL
 from unicorn.x86_const import *
@@ -45,6 +46,7 @@ STRING_ALIAS = {
     '??4' + _S + 'QAEAAV01@PBD@Z': 'str_assign_cstr', '?c_str@' + _S + 'QBEPBDXZ': 'str_cstr',
     '?data@' + _S + 'QBEPBDXZ': 'str_cstr',
     '?size@' + _S + 'QBEIXZ': 'str_size', '?length@' + _S + 'QBEIXZ': 'str_size',
+    '?swap@' + _S + 'QAEXAAV12@@Z': 'str_swap',
     '?substr@' + _S + 'QBE?AV12@II@Z': 'str_substr', '?find@' + _S + 'QBEIDI@Z': 'str_find_char',
     # (free operators, __cdecl: a result string through a hidden pointer first)
     _OP + '?HDU' + _T + 'YA?AV' + _B + 'ABV10@PBD@Z': 'str_plus_cstr',
@@ -278,6 +280,19 @@ class Harness:
                      else struct.unpack('<I', self.uc.mem_read(t + 4, 4))[0], 0, ret_this=False)
     def crt_str_size(self):
         self._str_op(lambda t: struct.unpack('<I', self.uc.mem_read(t + 20, 4))[0], 0, ret_this=False)
+
+    def crt_str_swap(self):
+        this, other = self._ecx(), self._arg(0)
+        if not this or not other or 0 < abs(this - other) < 28:
+            self.uc.emu_stop()
+            self.fault = 'unsupported std::string::swap with null or overlapping objects'
+            return
+        # VC8 exchanges the entire union and both counters, leaving each allocator in place.
+        a = bytes(self.uc.mem_read(this + 4, 24))
+        b = bytes(self.uc.mem_read(other + 4, 24))
+        self.uc.mem_write(this + 4, b)
+        self.uc.mem_write(other + 4, a)
+        self._ret(other, 4)
 
     def crt_str_substr(self):
         def go(t):
@@ -575,6 +590,44 @@ class Harness:
         self._ret(n, 4)
     def crt_GetAsyncKeyState(self): self._ret(0, 4)
 
+    def crt_SetRect(self):
+        rect = self._arg(0)
+        if rect:
+            self.uc.mem_write(rect, struct.pack('<4I', *(self._arg(i) for i in range(1, 5))))
+        self._ret(int(bool(rect)), 20)
+
+    def crt_SetRectEmpty(self):
+        rect = self._arg(0)
+        if rect:
+            self.uc.mem_write(rect, bytes(16))
+        self._ret(int(bool(rect)), 4)
+
+    def _shift_rect(self, offsets):
+        rect = self._arg(0)
+        if rect:
+            coords = struct.unpack('<4I', self.uc.mem_read(rect, 16))
+            shifted = [(coord + offset) & 0xFFFFFFFF for coord, offset in zip(coords, offsets)]
+            self.uc.mem_write(rect, struct.pack('<4I', *shifted))
+        self._ret(int(bool(rect)), 12)
+
+    def crt_OffsetRect(self):
+        dx, dy = self._arg(1), self._arg(2)
+        self._shift_rect((dx, dy, dx, dy))
+
+    def crt_InflateRect(self):
+        dx, dy = self._arg(1), self._arg(2)
+        self._shift_rect((-dx, -dy, dx, dy))
+
+    def crt_PtInRect(self):
+        rect = self._arg(0)
+        inside = False
+        if rect:
+            left, top, right, bottom = struct.unpack('<4i', self.uc.mem_read(rect, 16))
+            sp = self.uc.reg_read(UC_X86_REG_ESP)
+            x, y = struct.unpack('<2i', self.uc.mem_read(sp + 8, 8))
+            inside = left <= x < right and top <= y < bottom
+        self._ret(int(inside), 12)
+
 
     # operator new/delete, more of the C runtime
     def crt_free_like(self):
@@ -790,8 +843,17 @@ class Harness:
 
         va = game_addr if game_addr is not None else self.game_address(attt_addr)
         entry = self.to_rebuilt(va)
-        orig_head = self.orig.read(va, 5)
-        new_head = bytes(self.uc.mem_read(entry, 5))
+        # The relinker can overwrite bytes through the end of the instruction crossed by
+        # the jump. Decode up to four leading bytes plus one maximum-length x86 instruction.
+        original = self.orig.read(va, 19)
+        for address, size, _, _ in Cs(CS_ARCH_X86, CS_MODE_32).disasm_lite(original, va):
+            span = address + size - va
+            if span >= 5:
+                break
+        else:
+            raise ValueError('%08X has no decodable original entry' % va)
+        orig_head = original[:span]
+        new_head = bytes(self.uc.mem_read(entry, span))
         if new_head[0] != 0xE9:
             raise ValueError('%08X is not replaced in the rebuilt exe' % va)
         heap0 = self.heap_ptr

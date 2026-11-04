@@ -9,7 +9,14 @@ Keep the first pass and any selected 120-second retries in separate output direc
 first pass covered all 9,661 addresses in 29 minutes 9 seconds, with 488 timeouts. See
 `decomp/VERIFICATION.md` for the complete command and the comparison with the earlier run.
 
-**Current work: sound and geometry candidate.** Seven further translations have bounded
+**Current work: import coverage and original entry restoration.** Six import models were
+checked against their 32-bit Windows exports. The focused replay verified 18 previously
+unsupported addresses. A new string fixture exposed a partial instruction restore in the
+bounded harness. After the restore fix, both existing builds pass 45 differential tests and
+811 normal comparison pairs. The full sweep already restores complete function bodies.
+See `decomp/VERIFICATION.md` for the replay limits and evidence.
+
+**Previous work: sound and geometry candidate.** Seven further translations have bounded
 regressions, including Sound3D volume and terrain transform translation. The plain and debug
 builds pass 43 differential tests and 795 normal comparison pairs. The plain build passes a
 Wine save roundtrip with AttTFix 2.1.2. The 21-address rerun retains four raw differences and
