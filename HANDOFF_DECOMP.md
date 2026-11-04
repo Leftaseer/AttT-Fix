@@ -13,8 +13,11 @@ first pass covered all 9,661 addresses in 29 minutes 9 seconds, with 488 timeout
 regressions, including Sound3D volume and terrain transform translation. The plain and debug
 builds pass 43 differential tests and 795 normal comparison pairs. The plain build passes a
 Wine save roundtrip with AttTFix 2.1.2. The 21-address rerun retains four raw differences and
-six fault differences with separate diagnostic and valid-input evidence. Build hashes and
-evidence are in `decomp/VERIFICATION.md`.
+six fault differences with separate diagnostic and valid-input evidence. The full plain
+candidate sweep reconciles all 9,661 addresses in 33 minutes 34 seconds, with those same
+10 raw mismatches and no new mismatch addresses. All 14 previously verified addresses
+that timed out on the first pass verify at 120 seconds. Build hashes and evidence are in
+`decomp/VERIFICATION.md`.
 
 **Previous work: full v57 plain sweep and float edge fixes.** The 9,661-address baseline sweep is under
 `/home/attt-dev/work/v57-full-sweep-20261104/`. The inventory tool can attach its completed verdicts

@@ -48,6 +48,18 @@ in eight random pairs, with 0.11 normal-return coverage. The four raw `differs` 
 Reports and controls are under `/home/attt-dev/work/sound-and-sweep-20261104/`. The Wine
 run is `/home/attt-dev/work/wine-tests/sweep-candidate-attfix-roundtrip-k2dc5q5o/`.
 
+The full plain candidate sweep completed in **33 minutes 34 seconds** and reconciled all
+9,661 addresses and 96 shards. It recorded 3,540 verified, 4,593 low coverage, 997 unsupported,
+521 timeouts, four differs and six faultdiff verdicts. Relative to the v57 first pass at the
+same limits, nine `differs` and one `faultdiff` moved to verified, with no new mismatch addresses.
+
+Fourteen previously verified addresses timed out on the candidate's first pass, as did 19
+previously low-coverage addresses. None of the 34 sweep-eligible functions within three
+direct calls of the seven changes timed out. The 14 previously verified addresses all
+verified on the candidate at the 120-second limit. Their separate replay took 35 seconds
+with 14 active workers. The first-pass rows and timeout retry remain in `candidate-full/`
+and `timeout-retry/` under the evidence directory above.
+
 ## Recommended full sweep
 
 Start with 16 workers and native coverage. With the original seed and instruction cap, use
