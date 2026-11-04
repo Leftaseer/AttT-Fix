@@ -1,10 +1,18 @@
 # AttT decomp — handoff / full project context
 
-Updated 2026-11-03. Read `decomp/VERIFICATION.md` for the current, hash-identified checkpoint and verification
+Updated 2026-11-04. Read `decomp/VERIFICATION.md` for the current, hash-identified checkpoint and verification
 limits, then `decomp/README.md` for pipeline internals. Older sections below preserve investigation history;
 their status statements and test counts are superseded by the latest checkpoint.
 
-**Current work: grid lookup and debug action verification.** Both v57 builds match the original on 77,000
+**Current work: full v57 plain sweep and float edge fixes.** The 9,661-address baseline sweep is under
+`/home/attt-dev/work/v57-full-sweep-20261104/`. The inventory tool can attach its completed verdicts
+after reconciling all shards against the exact build. Seven confirmed mismatches in integer coordinate
+bounds and mesh position setters are corrected in the local candidate, with the raw v57 results preserved.
+All seven pass the targeted rerun. The plain candidate passes a Wine save roundtrip with active
+AttTFix 2.1.2. The sound volume setter's NaN discrepancy has a mock DirectSound reproduction and
+remains open. Build paths, hashes and evidence are in `decomp/VERIFICATION.md`.
+
+**Previous work: grid lookup and debug action verification.** Both v57 builds match the original on 77,000
 structured grid queries each and pass 34 differential tests with 653 normal comparison pairs. The raw
 allocator byte difference reproduces in v57 plain; the diagnostic constructor-input control matches 30/30.
 In Wine the debug menu opens the Barrack scene and starts a battle with one dragon at speed 1 and 100,836

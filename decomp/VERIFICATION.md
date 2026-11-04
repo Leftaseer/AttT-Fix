@@ -5,6 +5,41 @@ Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages. The user explicitly authorized running anything within the
 home directory; game tests now run from private WSL copies under `/home/attt-dev/work`.
 
+## Float edge candidate
+
+The v57 sweep exposed a translation error in the three-coordinate integer bounds function
+`00473280`. With `(1, 0, NaN)`, the original writes `(INT_MIN, 1)` and v57 writes `(0, INT_MIN)`.
+The replacement follows the original unordered comparisons and uses its signed `CVTTSS2SI`
+conversion for both outputs.
+
+Six position setters in `CMeshObject2D` and `CMeshObject2DRes` now return the original comparison byte
+in AH. The old code returned `06` for an unordered input where `UCOMISS` and `LAHF` produce `47`.
+The setters preserve the caller's other EAX bits, copy supplied float32 coordinates as raw dwords,
+and use the existing register adapters and default positions. The targeted tests exercise ordered
+coordinates, signed zeros, quiet and signaling NaNs, and noninteger screen scaling.
+
+All seven functions fail the bounded fixtures on v57 and pass on both candidate builds. Both
+candidates pass 36 differential tests and 747 normal comparison pairs. The corrected plain build
+also verifies all seven with the baseline seed-1, 30-case settings. Raw v57 results remain in the
+baseline or sibling probe results. Both candidates retain 10,167 replacements, pass relink with
+zero mismatches and preserve the 110 native functions required by AttTFix.
+
+| Binary under `/home/attt-dev/re/float-edges-final-20261104/` | SHA-256 |
+|---|---|
+| `plain/ATThrone.exe` | `1dbcf5ba3e29fa666b2082a73a739466dec33e4d73d06d474675355285c005c5` |
+| `debug/ATThrone_debug.exe` | `0023f5dc653779cfd6d4c235bb51711fcd12eb8486b1d62761120f6b01adcfc9` |
+
+The corrected plain build ran for 65 seconds in Wine with AttTFix 2.1.2 and the shared `game0`
+roundtrip fixture. It wrote both required saves, and independent decoding found zero state differences
+before and after reload. AttTFix logged live skinning and mipmap activity. Evidence is under
+`/home/attt-dev/work/wine-tests/float-edges-attfix-roundtrip-q12zc_12/`.
+
+A separate v57 probe of `004C2C00` with an initialized sound object and mock DirectSound buffer
+agrees on three finite calls. On a NaN input the original passes `0x7fffec78` to the buffer's
+`SetVolume` method and v57 passes `0xffffd8f0`. This result is still open and has no observed gameplay
+reproduction. The fixture and both generations of focused sweep results are under
+`/home/attt-dev/work/v57-full-sweep-20261104/triage/` and the candidate build directory.
+
 ## Full v57 plain sweep
 
 The current 9,661-address run is under `/home/attt-dev/work/v57-full-sweep-20261104/`. It uses seed 1,
