@@ -139,6 +139,7 @@ def main():
     # The compiled C++ formatter/queue must handle every selection, including the longest ID.
     ids = re.findall(r'"(u\w+)"', pathlib.Path(__file__).resolve().parents[1].joinpath(
         'rebuild/src/engine/debugmenu.cpp').read_text().split('static const char *kUnitIds[] = {')[1].split('};')[0])
+    assert ids == sorted(ids, key=str.casefold), "Expected alphabetized barracks unit IDs"
     for index, unit in enumerate(ids):
         h.lua("Unit['%s'] = {BattleParams = {}}" % unit)
         h.selection = index

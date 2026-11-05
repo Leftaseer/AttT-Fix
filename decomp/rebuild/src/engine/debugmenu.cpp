@@ -224,36 +224,34 @@ static const char *kTough =
 enum { IDC_SPELLS = 1001, IDC_GOLD, IDC_LIST, IDC_BARRACKS, IDC_TOUGH, IDC_BACK };
 static const int kHotkey = 0x4D01;
 
+// Keep IDs in alphabetical order. List rows use the same indices.
 static const char *kUnitIds[] = {
-    "uValkyr1", "uValkyr2", "uValkyr2_ring", "uValkyr3", "uRafael2", "uRafael3", "uPeasant", "uMilitiaman",
-    "uPeter", "uVeteran", "uGoblin", "uGoblinSpearman", "uHobgoblin", "uZombi", "uCadavre", "uRevenant",
-    "uWolf", "uFullgrownWolf", "uWerewolf", "uViking", "uYarl", "uConung", "uSpawn", "uBogle", "uGhnol",
-    "uArcher", "uLokhar", "uSam", "uBowman", "uYeoman", "uDwarf", "uDvergar", "uSiggurd", "uTangar",
-    "uDarkSlave", "uJailer", "uSlaveholder", "uSwordsman", "uFightInstructor", "uSwordMaster", "uLeper",
-    "uLeper2", "uIllGuardsman", "uIllGuardsman2", "uCursedCrusader", "uCursedCrusader2", "uWitch",
-    "uEnchantress", "uKira", "uSorceress", "uPalmer", "uPilgrim", "uSohay", "uOrc", "uZaghadar",
-    "uTogurghar", "uButcher", "uBourreaur", "uInquisitor", "uBear", "uGrizzly", "uCaveBear", "uOgre",
-    "uOrog", "uOgtur", "uApostate", "uHeretic", "uMalephic", "uAmazon", "uHelga", "uVirago", "uFury",
-    "uTroll", "uZaghon", "uOlogShakh", "uAssassin", "uNizarit", "uFidayin", "uGladiator", "uMirmilon",
-    "uConqueror", "uGolem", "uVarklap", "uStoneElemental", "uVampire", "uGangrule", "uNosferatu", "uPaladin",
-    "uSunknight", "uDragonslayer", "uDarkKnight", "uBanneret", "uWarlord", "uDarkPriest", "uDemonologiest",
-    "uArchont", "uGiant", "uIotun", "uGrimturs", "uDragon", "uPlague", "uMorana", "uMortiss", "uConrad",
-    "uDiana", "uEdward", "uFrederic", "uHarbord", "uSamael", "uSamaelDemon", "uTokugava", "uVeliar",
-    "uOnager", "uShip", "uTest",
+    "uAmazon", "uApostate", "uArcher", "uArchont", "uAssassin", "uBanneret", "uBear", "uBogle",
+    "uBourreaur", "uBowman", "uButcher", "uCadavre", "uCaveBear", "uConqueror", "uConrad", "uConung",
+    "uCursedCrusader", "uCursedCrusader2", "uDarkKnight", "uDarkPriest", "uDarkSlave", "uDemonologiest",
+    "uDiana", "uDragon", "uDragonslayer", "uDvergar", "uDwarf", "uEdward", "uEnchantress", "uFidayin",
+    "uFightInstructor", "uFrederic", "uFullgrownWolf", "uFury", "uGangrule", "uGhnol", "uGiant",
+    "uGladiator", "uGoblin", "uGoblinSpearman", "uGolem", "uGrimturs", "uGrizzly", "uHarbord", "uHelga",
+    "uHeretic", "uHobgoblin", "uIllGuardsman", "uIllGuardsman2", "uInquisitor", "uIotun", "uJailer",
+    "uKira", "uLeper", "uLeper2", "uLokhar", "uMalephic", "uMilitiaman", "uMirmilon", "uMorana", "uMortiss",
+    "uNizarit", "uNosferatu", "uOgre", "uOgtur", "uOlogShakh", "uOnager", "uOrc", "uOrog", "uPaladin",
+    "uPalmer", "uPeasant", "uPeter", "uPilgrim", "uPlague", "uRafael2", "uRafael3", "uRevenant", "uSam",
+    "uSamael", "uSamaelDemon", "uShip", "uSiggurd", "uSlaveholder", "uSohay", "uSorceress", "uSpawn",
+    "uStoneElemental", "uSunknight", "uSwordMaster", "uSwordsman", "uTangar", "uTest", "uTogurghar",
+    "uTokugava", "uTroll", "uValkyr1", "uValkyr2", "uValkyr2_ring", "uValkyr3", "uVampire", "uVarklap",
+    "uVeliar", "uVeteran", "uViking", "uVirago", "uWarlord", "uWerewolf", "uWitch", "uWolf", "uYarl",
+    "uYeoman", "uZaghadar", "uZaghon", "uZombi",
 };
 static const int kUnitCount = (int)(sizeof(kUnitIds) / sizeof(kUnitIds[0]));
 
-static void ShowMenu(bool activate)
+static void ShowMenu()
 {
     if (!g_menu)
         return;
-    ShowWindow(g_menu, activate ? SW_SHOW : SW_SHOWNOACTIVATE);
-    SetWindowPos(g_menu, HWND_TOPMOST, 0, 0, 0, 0,
-                 SWP_NOMOVE | SWP_NOSIZE | (activate ? 0 : SWP_NOACTIVATE));
-    if (activate) {
-        SetForegroundWindow(g_menu);
-        SetActiveWindow(g_menu);
-    }
+    ShowWindow(g_menu, SW_SHOW);
+    SetWindowPos(g_menu, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SetForegroundWindow(g_menu);
+    SetActiveWindow(g_menu);
 }
 
 static void HideMenu()
@@ -334,7 +332,8 @@ static void CreateControls(HWND hwnd)
          SS_LEFT, x, y, w, 18, 0);
     y += 20;
     g_list = Make(hwnd, L"LISTBOX", nullptr, WS_BORDER | WS_VSCROLL | WS_TABSTOP | LBS_NOINTEGRALHEIGHT,
-                  x, y, w, 150, IDC_LIST);    if (g_list) {
+                  x, y, w, 150, IDC_LIST);
+    if (g_list) {
         for (int i = 0; i < kUnitCount; i++) {
             wchar_t item[64];
             MultiByteToWideChar(CP_ACP, 0, kUnitIds[i], -1, item, 64);
@@ -383,7 +382,7 @@ static LRESULT CALLBACK MenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         break;
     case WM_HOTKEY:
         if ((int)wp == kHotkey)
-            ShowMenu(true);
+            ShowMenu();
         return 0;
     case WM_COMMAND:
         switch (LOWORD(wp)) {
@@ -416,8 +415,7 @@ static LRESULT CALLBACK MenuProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
-/* Called by GameMain after the game window and the engine exist (main.cpp).  The window appears without taking
- * the focus, so the game keeps running until the player clicks the menu; Ctrl+Alt+D shows and focuses it. */
+/* Create the hidden window and register Ctrl+Alt+D after the game window and engine exist (main.cpp). */
 extern "C" void DecompDebugMenuInit()
 {
     if (g_created)
@@ -456,7 +454,6 @@ extern "C" void DecompDebugMenuInit()
         return;
     }
     g_created = true;
-    ShowMenu(false);
     AddStatus("debug menu ready (Ctrl+Alt+D)");
     if (RegisterHotKey(g_menu, kHotkey, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'D'))
         OutputDebugStringA("debugmenu: Ctrl+Alt+D registered");

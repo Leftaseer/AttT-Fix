@@ -62,7 +62,7 @@ and combat actions, and actual AttTFix 2.1.2 activation/effects. No mod was inst
 The original, v57 plain and v57 debug EXEs each survived **35 seconds** of developer world start (`-nologo`),
 at 800x600 with the same WineD3D runtime and hash-matched original assets. No mod, saves or scripted inputs
 were injected. No game error files appeared. Screenshots were visually reviewed: all render the opening
-world/dialogue scene; debug also displays its menu and logs `debug menu ready (Ctrl+Alt+D)`.
+world/dialogue scene. The debug build logs `debug menu ready (Ctrl+Alt+D)` and opens the menu on that hotkey.
 These are qualitative scene checks, not pixel comparisons; animation poses differ with timing.
 
 Evidence root: `/home/attt-dev/work/wine-tests/`:
