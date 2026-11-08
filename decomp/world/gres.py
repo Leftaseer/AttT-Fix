@@ -4,6 +4,8 @@ Format (little endian): b'GRES', u32 version 100, u32 entry count, then 136-byte
 entries (128-byte cp1251 name, u32 offset, u32 size), then the payloads.
 Overlays work by archive slot: Resource2.pak replaces entries from Resource0/1.
 """
+import hashlib
+import json
 import struct
 from pathlib import Path
 
@@ -11,6 +13,10 @@ MAGIC = b'GRES'
 VERSION = 100
 ENTRY_SIZE = 136
 NAME_SIZE = 128
+
+#: Trailer appended after the payloads; the game ignores bytes outside entry ranges.
+IDENTITY_MAGIC = b'ATTTID1'
+IDENTITY_FORMAT = 'attt-build-identity/1'
 
 
 class Entry:
@@ -132,11 +138,20 @@ class ArchiveSet:
             paths.append(localization)
         return cls(paths, allow_gaps=allow_gaps)
 
-    def resolve(self, name):
-        """Return the winning Entry for name, or None."""
+    def resolve(self, name, exclude=None):
+        """Return the winning Entry for name, or None.
+
+        `exclude` is a PAK path ignored while resolving, so an overlay can be
+        checked against the game folder it has already been deployed into.
+        """
         key = name.lower()
+        if exclude is not None:
+            exclude = Path(exclude).resolve()
         for slot in reversed(self.slots):
-            entry = self.archives[slot].entries.get(key)
+            archive = self.archives[slot]
+            if exclude is not None and archive.path.resolve() == exclude:
+                continue
+            entry = archive.entries.get(key)
             if entry is not None:
                 return entry
         return None
@@ -169,12 +184,17 @@ class ArchiveSet:
         self.close()
 
 
-def write_pak(path, entries, overwrite=False):
+def write_pak(path, entries, overwrite=False, identity=None):
     """Write name -> bytes entries as a deterministic GRES archive.
 
     Refuses to replace an existing file unless `overwrite` is set, and never
     writes through a symlink; an accidental slot collision must not clobber a
     game archive.
+
+    When `identity` is given, a JSON build-identity trailer is appended after
+    the payloads.  The engine reads entries by offset/size and ignores it, so
+    the archive stays loadable while overlay-check can prove which build the
+    overlay was made for.
     """
     path = Path(path)
     if path.is_symlink():
@@ -197,4 +217,87 @@ def write_pak(path, entries, overwrite=False):
         table[at:at + len(encoded)] = encoded
         struct.pack_into('<II', table, at + NAME_SIZE, offset, len(data))
         offset += len(data)
-    path.write_bytes(bytes(table) + b''.join(data for _, data in ordered))
+    payload = bytes(table) + b''.join(data for _, data in ordered)
+    if identity is not None:
+        body = json.dumps(identity, ensure_ascii=False, sort_keys=True,
+                          separators=(',', ':')).encode('utf-8')
+        payload += IDENTITY_MAGIC + body + struct.pack('<I', len(body))
+    path.write_bytes(payload)
+
+
+def read_identity(path):
+    """Return the build-identity trailer of a PAK, or None if absent/invalid."""
+    path = Path(path)
+    try:
+        size = path.stat().st_size
+        if size < len(IDENTITY_MAGIC) + 4:
+            return None
+        with path.open('rb') as stream:
+            stream.seek(size - 4)
+            length = struct.unpack('<I', stream.read(4))[0]
+            start = size - 4 - length - len(IDENTITY_MAGIC)
+            if start < 0:
+                return None
+            stream.seek(start)
+            blob = stream.read(len(IDENTITY_MAGIC) + length)
+    except (OSError, struct.error):
+        return None
+    if len(blob) != len(IDENTITY_MAGIC) + length or not blob.startswith(IDENTITY_MAGIC):
+        return None
+    try:
+        identity = json.loads(blob[len(IDENTITY_MAGIC):].decode('utf-8'))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    files = identity.get('files') if isinstance(identity, dict) else None
+    if (not isinstance(identity, dict) or identity.get('format') != IDENTITY_FORMAT or
+            not isinstance(files, dict) or
+            not all(isinstance(record, dict) for record in files.values())):
+        return None
+    return identity
+
+
+def file_identity(archive_set, names, exclude=None):
+    """Fingerprint the winning version of each named entry in an archive set."""
+    files = {}
+    for name in sorted(set(names)):
+        entry = archive_set.resolve(name, exclude=exclude)
+        if entry is None:
+            continue
+        data = entry.read()
+        files[name] = {'size': len(data),
+                       'sha256': hashlib.sha256(data).hexdigest()}
+    return {'format': IDENTITY_FORMAT, 'files': files}
+
+
+def identity_differences(expected, actual):
+    """Compare two build identities; return human-readable differences."""
+    expected_files = expected.get('files', {})
+    actual_files = actual.get('files', {})
+    problems = []
+    for name in sorted(set(expected_files) | set(actual_files)):
+        want = expected_files.get(name)
+        have = actual_files.get(name)
+        if want == have:
+            continue
+        if want is None:
+            problems.append('%s is not part of the overlay build' % name)
+        elif have is None:
+            problems.append('%s is missing from the target game' % name)
+        else:
+            problems.append('%s differs (built for %s bytes %s, target has %s bytes %s)' %
+                            (name, want.get('size'), str(want.get('sha256'))[:16],
+                             have.get('size'), str(have.get('sha256'))[:16]))
+    return problems
+
+
+def check_overlay(path, archive_set):
+    """Compare an overlay trailer with the target archives.
+
+    Returns (identity, differences), or None when the PAK has no identity.
+    """
+    identity = read_identity(path)
+    if identity is None:
+        return None
+    actual = file_identity(archive_set, identity['files'],
+                           exclude=Path(path).resolve())
+    return identity, identity_differences(identity, actual)

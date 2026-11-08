@@ -15,6 +15,11 @@ assignments just before the main chunk's final ``RETURN``::
 New constants are appended, which is why the 256-slot RK addressing limit that
 blocks bulk edits of shared literals does not apply.  No jump offset, function
 prototype, local or upvalue changes; the final ``RETURN`` only moves down.
+
+A field that does not exist yet may be given a JSON object or array.  Those
+values are built with ``NEWTABLE`` plus ``SETTABLE``, which makes it possible to
+add a whole quest, trigger or dialogue node.  New function bodies cannot be
+synthesized, but a ``{"$ref": [...]}`` value copies an existing function.
 """
 import math
 import struct
@@ -31,6 +36,19 @@ MISSING = object()
 
 class LuaPatchError(ValueError):
     pass
+
+
+class Ref:
+    """A function copied from another table path when the patch runs."""
+
+    __slots__ = ('path', 'value')
+
+    def __init__(self, path):
+        self.path = tuple(path)
+        self.value = MISSING
+
+    def __repr__(self):
+        return '<ref %s>' % '.'.join(str(part) for part in self.path)
 
 
 def _read_constant(reader, data):
@@ -63,6 +81,24 @@ def encode_constant(value):
 
 
 def _same(left, right):
+    if isinstance(left, Ref) or isinstance(right, Ref):
+        if isinstance(left, Ref):
+            reference, other = left, right
+        else:
+            reference, other = right, left
+        expected = reference.value
+        if isinstance(expected, lua_data.Closure) and isinstance(other, lua_data.Closure):
+            return expected.proto == other.proto
+        return _same(expected, other)
+    if isinstance(left, dict) or isinstance(right, dict):
+        if not (isinstance(left, dict) and isinstance(right, dict)):
+            return False
+        if len(left) != len(right):
+            return False
+        for key, value in left.items():
+            if key not in right or not _same(value, right[key]):
+                return False
+        return True
     if isinstance(left, bool) or isinstance(right, bool):
         return type(left) is type(right) and left == right
     if isinstance(left, (int, float)) and isinstance(right, (int, float)):
@@ -221,8 +257,25 @@ def _number(value, path):
     return rounded
 
 
+def _is_ref(value):
+    return isinstance(value, dict) and set(value) == {'$ref'}
+
+
+def _make_ref(value, path):
+    if not isinstance(value, list) or not value:
+        raise LuaPatchError('%s.$ref must be a non-empty array of table keys' % path)
+    keys = [_table_key(key, path + '.$ref') for key in value]
+    return Ref(keys)
+
+
 def validate_new(value, path):
-    """Check a literal for a field that does not exist yet."""
+    """Check a literal, nested table or function reference for a new field."""
+    if isinstance(value, Ref):
+        return value
+    if _is_ref(value):
+        return _make_ref(value['$ref'], path)
+    if isinstance(value, (dict, list)):
+        return normalize_table(value, path)
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -235,6 +288,67 @@ def validate_new(value, path):
         return _number(value, path)
     raise LuaPatchError('cannot add %s = %r: expected a string, number or boolean'
                         % (path, value))
+
+
+def _table_key(key, path):
+    if isinstance(key, bool):
+        raise LuaPatchError('%s has a boolean table key' % path)
+    if isinstance(key, int):
+        if not -2 ** 24 < key < 2 ** 24:
+            raise LuaPatchError('%s has an integer key outside the float32 range' % path)
+        return key
+    if isinstance(key, str):
+        if not key:
+            raise LuaPatchError('%s has an empty table key' % path)
+        if key.isdigit():
+            value = int(key)
+            if value >= 2 ** 24:
+                raise LuaPatchError('%s has an integer key outside the float32 range' % path)
+            return value
+        return key
+    raise LuaPatchError('%s has an unsupported table key %r' % (path, key))
+
+
+def normalize_table(value, path):
+    """Validate a JSON table, converting digit-only keys to Lua integers."""
+    if isinstance(value, list):
+        value = {index + 1: item for index, item in enumerate(value)}
+    if not isinstance(value, dict):
+        raise LuaPatchError('%s must be a JSON object or array' % path)
+    result = {}
+    for raw_key, item in value.items():
+        key = _table_key(raw_key, path)
+        item_path = '%s[%s]' % (path, key)
+        if item is None:
+            raise LuaPatchError('%s cannot be nil inside a new table' % item_path)
+        if isinstance(item, Ref):
+            result[key] = item
+        elif _is_ref(item):
+            result[key] = _make_ref(item['$ref'], item_path)
+        elif isinstance(item, (dict, list)):
+            result[key] = normalize_table(item, item_path)
+        else:
+            result[key] = validate_new(item, item_path)
+    return result
+
+
+def resolve_refs(globals_, value, path):
+    """Resolve ``$ref`` placeholders to the functions they copy."""
+    if isinstance(value, Ref):
+        if value.value is not MISSING:
+            return
+        try:
+            target = resolve(globals_, value.path)
+        except LuaPatchError:
+            raise LuaPatchError('%s: $ref path %s does not exist' %
+                                (path, '.'.join(str(part) for part in value.path)))
+        if not isinstance(target, lua_data.Closure):
+            raise LuaPatchError('%s: $ref must point at a function, not a %s' %
+                                (path, type(target).__name__))
+        value.value = target
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            resolve_refs(globals_, item, '%s[%s]' % (path, key))
 
 
 def lookup(globals_, path):
@@ -297,29 +411,104 @@ class ChunkEditor:
         label = '.'.join(str(part) for part in path)
         if old is MISSING:
             new = validate_new(value, label)
+            resolve_refs(self.globals, new, label)
         else:
             new = coerce(value, old, label)
         self.edits.append({'path': path, 'keys': keys, 'old': old, 'new': new})
         return old, new
 
     def _instructions(self, edit):
+        if isinstance(edit['new'], Ref):
+            return self._ref_instructions(edit['keys'], edit['new'])
+        if isinstance(edit['new'], dict):
+            return self._table_instructions(edit['keys'], edit['new'])
+        return self._literal_instructions(edit['keys'], edit['new'])
+
+    def _literal_instructions(self, keys, new):
         table = self.layout.stack - 1
         key_register = self.layout.stack - 2
         value = self.layout.stack - 3
-        keys = edit['keys']
         code = [_abx('GETGLOBAL', table, self._constant(keys[0]))]
         for key in keys[1:-1]:
             code.append(_abx('LOADK', key_register, self._constant(key)))
             code.append(_abc('GETTABLE', table, table, key_register))
         code.append(_abx('LOADK', key_register, self._constant(keys[-1])))
-        new = edit['new']
-        if new is None:
-            code.append(_abc('LOADNIL', value, 0, 0))
-        elif isinstance(new, bool):
-            code.append(_abc('LOADBOOL', value, 1 if new else 0, 0))
-        else:
-            code.append(_abx('LOADK', value, self._constant(new)))
+        code.append(self._literal(value, new))
         code.append(_abc('SETTABLE', table, key_register, value))
+        return code
+
+    def _literal(self, register, value):
+        if value is None:
+            return _abc('LOADNIL', register, 0, 0)
+        if isinstance(value, bool):
+            return _abc('LOADBOOL', register, 1 if value else 0, 0)
+        return _abx('LOADK', register, self._constant(value))
+
+    @staticmethod
+    def _table_depth(value):
+        if not isinstance(value, dict):
+            return 0
+        return 1 + max((ChunkEditor._table_depth(item) for item in value.values()),
+                       default=0)
+
+    def _ref_load(self, code, register, key_register, reference):
+        code.append(_abx('GETGLOBAL', register, self._constant(reference.path[0])))
+        for part in reference.path[1:]:
+            code.append(_abx('LOADK', key_register, self._constant(part)))
+            code.append(_abc('GETTABLE', register, register, key_register))
+
+    def _ref_instructions(self, keys, reference):
+        if self.layout.stack < 3:
+            raise LuaPatchError('main chunk frame has fewer than 3 registers')
+        table = self.layout.stack - 1
+        key_register = self.layout.stack - 2
+        value = self.layout.stack - 3
+        code = []
+        self._ref_load(code, value, key_register, reference)
+        code.append(_abx('GETGLOBAL', table, self._constant(keys[0])))
+        for key in keys[1:-1]:
+            code.append(_abx('LOADK', key_register, self._constant(key)))
+            code.append(_abc('GETTABLE', table, table, key_register))
+        code.append(_abx('LOADK', key_register, self._constant(keys[-1])))
+        code.append(_abc('SETTABLE', table, key_register, value))
+        return code
+
+    def _emit_table(self, code, register, value, key_register, value_register):
+        code.append(_abc('NEWTABLE', register, 0, 0))
+        for key, item in value.items():
+            if isinstance(item, dict):
+                child = register - 1
+                self._emit_table(code, child, item, key_register, value_register)
+                code.append(_abx('LOADK', key_register, self._constant(key)))
+                code.append(_abc('SETTABLE', register, key_register, child))
+            elif isinstance(item, Ref):
+                code.append(_abx('LOADK', key_register, self._constant(key)))
+                self._ref_load(code, value_register, key_register, item)
+                code.append(_abc('SETTABLE', register, key_register, value_register))
+            else:
+                code.append(_abx('LOADK', key_register, self._constant(key)))
+                code.append(self._literal(value_register, item))
+                code.append(_abc('SETTABLE', register, key_register, value_register))
+
+    def _table_instructions(self, keys, new):
+        depth = self._table_depth(new)
+        needed = depth + 2
+        if self.layout.stack < needed:
+            raise LuaPatchError('building this table needs %d registers, but the '
+                                'main chunk frame has %d' % (needed, self.layout.stack))
+        top = self.layout.stack - 1
+        key_register = top
+        value_register = top - (depth + 1)
+        root_register = top - 1
+        code = []
+        self._emit_table(code, root_register, new, key_register, value_register)
+        table = value_register
+        code.append(_abx('GETGLOBAL', table, self._constant(keys[0])))
+        for key in keys[1:-1]:
+            code.append(_abx('LOADK', key_register, self._constant(key)))
+            code.append(_abc('GETTABLE', table, table, key_register))
+        code.append(_abx('LOADK', key_register, self._constant(keys[-1])))
+        code.append(_abc('SETTABLE', table, key_register, root_register))
         return code
 
     def build(self):

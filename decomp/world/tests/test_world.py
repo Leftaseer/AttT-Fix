@@ -57,6 +57,36 @@ def ins(op, a=0, b=0, c=0):
     return op | (a << 6) | (c << 14) | (b << 23)
 
 
+def function(code, constants, params=0, stack=8, nups=0, protos=()):
+    """Serialize one nested function body (no chunk header)."""
+    def string(value):
+        raw = value.encode('cp1251')
+        return struct.pack('<I', len(raw) + 1) + raw + b'\0'
+
+    out = bytearray()
+    out += string('')
+    out += struct.pack('<ii', 1, 1)
+    out += struct.pack('<4B', nups, params, 0, stack)
+    out += struct.pack('<I', len(code))
+    out += b''.join(struct.pack('<I', item) for item in code)
+    out += struct.pack('<I', len(constants))
+    for value in constants:
+        if value is None:
+            out += b'\0'
+        elif isinstance(value, bool):
+            out += b'\1' + bytes((1 if value else 0,))
+        elif isinstance(value, float):
+            out += b'\3' + struct.pack('<f', value)
+        else:
+            out += b'\4' + string(value)
+    out += struct.pack('<I', len(protos))
+    out += b''.join(protos)
+    out += struct.pack('<I', 0)                       # line info
+    out += struct.pack('<I', 0)                       # locals
+    out += struct.pack('<I', 0)                       # upvalue names
+    return bytes(out)
+
+
 class HeightmapTest(unittest.TestCase):
     def make(self):
         width, height = 5, 3
@@ -146,6 +176,50 @@ class ArchiveTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 gres.write_pak(link, {'a': b'A'})
 
+    def test_identity_trailer_and_overlay_check(self):
+        with tempfile.TemporaryDirectory() as folder:
+            base = os.path.join(folder, 'Resource0.pak')
+            entries = {'a.lua': b'A', 'b.lua': b'B'}
+            gres.write_pak(base, entries)
+            archive_set = gres.ArchiveSet.open_folder(folder)
+            try:
+                identity = gres.file_identity(archive_set, entries)
+            finally:
+                archive_set.close()
+            overlay = os.path.join(folder, 'Resource1.pak')
+            gres.write_pak(overlay, {'b.lua': b'B2'}, identity=identity)
+            with gres.Archive(overlay) as archive:
+                self.assertEqual(archive.read('b.lua'), b'B2')
+            self.assertEqual(gres.read_identity(overlay), identity)
+            archive_set = gres.ArchiveSet.open_folder(folder)
+            try:
+                self.assertEqual(gres.check_overlay(overlay, archive_set),
+                                 (identity, []))
+            finally:
+                archive_set.close()
+            gres.write_pak(base, {'a.lua': b'AX', 'b.lua': b'B'}, overwrite=True)
+            archive_set = gres.ArchiveSet.open_folder(folder)
+            try:
+                built_for, differences = gres.check_overlay(overlay, archive_set)
+            finally:
+                archive_set.close()
+            self.assertEqual(built_for, identity)
+            self.assertEqual(len(differences), 1)
+            self.assertIn('a.lua differs', differences[0])
+            plain = os.path.join(folder, 'Resource2.pak')
+            gres.write_pak(plain, {'c.lua': b'C'})
+            self.assertIsNone(gres.read_identity(plain))
+            archive_set = gres.ArchiveSet.open_folder(folder)
+            try:
+                self.assertIsNone(gres.check_overlay(plain, archive_set))
+            finally:
+                archive_set.close()
+            malformed = os.path.join(folder, 'Resource3.pak')
+            gres.write_pak(malformed, {'c.lua': b'C'},
+                           identity={'format': gres.IDENTITY_FORMAT,
+                                     'files': {'c.lua': 'not-a-record'}})
+            self.assertIsNone(gres.read_identity(malformed))
+
     def test_localization_slot_and_bad_archive(self):
         with tempfile.TemporaryDirectory() as folder:
             gres.write_pak(os.path.join(folder, 'Localization.pak'), {'t.txt': b'hello'})
@@ -225,6 +299,70 @@ class LuaDataTest(unittest.TestCase):
         with self.assertRaises(lua_data.LuaDataError):
             lua_data.decode_chunk(data)
         self.assertEqual(lua_data.decode_chunk(data, allow_closures=True)['Dialog'], {})
+
+    def test_numeric_for_loop(self):
+        instructions = [
+            ins(10, 0),                        # NEWTABLE r0
+            ins(1, 1, 0, 1),                   # LOADK r1 1.0
+            ins(1, 2, 0, 2),                   # LOADK r2 3.0
+            ins(1, 3, 0, 3),                   # LOADK r3 1.0
+            ins(32, 1, 0, 2 + 131071),         # FORPREP r1 -> FORLOOP
+            ins(1, 5, 0, 0),                   # LOADK r5 "v"
+            ins(9, 0, 4, 5),                   # r0[r4] = r5
+            ins(31, 1, 0, -3 + 131071),        # FORLOOP r1 -> body
+            ins(7, 0, 0, 4),                   # SETGLOBAL r0 "T"
+            ins(30),                           # RETURN
+        ]
+        data = chunk(instructions, ['v', 1.0, 3.0, 1.0, 'T'])
+        self.assertEqual(lua_data.decode_global(data, 'T'),
+                         {1: 'v', 2: 'v', 3: 'v'})
+
+    def test_generic_for_with_pairs(self):
+        instructions = [
+            ins(10, 0),                        # NEWTABLE r0
+            ins(1, 2, 0, 0),                   # LOADK r2 "a"
+            ins(1, 3, 0, 1),                   # LOADK r3 1.0
+            ins(9, 0, 2, 3),                   # r0["a"] = 1.0
+            ins(1, 2, 0, 2),                   # LOADK r2 "b"
+            ins(1, 3, 0, 3),                   # LOADK r3 2.0
+            ins(9, 0, 2, 3),                   # r0["b"] = 2.0
+            ins(10, 7),                        # NEWTABLE r7
+            ins(5, 1, 0, 4),                   # GETGLOBAL r1 "pairs"
+            ins(0, 2, 0, 0),                   # MOVE r2 r0
+            ins(28, 1, 2, 4),                  # CALL r1 2 4
+            ins(22, 0, 0, 1 + 131071),         # JMP -> TFORLOOP
+            ins(9, 7, 4, 5),                   # r7[r4] = r5
+            ins(33, 1, 0, 2),                  # TFORLOOP r1 2
+            ins(22, 0, 0, -3 + 131071),        # JMP -> body
+            ins(7, 7, 0, 5),                   # SETGLOBAL r7 "Out"
+            ins(30),                           # RETURN
+        ]
+        data = chunk(instructions, ['a', 1.0, 'b', 2.0, 'pairs', 'Out'])
+        self.assertEqual(lua_data.decode_chunk(data, allow_closures=True)['Out'],
+                         {'a': 1.0, 'b': 2.0})
+
+    def test_closure_call_and_upvalue_binding(self):
+        concat = function([ins(21, 2, 0, 1), ins(30, 2, 2)], [], params=2)
+        upvalue = function([ins(4, 0, 0, 0), ins(30, 0, 2)], [], nups=1)
+        instructions = [
+            ins(10, 1),                        # NEWTABLE r1
+            ins(36, 0, 0, 0),                  # CLOSURE r0 proto 0
+            ins(1, 1, 0, 1),                   # LOADK r1 "a"
+            ins(1, 2, 0, 2),                   # LOADK r2 "b"
+            ins(28, 0, 3, 2),                  # CALL r0 3 2
+            ins(7, 0, 0, 0),                   # SETGLOBAL r0 "F"
+            ins(10, 1),                        # NEWTABLE r1
+            ins(36, 0, 0, 1),                  # CLOSURE r0 proto 1 (1 upvalue)
+            ins(0, 0, 1, 0),                   # upvalue 0 = r1
+            ins(28, 0, 1, 2),                  # CALL r0 1 2
+            ins(7, 0, 0, 3),                   # SETGLOBAL r0 "G"
+            ins(30),                           # RETURN
+        ]
+        data = chunk(instructions, ['F', 'a', 'b', 'G'],
+                     protos=(concat, upvalue))
+        values = lua_data.decode_chunk(data, allow_closures=True)
+        self.assertEqual(values['F'], 'ab')
+        self.assertEqual(values['G'], {})
 
     def test_rejects_non_data_chunks(self):
         with self.assertRaises(lua_data.LuaDataError):

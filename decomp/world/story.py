@@ -4,8 +4,9 @@ All three modules are Lua 5.1 bytecode that mixes data tables with nested
 functions.  `lua_data` decodes the straight-line data part and represents each
 nested function as an opaque `Closure`; this module turns that into a stable,
 searchable document (function code is not exposed, only line/parameter counts).
-`StoryPatch` edits literal fields through `lua_patch` and exports the changed
-modules as an overlay PAK; function values are preserved byte-for-byte.
+`StoryPatch` edits literal fields, creates or removes whole records through
+`lua_patch`, and exports the changed modules as an overlay PAK; function values
+are preserved byte-for-byte or copied from another record with `$ref`.
 
 Layouts seen on all three retail continents::
 
@@ -62,6 +63,8 @@ def _function(value):
 def _plain(value):
     if isinstance(value, lua_data.Closure):
         return _function(value)
+    if isinstance(value, lua_patch.Ref):
+        return {'$ref': list(value.path)}
     if isinstance(value, dict):
         return {str(key): _plain(item) for key, item in value.items()
                 if isinstance(key, (str, int))}
@@ -161,6 +164,13 @@ def _load_table(archive_set, filename, global_name):
     return globals_[global_name], source
 
 
+def build_identity(archive_set, continents):
+    """Fingerprint every story module an overlay is based on."""
+    names = [MODULES[kind][0] % continent
+             for continent in sorted(set(continents)) for kind in MODULES]
+    return gres.file_identity(archive_set, names)
+
+
 class Story:
     def __init__(self, continents=None, archives=None):
         self.continents = continents or {}
@@ -195,7 +205,7 @@ class Story:
 
     @classmethod
     def load_folder(cls, folder, continents=(1, 2, 3)):
-        archive_set = gres.ArchiveSet.open_folder(folder)
+        archive_set = gres.ArchiveSet.open_folder(folder, allow_gaps=True)
         try:
             return cls._from_set(archive_set, continents)
         finally:
@@ -399,6 +409,20 @@ class StoryPatch:
         {"kind": "dialogue", "continent": 1, "name": "cIntro",
          "path": "root.1.2", "field": "speech", "value": "..."}
 
+    Whole records are created with ``"create": {...}`` and removed with
+    ``"remove": true``::
+
+        {"kind": "quest", "continent": 1, "name": "qNew",
+         "create": {"DisplayName": "New quest", "Level": 1, "SubQuest": {}}}
+        {"kind": "dialogue", "continent": 1, "name": "cIntro",
+         "path": "root.1", "create": {"who": "HERO", "speech": "Hi"}}
+        {"kind": "dialogue", "continent": 1, "name": "cIntro",
+         "path": "root.1.2", "remove": true}
+
+    A dialogue ``create`` without ``path`` makes a new dialogue record; with a
+    path it appends a reply (the next free integer key, or ``"key"``).  Nested
+    tables are supported; function values cannot be synthesized.
+
     Dialogue ``condition`` is editable only where the stock node stores a
     boolean; function-valued conditions and actions are preserved untouched.
     """
@@ -408,6 +432,10 @@ class StoryPatch:
         self._modules = {}
         self._edits = {}
         self.changes = []
+
+    @property
+    def continents(self):
+        return sorted({continent for continent, _ in self._modules})
 
     def _module(self, continent, kind):
         kind = KIND_MODULE[kind]
@@ -436,40 +464,138 @@ class StoryPatch:
         self._modules[key] = module
         return module
 
-    def _path(self, continent, module, kind, name, field, dialogue_path):
+    def _table(self, module, kind):
         table_name = MODULES[KIND_MODULE[kind]][1]
         table = module['globals'].get(table_name)
         if not isinstance(table, dict):
             raise StoryError('%s does not define a %s table' % (module['file'], table_name))
+        return table_name, table
+
+    def _dialogue_node(self, continent, module, name, dialogue_path):
+        table_name, table = self._table(module, 'dialogue')
         try:
             actual = lua_patch.actual_key(table, name)
         except lua_patch.LuaPatchError:
-            raise StoryError('continent %d has no %s %s' % (continent, kind, name))
+            raise StoryError('continent %d has no dialogue %s' % (continent, name))
+        node = table[actual]
+        if not isinstance(node, dict):
+            raise StoryError('dialogue %s is not a table' % name)
         path = [table_name, actual]
-        if kind == 'dialogue':
-            node = table[actual]
+        segments = (dialogue_path or 'root').split('.')
+        if segments[0] != 'root':
+            raise StoryError('dialogue path must start with root: %r' % dialogue_path)
+        for segment in segments[1:]:
+            if not segment.isdigit() or int(segment) < 1:
+                raise StoryError('dialogue path segment %r is not a reply index' %
+                                 segment)
+            replies = sorted(key for key in node if isinstance(key, int))
+            index = int(segment)
+            if index > len(replies):
+                raise StoryError('dialogue %s has no reply %d (only %d)' %
+                                 (name, index, len(replies)))
+            key = replies[index - 1]
+            node = node[key]
             if not isinstance(node, dict):
-                raise StoryError('dialogue %s is not a table' % name)
-            segments = (dialogue_path or 'root').split('.')
-            if segments[0] != 'root':
-                raise StoryError('dialogue path must start with root: %r' % dialogue_path)
-            for segment in segments[1:]:
-                if not segment.isdigit() or int(segment) < 1:
-                    raise StoryError('dialogue path segment %r is not a reply index' %
-                                     segment)
-                replies = sorted(key for key in node if isinstance(key, int))
-                index = int(segment)
-                if index > len(replies):
-                    raise StoryError('dialogue %s has no reply %d (only %d)' %
-                                     (name, index, len(replies)))
-                key = replies[index - 1]
-                node = node[key]
-                if not isinstance(node, dict):
-                    raise StoryError('dialogue %s reply %s is not a table' %
-                                     (name, segment))
-                path.append(key)
+                raise StoryError('dialogue %s reply %s is not a table' %
+                                 (name, segment))
+            path.append(key)
+        return node, path
+
+    def _path(self, continent, module, kind, name, field, dialogue_path):
+        if kind == 'dialogue':
+            _, path = self._dialogue_node(continent, module, name, dialogue_path)
+        else:
+            table_name, table = self._table(module, kind)
+            try:
+                actual = lua_patch.actual_key(table, name)
+            except lua_patch.LuaPatchError:
+                raise StoryError('continent %d has no %s %s' % (continent, kind, name))
+            path = [table_name, actual]
         path.append(FIELDS[kind][field])
         return path
+
+    def _next_reply_key(self, node_path, node):
+        used = {key for key in node if isinstance(key, int)}
+        for group in self._edits.values():
+            for edit in group:
+                if edit['path'][:-1] == node_path and isinstance(edit['path'][-1], int):
+                    used.add(edit['path'][-1])
+        return max(used, default=0) + 1
+
+    def _record_edit(self, kind, continent, module_kind, keys, new, label, name,
+                     field=None, dialogue_path=None, old=None,
+                     created=False, removed=False):
+        group = self._edits.setdefault((continent, module_kind), [])
+        if any(edit['path'] == keys for edit in group):
+            raise StoryError('%s is edited twice' % label)
+        group.append({'path': keys, 'new': new})
+        self.changes.append({
+            'continent': continent, 'kind': kind, 'name': name, 'field': field,
+            'path': dialogue_path, 'old': _plain(old) if old is not None else None,
+            'new': _plain(new), 'created': created, 'removed': removed,
+        })
+
+    def _create(self, operation, kind, continent, name):
+        module = self._module(continent, kind)
+        table_name, table = self._table(module, kind)
+        payload = operation.get('create')
+        if not isinstance(payload, (dict, list)):
+            raise StoryError('create for %s must be a JSON object or array' % kind)
+        dialogue_path = operation.get('path')
+        if kind == 'dialogue' and dialogue_path is not None:
+            node, node_path = self._dialogue_node(continent, module, name, dialogue_path)
+            key = operation.get('key')
+            if key is None:
+                key = self._next_reply_key(node_path, node)
+            elif (not isinstance(key, int) or isinstance(key, bool) or key < 1):
+                raise StoryError('dialogue reply key must be a positive integer')
+            elif key in node:
+                raise StoryError('dialogue %s already has reply %d at %s' %
+                                 (name, key, dialogue_path))
+            keys = node_path + [key]
+            label = 'dialogue/%s/%s' % (name, dialogue_path)
+        else:
+            if dialogue_path not in (None, 'root'):
+                raise StoryError('%s records have no dialogue reply path' % kind)
+            try:
+                lua_patch.actual_key(table, name)
+            except lua_patch.LuaPatchError:
+                pass
+            else:
+                raise StoryError('continent %d already has %s %s' %
+                                 (continent, kind, name))
+            keys = [table_name, name]
+            label = '%s/%s' % (kind, name)
+        try:
+            new = lua_patch.validate_new(payload, label)
+            lua_patch.resolve_refs(module['globals'], new, label)
+        except lua_patch.LuaPatchError as error:
+            raise StoryError(str(error))
+        if isinstance(new, lua_patch.Ref):
+            raise StoryError('%s must be a table, not a function reference' % label)
+        self._record_edit(kind, continent, KIND_MODULE[kind], keys, new, label, name,
+                          dialogue_path=dialogue_path, created=True)
+
+    def _remove(self, operation, kind, continent, name):
+        module = self._module(continent, kind)
+        table_name, table = self._table(module, kind)
+        dialogue_path = operation.get('path')
+        if kind == 'dialogue' and dialogue_path not in (None, 'root'):
+            node, keys = self._dialogue_node(continent, module, name, dialogue_path)
+            old = node
+            label = 'dialogue/%s/%s' % (name, dialogue_path)
+        else:
+            if dialogue_path not in (None, 'root'):
+                raise StoryError('%s records have no dialogue reply path' % kind)
+            try:
+                actual = lua_patch.actual_key(table, name)
+            except lua_patch.LuaPatchError:
+                raise StoryError('continent %d has no %s %s' % (continent, kind, name))
+            keys = [table_name, actual]
+            old = table[actual]
+            label = '%s/%s' % (kind, name)
+        self._record_edit(kind, continent, KIND_MODULE[kind], keys, None, label, name,
+                          dialogue_path=dialogue_path, old=old, removed=True)
 
     def add(self, operation):
         if not isinstance(operation, dict):
@@ -478,7 +604,7 @@ class StoryPatch:
         if kind not in FIELDS:
             raise StoryError('unknown story kind %r' % (kind,))
         field = operation.get('field')
-        if field not in FIELDS[kind]:
+        if field is not None and field not in FIELDS[kind]:
             raise StoryError('%s field %r is not editable; choose one of %s' %
                              (kind, field, ', '.join(sorted(FIELDS[kind]))))
         try:
@@ -488,6 +614,22 @@ class StoryPatch:
         name = operation.get('name')
         if not isinstance(name, str) or not name:
             raise StoryError('operation %s needs a name' % (kind,))
+        creating = 'create' in operation
+        removing = bool(operation.get('remove'))
+        if creating and removing:
+            raise StoryError('operation %s/%s cannot create and remove at once' %
+                             (kind, name))
+        if creating or removing:
+            if field is not None:
+                raise StoryError('%s operations take a create/remove payload, '
+                                 'not a field' % kind)
+            if creating:
+                self._create(operation, kind, continent, name)
+            else:
+                self._remove(operation, kind, continent, name)
+            return
+        if field is None:
+            raise StoryError('%s operations need a field, create or remove' % kind)
         if 'value' not in operation:
             raise StoryError('operation %s/%s needs a value' % (kind, name))
         module = self._module(continent, kind)
@@ -513,8 +655,9 @@ class StoryPatch:
         self.changes.append({
             'continent': continent, 'kind': kind, 'name': name, 'field': field,
             'path': operation.get('path'),
-            'old': None if old is lua_patch.MISSING else old,
-            'new': new, 'created': old is lua_patch.MISSING,
+            'old': None if old is lua_patch.MISSING else _plain(old),
+            'new': _plain(new), 'created': old is lua_patch.MISSING,
+            'removed': new is None,
         })
 
     def documents(self):
@@ -552,13 +695,15 @@ class StoryPatch:
         if not folder.is_dir():
             raise StoryError('output folder does not exist: %s' % folder)
         if slot is None:
-            used = {module['source']['slot'] for module in self._modules.values()}
+            used = set(self.archive_set.slots)
+            used.update(module['source']['slot'] for module in self._modules.values())
             used.update(gres.archive_slot(candidate.name)
                         for candidate in folder.glob('Resource*.pak'))
             used.discard(None)
             slot = max(used, default=0) + 1
         destination = folder / ('Resource%d.pak' % slot)
-        gres.write_pak(destination, entries, overwrite=overwrite)
+        identity = build_identity(self.archive_set, self.continents)
+        gres.write_pak(destination, entries, overwrite=overwrite, identity=identity)
         return str(destination), entries
 
 

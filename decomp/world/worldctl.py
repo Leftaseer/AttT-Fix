@@ -21,7 +21,8 @@ import story as story_module  # noqa: E402
 import world as world_module  # noqa: E402
 
 
-def open_game(folder, allow_gaps=False):
+def open_game(folder, allow_gaps=True):
+    """Open a live game folder; disabled ResourceN.pak slots are legitimate."""
     folder = Path(folder)
     if not folder.is_dir():
         raise SystemExit('game folder does not exist: %s' % folder)
@@ -808,6 +809,20 @@ def command_story_patch(args):
         raise SystemExit('--out is required unless --dry-run is used')
     archive_set = open_game(args.game)
     try:
+        expected = document.get('identity')
+        if expected is not None:
+            if (not isinstance(expected, dict) or
+                    expected.get('format') != gres.IDENTITY_FORMAT):
+                raise SystemExit('patch identity is not an %s document' %
+                                 gres.IDENTITY_FORMAT)
+            files = expected.get('files')
+            if not isinstance(files, dict) or not files:
+                raise SystemExit('patch identity has no files')
+            differences = gres.identity_differences(
+                expected, gres.file_identity(archive_set, files))
+            if differences:
+                raise SystemExit('patch was built for a different game build:\n  ' +
+                                 '\n  '.join(differences[:10]))
         patcher = story_module.StoryPatch(archive_set)
         try:
             for operation in operations:
@@ -827,6 +842,8 @@ def command_story_patch(args):
             except story_module.StoryError as error:
                 raise SystemExit('patch failed: %s' % error)
             result['files'] = {name: len(data) for name, data in sorted(entries.items())}
+            result['identity'] = story_module.build_identity(archive_set,
+                                                             patcher.continents)
             print(json.dumps(result, ensure_ascii=False, indent=1, sort_keys=True))
             return 0
         try:
@@ -836,10 +853,48 @@ def command_story_patch(args):
             raise SystemExit('export failed: %s' % error)
         result['out'] = destination
         result['files'] = {name: len(data) for name, data in sorted(entries.items())}
+        result['identity'] = gres.read_identity(destination)
         print(json.dumps(result, ensure_ascii=False, indent=1, sort_keys=True))
         return 0
     finally:
         archive_set.close()
+
+
+def command_overlay_check(args):
+    pak = Path(args.pak)
+    if not pak.is_file():
+        raise SystemExit('overlay PAK does not exist: %s' % pak)
+    try:
+        archive = gres.Archive(pak)
+        archive.close()
+    except (OSError, ValueError) as error:
+        raise SystemExit('%s is not a usable PAK: %s' % (pak, error))
+    archive_set = open_game(args.game)
+    try:
+        check = gres.check_overlay(pak, archive_set)
+    finally:
+        archive_set.close()
+    if check is None:
+        result = {'pak': str(pak), 'game': args.game, 'status': 'unknown',
+                  'differences': []}
+    else:
+        identity, differences = check
+        result = {'pak': str(pak), 'game': args.game,
+                  'status': 'match' if not differences else 'mismatch',
+                  'files': len(identity['files']), 'differences': differences}
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=1, sort_keys=True))
+    elif check is None:
+        print('unknown: %s has no build-identity trailer; rebuild it with the '
+              'current toolkit' % pak)
+    elif result['status'] == 'match':
+        print('match: %s was built for the archives in %s (%d files)' %
+              (pak, args.game, result['files']))
+    else:
+        print('mismatch: %s was built for a different game build' % pak)
+        for difference in result['differences']:
+            print('  ' + difference)
+    return 0 if result['status'] == 'match' else 1
 
 
 def command_render(args):
@@ -1281,8 +1336,9 @@ def build_parser():
     story_validate.add_argument('--limit', type=int, default=30)
     story_validate.set_defaults(func=command_story_validate)
 
-    story_patch = sub.add_parser('story-patch',
-                                 help='apply literal story edits as a ResourceN.pak overlay')
+    story_patch = sub.add_parser(
+        'story-patch',
+        help='edit literals or create/remove records as a ResourceN.pak overlay')
     story_patch.add_argument('patch', help='attt-story-patch/1 JSON document')
     story_patch.add_argument('--game', required=True,
                              help='game folder the edits are based on')
@@ -1291,6 +1347,15 @@ def build_parser():
     story_patch.add_argument('--overwrite', action='store_true')
     story_patch.add_argument('--dry-run', action='store_true')
     story_patch.set_defaults(func=command_story_patch)
+
+    overlay_check = sub.add_parser(
+        'overlay-check',
+        help='verify that an overlay PAK targets the archives of a game build')
+    overlay_check.add_argument('pak', help='overlay ResourceN.pak to inspect')
+    overlay_check.add_argument('--game', required=True,
+                               help='game folder the overlay will be deployed to')
+    overlay_check.add_argument('--json', action='store_true')
+    overlay_check.set_defaults(func=command_overlay_check)
     return parser
 
 
