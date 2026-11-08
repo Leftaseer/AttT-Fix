@@ -10,11 +10,8 @@ floats, matching the engine's LUA_NUMBER.
 """
 import math
 import struct
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-import luadis  # noqa: E402
+import luadis
 
 HEADER = b'\x1bLua\x51\x00\x01\x04\x04\x04\x04\x00'
 OPS = luadis.OPS
