@@ -10,17 +10,20 @@ branch never conflict with them.
 
 ## Layout
 
-- `world/` — world and story data toolkit: GRES PAK reader/writer, Lua bytecode
-  decoder and expression compiler, quest/trigger/dialogue and placement CRUD,
-  validation, overlay export with build identity, preview server, and the
-  `worldctl.py` command-line front end.
+- `world-editor/` — edits world, forest and story content through numbered PAK
+  overlays: GRES archive I/O, Lua 5.1 bytecode decoding and expression
+  compilation, placement/town/army/forest/quest/trigger/dialogue editing,
+  validation, build-identity checks, a preview server, and the `worldctl.py`
+  command-line front end. See its [README](world-editor/README.md).
 
-Each future tool gets its own sibling directory here.
+Each future tool gets its own sibling directory here. World, forest and story
+editing share one directory because they reuse the same archive and bytecode
+layer and the same CLI.
 
 ## Running
 
 ```sh
-cd modding-tools/world
+cd modding-tools/world-editor
 python3 worldctl.py --help
 python3 -m unittest discover -s tests
 ```
