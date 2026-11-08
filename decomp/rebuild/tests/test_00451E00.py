@@ -2,8 +2,16 @@
 import struct
 from unicorn.x86_const import UC_X86_REG_ECX
 
+from difftest import STACK, STACK_SIZE
+
 VFT_FILESYSTEM = 0x0060B1A8
 VFT_SINGLETON = 0x0060B140
+
+
+def _zero_stack(h):
+    """The original hands the map ctors an uninitialised stack byte (the allocator, never read); the runs must
+    read the same stale value for their maps to compare equal."""
+    h.uc.mem_write(STACK + STACK_SIZE - 0x8000, bytes(0x8000))
 
 
 def _fill_empty(h, obj):
@@ -19,7 +27,7 @@ def _fill_empty(h, obj):
 
 def test_filesystem_ctor(h):
     obj = h.alloc(0xB8, bytes(0xB8))
-    diffs = h.compare(0x00451E00, regs={UC_X86_REG_ECX: obj}, ret='eax')
+    diffs = h.compare(0x00451E00, regs={UC_X86_REG_ECX: obj}, setup=_zero_stack, ret='eax')
     if diffs:
         return diffs
     res = h.call(0x00451E00, regs={UC_X86_REG_ECX: obj})
