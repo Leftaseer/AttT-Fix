@@ -279,6 +279,53 @@ def pushes_since_call(ins, k, preds, saves=()):
     return None
 
 
+def saves_since_call(ins, k, preds, saves):
+    """every push between the last call (or jump, ret, join of paths) and the call at ins[k] is a register save
+    (nothing was pushed for this callee)"""
+    for j in range(k - 1, -1, -1):
+        i = ins[j]
+        m = i.mnemonic
+        if m == 'push':
+            if i.address not in saves:
+                return False
+        elif m == 'call' or m in ('pop', 'leave') or m.startswith(('ret', 'j', 'loop')):
+            return True
+        if len(preds.get(i.address, [])) > 1 or (j and ins[j - 1].address not in preds.get(i.address, [])):
+            return True
+    return True
+
+
+# x87 instructions that take ST0 as an input / overwrite it: capstone's regs_access does not report ST0 for the
+# implicit x87 operands, so the mnemonic decides (ghidra/ICallOverride.java: a call with no prototype loses its
+# ST0 result, and the machine code says whether there is one to lose)
+X87_READ_ST0 = frozenset((
+    'fadd', 'faddp', 'fsub', 'fsubp', 'fsubr', 'fsubrp', 'fmul', 'fmulp', 'fdiv', 'fdivp', 'fdivr', 'fdivrp',
+    'fst', 'fstp', 'fcom', 'fcomp', 'fcompp', 'fcomi', 'fcomip', 'fucom', 'fucomp', 'fucompp', 'fucomi', 'fucomip',
+    'fxch', 'fabs', 'fchs', 'fsqrt', 'fscale', 'fprem', 'fprem1', 'frndint', 'f2xm1', 'fyl2x', 'fpatan',
+    'fsin', 'fcos', 'fsincos', 'fptan', 'ftst', 'fxam'))
+X87_WRITE_ST0 = frozenset((
+    'fld', 'fild', 'fbld', 'fldz', 'fld1', 'fldpi', 'fldl2e', 'fldl2t', 'fldlg2', 'fldln2', 'fxch',
+    'fadd', 'faddp', 'fsub', 'fsubp', 'fsubr', 'fsubrp', 'fmul', 'fmulp', 'fdiv', 'fdivp', 'fdivr', 'fdivrp',
+    'fabs', 'fchs', 'fsqrt', 'fscale', 'fprem', 'fprem1', 'frndint', 'f2xm1', 'fyl2x', 'fpatan',
+    'fsin', 'fcos', 'fsincos', 'fptan', 'fstp', 'fstp1', 'fcomp', 'fcompp', 'fucomp', 'fucompp',
+    'fcomi', 'fcomip', 'fucomi', 'fucomip', 'fistp', 'fisttp'))
+
+
+def x87_result(ins, k):
+    """1 when the call at ins[k] returns an x87 value in ST0: an instruction after it reads ST0 before one
+    overwrites it ('call eax; fadd [esp+0x48]', 0x4C805B).  Straight-line code: a branch, another call or a ret
+    ends the search (that call's ST0, or another path's, is not this one's result)"""
+    for i in ins[k + 1:k + 13]:
+        m = i.mnemonic
+        if m == 'call' or m.startswith(('ret', 'j', 'loop')) or m in ('int3', 'hlt', 'ud2'):
+            return 0
+        if m in X87_READ_ST0:
+            return 1
+        if m in X87_WRITE_ST0:
+            return 0
+    return 0
+
+
 def ecx_set(a, preds, code, start, ecx_in, limit=200):
     """1 if on some path to the call ECX is written after the last call (or is the function's own ECX input):
     a __thiscall callee needs it; for a __stdcall one a value in ECX does no harm"""
@@ -1257,7 +1304,8 @@ infer_direct_pops()
 with open(sys.argv[3], 'w') as f:
     f.write('# call address\tfunction\tecx set (1/0)\tadd esp after (-1: none)\tpushes right before'
             '\tbytes the callee pops (ESP balance, -1: unknown)\targument dwords pushed since the call before (-1: unknown)'
-            '\tESP after the call irrelevant to the decompiled code (1/0)\n')
+            '\tESP after the call irrelevant to the decompiled code (1/0)'
+            '\tresult in ST0 read after the call (1/0)\n')
     n = solved = byvt = ntail = bym = byimp = bynone = bycls = 0
     tails = []
     for start, size, ecx_in in funcs:
@@ -1268,6 +1316,8 @@ with open(sys.argv[3], 'w') as f:
         code = {i.address: i for i in ins}
         preds = predecessors(ins, code)
         rows, cleanup, fixed = [], {}, {}
+        savesonly = set()
+        st0 = {}
         saves = register_saves(ins)
         # the prologue's pushes save registers (or reserve locals, or are the SEH frame): not arguments of a call
         # with only moves between (0x479885's 'call edx' after 'push ecx; push esi' takes none)
@@ -1304,6 +1354,9 @@ with open(sys.argv[3], 'w') as f:
                     fixed[i.address] = dev_pops[dv]
             rows.append((i.address, ecx, cl, pushes, None if com else vslot(ins, k), pushes_since_call(ins, k, preds),
                          pushes_since_call(ins, k, preds, saves)))
+            if saves_since_call(ins, k, preds, saves):
+                savesonly.add(i.address)
+            st0[i.address] = x87_result(ins, k)
             slot = reg_import(ins, k)
             if slot is not None:
                 fixed[i.address] = imports[slot]
@@ -1357,7 +1410,7 @@ with open(sys.argv[3], 'w') as f:
                         o.type == x86.X86_OP_MEM and o.mem.base == ESP and o.mem.disp != 0 for o in x.operands):
                     return 0
             return 1
-        extra = {r[0]: '\t%d\t%d' % (-1 if r[6] is None else r[6], esp_safe(r[0])) for r in rows}
+        extra = {r[0]: '\t%d\t%d\t%d' % (-1 if r[6] is None else r[6], esp_safe(r[0]), st0[r[0]]) for r in rows}
         for a, ecx, cl, pushes, off, outstanding, _ in rows:
             if a in fixed:
                 f.write('%08X\t%08X\t%d\t%d\t%d\t%d%s\n' % (a, start, ecx, cl, pushes, fixed[a] if cl < 0 else 0, extra[a]))
@@ -1377,8 +1430,8 @@ with open(sys.argv[3], 'w') as f:
                 pop = vt_pops[off]
                 byvt += 1
             # a measured 0 may be a caller-pop callee whose arguments are cleaned up later, after another call: only
-            # without pushes before the call
-            if pop < 0 and cl < 0 and a in measured and (measured[a] > 0 or pushes == 0):
+            # without pushes before the call (or with nothing but register saves before it)
+            if pop < 0 and cl < 0 and a in measured and (measured[a] > 0 or pushes == 0 or a in savesonly):
                 pop = measured[a]
                 bym += 1
             if a in nopush:

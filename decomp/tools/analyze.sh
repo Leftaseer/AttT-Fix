@@ -97,15 +97,21 @@ EOF
 done
 
 # 4. back into Ghidra: register conventions, names, thiscall methods, class structures; export
+# (the functions hand-written code replaces: their prototypes stay as that code was written against)
+{ grep -rhoE 'DECOMP\([0-9A-Fa-f]{8}\)' "$HERE/../rebuild/src" || true; } | sed -E 's/.*\(([0-9A-Fa-f]{8})\)/\1/' \
+  | sort -u > "$O/hand_decompiled.tsv"
 for g in attt valk; do
+  HAND=/dev/null; [ "$g" = attt ] && HAND="$O/hand_decompiled.tsv"
   "$HL" "$WORK/proj" $g -process $g.exe -noanalysis -scriptPath "$GH" \
      -postScript FixNoReturn.java \
      -postScript RecoverSwitches.java "$SYMS/${g}_functions.tsv" \
      -postScript ApplyRegParams.java "$O/${g}_regparams.tsv" \
+     -postScript FixPhantomEdx.java "$O/${g}_regparams.tsv" "$SYMS/${g}_functions.tsv" \
      -postScript ApplySymbols.java "$SYMS/$g.sym,$SYMS/${g}_ctors.sym" \
      -postScript ClassThiscall.java "$O/${g}_regparams.tsv" \
      -postScript FloatReturns.java "$SYMS/${g}_x87ret.tsv" \
      -postScript FixStackParams.java "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv" \
+     -postScript AddStackArgs.java "$SYMS/${g}_functions.tsv" "$SYMS/${g}_stackparams.tsv" "$HAND" \
      -postScript SetReturns.java "$SYMS/${g}_retlive.tsv" "$SYMS/${g}_x87ret.tsv" \
      -postScript ByValueParams.java "$SYMS/${g}_byvalue.tsv" \
      -postScript FpuIntrinsics.java \
@@ -124,12 +130,28 @@ done
 #    indirect calls get call-site prototypes from the machine code first
 #    (a first export gives the conventions of the imports that icalls.py follows the stack through)
 "$HL" "$WORK/proj" attt -process attt.exe -noanalysis -readOnly -scriptPath "$GH" \
-   -postScript AutoExport.java "$WORK/decomp/attt_auto0.jsonl" "$WORK/decomp/attt_auto0_types.h" > "$WORK/logs/auto0_attt.log" 2>&1
+   -postScript AutoExport.java "$WORK/decomp/attt_auto0.jsonl" "$WORK/decomp/attt_auto0_types.h" \
+   200000 "" 120 > "$WORK/logs/auto0_attt.log" 2>&1
 py icalls.py "$WORK/bin/attt.exe" "$SYMS/attt_functions.tsv" "$O/attt_icalls.tsv" "$WORK/decomp/attt_auto0.jsonl.protos" "$SYMS/attt.sym" "$SYMS/attt_icall_pops.tsv" "$O/attt_rtti.json"
 "$HL" "$WORK/proj" attt -process attt.exe -noanalysis -scriptPath "$GH" \
-   -postScript ICallOverride.java "$O/attt_icalls.tsv" "$O/attt_icall_overrides.tsv" > "$WORK/logs/icall_attt.log" 2>&1
+   -postScript ICallOverride.java "$O/attt_icalls.tsv" "$O/attt_icall_overrides.tsv" 120 \
+   > "$WORK/logs/icall_attt.log" 2>&1
 "$HL" "$WORK/proj" attt -process attt.exe -noanalysis -readOnly -scriptPath "$GH" \
-   -postScript AutoExport.java "$WORK/decomp/attt_auto.jsonl" "$WORK/decomp/attt_auto_types.h" > "$WORK/logs/auto_attt.log" 2>&1
+   -postScript AutoExport.java "$WORK/decomp/attt_auto.jsonl" "$WORK/decomp/attt_auto_types.h" \
+   200000 "" 120 > "$WORK/logs/auto_attt.log" 2>&1
+# A function the decompiler could not render is listed with its reason; it is left as original code.
+for f in "$WORK/decomp/attt_auto0.jsonl" "$WORK/decomp/attt_auto.jsonl"; do
+  test -s "$f" || { echo "AutoExport wrote no functions to $f" >&2; exit 1; }
+  n=$(wc -l < "$f")
+  m=$(($(wc -l < "$f.failures.tsv") - 1))
+  echo "  $(basename "$f"): $n functions exported, $m decompiler failures"
+  if [ "$m" -gt 0 ]; then sed -n '2,6p' "$f.failures.tsv"; fi
+done
+m=$(($(wc -l < "$O/attt_icall_overrides.tsv.failures.tsv") - 1))
+if [ "$m" -gt 0 ]; then
+  echo "  indirect-call overrides: $m containing functions failed to decompile"
+  sed -n '2,6p' "$O/attt_icall_overrides.tsv.failures.tsv"
+fi
 # the export types every import, the plain C runtime included (memcpy, printf, Direct3DCreate9), which step 3's
 # tailpop.py knew only for the C++ runtime (cxximports, import_protos): the import thunk pops come from it now
 py tailpop.py "$WORK/bin/attt.exe" "$O/attt_regparams.tsv" "$SYMS/attt_functions.tsv" \

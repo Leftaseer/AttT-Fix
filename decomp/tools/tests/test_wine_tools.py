@@ -53,6 +53,24 @@ class WineToolsTests(unittest.TestCase):
             self.assertEqual((saves / 'game00').read_bytes(), b'save')
             self.assertEqual(exe.read_bytes(), b'executable')
 
+    def test_staging_copies_valkyrie_media_without_miles_or_bink(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets = root / 'assets'
+            media = assets / 'Resource/Media/Intro.ogm'
+            media.parent.mkdir(parents=True)
+            media.write_bytes(b'original video')
+            (assets / 'Resource0.pak').write_bytes(b'archive')
+            (assets / 'graphic.cfg').write_bytes(bytes(66))
+            exe = root / 'input.exe'
+            exe.write_bytes(b'executable')
+            game = root / 'game'
+            identities = wine.stage_game(assets, exe, game, 800, 600)
+            name = 'Resource/Media/Intro.ogm'
+            self.assertEqual(identities[name]['sha256'], wine.sha256(media))
+            (game / name).write_bytes(b'changed')
+            self.assertEqual(media.read_bytes(), b'original video')
+
     def test_staging_refuses_existing_directory(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

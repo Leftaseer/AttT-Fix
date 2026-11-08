@@ -17,3 +17,13 @@
 0047FF90	cdecl	0	bool __cdecl FUN_0047FF90(int *it, void *p, float eps)	polygon edge walk: EAX overwritten before it is read
 00480A30	cdecl	0	bool __cdecl FUN_00480A30(int *it, void *p)	polygon edge walk: EAX overwritten before it is read
 00480200	thiscall	0	bool __thiscall FUN_00480200(void *this)	polygon convexity: EAX overwritten before it is read
+# Callees whose stack arguments the decompiler typed from the pcode, but whose float arguments the callers passed
+# as integer bits (or the other way round): AutoExport reads that as float and integer bits mixed and leaves the
+# callers out.
+004CA820	thiscall	16	void __thiscall f_004CA820(void *this, float param_1, float param_2, float param_3, float param_4)	all four stack parameters are read only by x87/SSE float instructions (0x4CA844..0x4CA9BA); AddStackArgs typed the last undefined4, and the callers cast a float's bits (0x4F7430, 0x4F7780)
+00586BA0	thiscall	20	void __thiscall f_00586BA0(void *this, float param_1, float param_2, float param_3, float param_4, undefined4 param_5)	its only caller (0x586EC0, at 0x586FBB) pushes four floats and a truncated int (0x586F84..0x586FB6); AddStackArgs typed the first two undefined4, and the caller passed a float's bits through a BITCAST
+# The crash-report helper: it captures the caller's whole register context (and the return address) into a
+# CONTEXT for its stack walk (0x47C4F0, left original).  Ghidra's exported signature made every register of the
+# callee an input, so the caller 0x42EEF0 passed live EAX/EDX/EBX/ESI/EDI and an uninitialized ECX ('this').
+# The machine code's call site (0x42EF67) pushes two cdecl arguments and cleans 8 bytes.
+0047C4F0	cdecl	0	undefined4 __cdecl FUN_0047C4F0(int frames, char *report)	crash report: the callee records the caller's registers itself

@@ -99,6 +99,40 @@ public class FillClassStructs extends GhidraScript {
             }
         }
         d.dispose();
+        // FillOutStructureHelper can insert a composite field while that composite is still small and grow the
+        // composite later (CRenderObject in CSkinMesh at +0x168): the embedded length no longer matches the type
+        // and the decompiler rejects every function using the outer structure.  A type that still fits keeps its
+        // place with the current length; one that grew past the next field becomes a byte array of the same span.
+        int repaired = 0;
+        int ftx = currentProgram.startTransaction("repair embedded structures");
+        try {
+            for (int pass = 0; pass < 4; pass++) {
+                int n = 0;
+                Iterator<DataType> ti = dtm.getAllDataTypes();
+                while (ti.hasNext()) {
+                    DataType dt = ti.next();
+                    if (!(dt instanceof Structure)) continue;
+                    Structure s = (Structure) dt;
+                    DataTypeComponent[] cs = s.getComponents();
+                    for (int i = 0; i < cs.length; i++) {
+                        DataType cdt = cs[i].getDataType();
+                        if (!(cdt instanceof Composite) || cdt.getLength() == cs[i].getLength()) continue;
+                        int next = i + 1 < cs.length ? cs[i + 1].getOffset() : s.getLength();
+                        int gap = next - cs[i].getOffset();
+                        DataType repl = cdt.getLength() <= gap ? cdt
+                                : new ArrayDataType(Undefined1DataType.dataType, gap, 1);
+                        s.replaceAtOffset(cs[i].getOffset(), repl, Math.min(cdt.getLength(), gap),
+                                cs[i].getFieldName(), "embedded " + cdt.getPathName() + " resized");
+                        n++;
+                    }
+                }
+                repaired += n;
+                if (n == 0) break;
+            }
+        } finally {
+            currentProgram.endTransaction(ftx, repaired > 0);
+        }
+        println("embedded structures repaired: " + repaired);
         println("methods processed: " + done + ", failed: " + failed);
     }
 }

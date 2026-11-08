@@ -25,6 +25,7 @@ from pe import PE  # noqa: E402
 
 GAMES = {0x475EABAF: 'attt', 0x4883FB4F: 'valk'}
 REG_ORDER = ['ECX', 'EAX', 'EDX', 'EBX', 'ESI', 'EDI']
+ORIGINAL_REF = re.compile(r'^[_@]?(sub|d)_([0-9A-Fa-f]{8})(@\d+)?$')
 
 
 
@@ -336,6 +337,7 @@ def main():
                     'decomp_toggle.txt next to the exe): bisection without a new build for each step')
     ap.add_argument('--only', help='comma-separated source files (default: all of rebuild/src)')
     ap.add_argument('--auto', help='folder made by tools/autodecomp.py for this game (addresses of the game itself)')
+    ap.add_argument('--auto-only', action='store_true', help='build generated replacements without hand-written engine sources')
     ap.add_argument('-D', dest='defines', action='append', default=[], help='preprocessor define for the sources '
                     '(e.g. -D DECOMP_DEBUG_LOG: engine errors go to OutputDebugString)')
     ap.add_argument('--coverage', action='store_true', help='the new code marks each function it runs '
@@ -347,6 +349,8 @@ def main():
     ap.add_argument('--attfix-compat', action='store_true', help='preserve the native engine functions used by '
                     'AttTFix hooks (attfix_compat.json), including their byte-checked interior patch sites')
     a = ap.parse_args()
+    if a.auto_only and (not a.auto or a.only):
+        ap.error('--auto-only requires --auto and cannot be combined with --only')
 
     pe = PE(a.exe)
     game = GAMES.get(pe.pe.FILE_HEADER.TimeDateStamp)
@@ -365,13 +369,12 @@ def main():
         if not attfix_keep <= set(funcs):
             sys.exit('attfix_compat.json contains unknown function addresses')
         a.defines.append('DECOMP_ATTFIX_COMPAT')
-    native_refs = set()     # filled for auto-decompiled code of Valkyrie (its own addresses)
     fhow = {}
     fmap = load_map('attt2valk.tsv', fhow) if game == 'valk' else None
     dmap = load_map('attt2valk_data.tsv') if game == 'valk' else None
 
     def gaddr(x, data=False):
-        if game == 'attt' or (x in native_refs):
+        if game == 'attt':
             return x
         m = (dmap if data else fmap) or {}
         if x not in m:
@@ -383,7 +386,9 @@ def main():
     files = sorted(f for f in glob.glob(os.path.join(HERE, 'src', '**', '*.c'), recursive=True) +
                    glob.glob(os.path.join(HERE, 'src', '**', '*.cpp'), recursive=True)
                    if os.path.dirname(f) != fixed_dir)
-    if a.only:
+    if a.auto_only:
+        files = []
+    elif a.only:
         files = [f for f in files if os.path.basename(f) in a.only.split(',')]
 
     mingw_inc = os.environ.get('MINGW_INCLUDE', '/usr/i686-w64-mingw32/include')
@@ -418,6 +423,7 @@ def main():
         cached_run(['clang'] + cflags + extra + cov + ['-c', fn, '-o', obj], fn, obj)
         return obj
     objs = pmap(compile_src, files)
+    auto_objs, auto_sources, auto_protos = set(), set(), {}
     native = set()          # DECOMP addresses that are already addresses of this game (auto-decompiled code)
     raw_fixed = set()       # src/fixed functions marked '/* @raw */': naked code taking the original's place as is
     custom_auto = {}        # auto functions written as cdecl with the register parameters first
@@ -438,7 +444,7 @@ def main():
         # the functions fixed by hand replace their generated versions; '/* @conv REGS POP */' in them is the
         # prototype as convs.tsv would give it
         fixed = {}
-        for fx in sorted(glob.glob(os.path.join(fixed_dir, 'f_*.c'))) if game == 'attt' else []:
+        for fx in sorted(glob.glob(os.path.join(fixed_dir, 'f_*.c'))) if game == 'attt' and not a.auto_only else []:
             fixed[int(os.path.basename(fx)[2:10], 16)] = fx
         if a.fixed_exclude:
             drop = set(int(l.split()[0], 16) for l in open(a.fixed_exclude) if l.strip() and not l.startswith('#'))
@@ -461,6 +467,8 @@ def main():
                   '-I', os.path.join(HERE, 'include'), '-I', os.path.abspath(a.auto)] + ['-D' + d for d in a.defines]
         # the prototypes the generated code uses: the register lists in their parameter order (they may name
         # registers the function does not read, which is harmless) and the ret pop
+        hand_targets = {gaddr(d[0]) for d in decomp}
+        hand_calls = set(protos) if game == 'attt' else {fmap[ad] for ad in protos if ad in fmap}
         for l in open(os.path.join(a.auto, 'convs.tsv')):
             if l.startswith('#'):
                 continue
@@ -468,10 +476,9 @@ def main():
             ad = int(q[0], 16)
             size, old, oldpop, clob = funcs.get(ad, (0, [], 0, {'EAX', 'ECX', 'EDX'}))
             new = [r for r in q[1].split(',') if r]
-            if (ad in protos or any(gaddr(d[0]) == ad for d in decomp)) and (new, int(q[2])) != (old, oldpop):
+            if (ad in hand_targets or ad in hand_calls) and (new, int(q[2])) != (old, oldpop):
                 sys.exit('%08X: the hand-written code and the generated code see different conventions' % ad)
             funcs[ad] = (size, new, int(q[2]), clob)
-        hand = set(d[0] for d in decomp) if game == 'attt' else set(gaddr(d[0]) for d in decomp)
         srcs = []
         for fn in sorted(glob.glob(os.path.join(a.auto, 'auto_*.c'))):
             src = fn
@@ -505,15 +512,18 @@ def main():
                 custom_auto[int(m.group(1), 16)] = True
             for m in re.finditer(r'__decomp_marker__\(\s*([0-9A-Fa-f]{8})\s*\)\s*([^{;]*?)\b(f_[0-9A-F]{8})\s*(\((?:[^()]|\([^()]*\))*\))', pre):
                 ad = int(m.group(1), 16)
-                if ad in hand:
+                if ad in hand_targets:
                     continue
                 cm = re.search(r'__(cdecl|stdcall|fastcall|thiscall)', m.group(2))
                 decomp.append((ad, m.group(3), split_params(m.group(4), types), False, src, cm.group(1) if cm else 'cdecl'))
                 native.add(ad)
             for m in re.finditer(r'(__cdecl|__stdcall|__fastcall|__thiscall)\s+sub_([0-9A-Fa-f]{8})\s*(\((?:[^()]|\([^()]*\))*\))', pre):
                 conv_of = {'__cdecl': 'FN', '__stdcall': 'STDCALL', '__fastcall': 'FASTCALL', '__thiscall': 'THISCALL'}
-                protos.setdefault(int(m.group(2), 16), (conv_of[m.group(1)], split_params(m.group(3), types)))
+                table = auto_protos if game == 'valk' else protos
+                table.setdefault(int(m.group(2), 16), (conv_of[m.group(1)], split_params(m.group(3), types)))
             objs.append(obj)
+            auto_objs.add(obj)
+            auto_sources.add(src)
     rt = os.path.join(work, 'rt_support.obj')
     run(['clang'] + cflags + ['-c', os.path.join(HERE, 'rt_support.c'), '-o', rt])
     objs.append(rt)
@@ -526,14 +536,17 @@ def main():
         run(['clang'] + cflags + ['-c', os.path.join(HERE, 'toggle.c'), '-o', to])
         objs.append(to)
 
-    defined, undefined = set(), set()
+    defined, undefined, hand_refs, auto_refs = set(), set(), set(), set()
     for o in objs:
         d, u = nm_symbols(o)
         defined |= set(d)
         undefined |= set(u)
+        if game == 'valk':
+            refs = auto_refs if o in auto_objs else hand_refs
+            refs.update(s for s in u if ORIGINAL_REF.fullmatch(s))
     undefined -= defined
 
-    syms, repl, asm = [], [], ['\t.text']
+    syms, repl, asm = [(gaddr(0x005E4080), 'orig_chkstk')], [], ['\t.text']
     skipped = []
     # replacements
     demangle_all(list(defined) + list(undefined))
@@ -548,13 +561,14 @@ def main():
         if len(cands) != 1:
             sys.exit('%s: cannot find the compiled symbol of %s (candidates: %s)' % (fn, name, cands))
         sym = cands[0]
-        ga = addr if addr in native else gaddr(addr)
+        is_native = fn in auto_sources
+        ga = addr if is_native else gaddr(addr)
         if a.toggle and (ga not in native or addr in HARNESS_EXTRA):
             # the hand-written code (src/engine, src/fixed) stays replaced in every bisection step: it is the
             # engine that runs the test input (skipping the intros, loading the save, the debug keys), so a step
             # that switched it off would break the test itself, not the function under test
             ALWAYS_ON.add(ga)
-        if game == 'valk' and addr not in native and fhow.get(addr) not in TRUSTED:
+        if game == 'valk' and not is_native and fhow.get(addr) not in TRUSTED:
             sys.exit('%s: %s: the Valkyrie match of %08X is only "%s"; check it and mark it "manual" in '
                      'symbols/attt2valk.tsv, or exclude the function with #if DECOMP_GAME_ATTT'
                      % (fn, name, addr, fhow.get(addr)))
@@ -572,7 +586,7 @@ def main():
         elif conv == 'cdecl':
             nstack = nparams - len(regs)
             direct = not regs and retpop == 0
-            if addr in native and regs and forced_conv == 'cdecl' and not custom_auto.get(addr, False):
+            if is_native and regs and forced_conv == 'cdecl' and not custom_auto.get(addr, False):
                 skipped.append((addr, 'registers the prototype does not take'))
                 continue
         else:
@@ -589,7 +603,9 @@ def main():
         if conv == 'stdcall' and not regs:
             conv = 'thiscall'      # same stack handling: the target pops its stack arguments, no registers
         elif conv == 'fastcall' and set(regs) <= {'ECX', 'EDX'}:
-            conv, nstack = 'thiscall', max(0, nstack - 2)   # ECX and EDX pass through the adapter untouched
+            # ECX and EDX pass through the adapter untouched; the stack dwords it copies are the ones the
+            # callee pops (a by-value std::string is seven of them, not one parameter: 0x4C0A10)
+            conv, nstack = 'thiscall', max(0, retpop // 4)
             regs = [r for r in regs if r != 'EDX']
         if conv == 'cdecl' and nstack >= 0 and retpop > 4 * nstack and retpop % 4 == 0:
             # The original caller pushed retpop bytes but the prototype names fewer dwords: the decompiler
@@ -599,8 +615,8 @@ def main():
             # every dword the original caller pushed.
             nstack = retpop // 4
         if conv not in ('cdecl', 'thiscall') or (conv == 'thiscall' and not set(regs) <= {'ECX'}) or \
-                (conv == 'cdecl' and addr in native and regs and nstack < 0):
-            if addr in native:      # the decompiler's prototype does not fit the machine code: leave the original
+                (conv == 'cdecl' and is_native and regs and nstack < 0):
+            if is_native:          # the decompiler's prototype does not fit the machine code: leave the original
                 skipped.append((addr, 'convention'))
                 continue
             sys.exit('%s: %s: original %08X takes %s and pops %d bytes; write the replacement as a cdecl function '
@@ -640,16 +656,19 @@ def main():
             resolved.add(s)
     # references to originals
     for s in sorted(undefined):
-        m = re.match(r'^[_@]?(sub|d)_([0-9A-Fa-f]{8})(@\d+)?$', s)
+        m = ORIGINAL_REF.fullmatch(s)
         if not m:
             continue
         kind, addr = m.group(1), int(m.group(2), 16)
+        is_native = s in auto_refs
+        if is_native and s in hand_refs:
+            sys.exit('%s is shared by generated Valkyrie code and hand-written AttT code; build with --auto-only' % s)
+        ga = addr if is_native else gaddr(addr, kind == 'd')
         if kind == 'd':
-            syms.append((gaddr(addr, True), s[1:] if s.startswith('_') else s))
+            syms.append((ga, s[1:] if s.startswith('_') else s))
             continue
-        ga = gaddr(addr)
         size, regs, retpop, clob = funcs.get(ga, (0, [], 0, set()))
-        conv, nparams = protos.get(addr, ('FN', None))
+        conv, nparams = (auto_protos if is_native else protos).get(addr, ('FN', None))
         if conv == 'FN' and regs:
             if nparams is None:
                 sys.exit('sub_%08X has a register convention: declare it with ORIG_FN' % addr)

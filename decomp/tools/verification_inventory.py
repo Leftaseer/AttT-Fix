@@ -102,8 +102,9 @@ def main():
             sweep_rows, sweep = read_sweep(args.sweep, inputs, args.auto, eligible)
         except (OSError, ValueError, KeyError, TypeError, IndexError) as error:
             parser.error(f'invalid sweep: {error}')
+    game = 'valk' if PE(str(args.original)).pe.FILE_HEADER.TimeDateStamp == 0x4883FB4F else 'attt'
     names = {}
-    for line in (Path(__file__).resolve().parents[1] / 'symbols/attt.sym').read_text().splitlines():
+    for line in (Path(__file__).resolve().parents[1] / 'symbols' / f'{game}.sym').read_text().splitlines():
         parts = line.split('#')[0].split(maxsplit=2)
         if len(parts) == 3 and parts[1] == 'f':
             names.setdefault(int(parts[0], 16), parts[2])

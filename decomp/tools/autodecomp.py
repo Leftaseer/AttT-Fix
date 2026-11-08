@@ -26,7 +26,7 @@ BLOCK = [
     (r'\bin_stack_(?!ff)\w+', 'stack outside the frame'), (r'\bin_[A-Z]{2,4}\b', 'register input'),
     (r'\bin_ST\d\b', 'x87 register input (a value left on the FPU stack the decompiler lost track of)'),
     (r'WARNING: (?!Globals starting|Removing unreachable|Load size|Type propagation|Subroutine does not return|'
-     r'Function: \w+ replaced with injection: decomp_)', 'decompiler warning'),
+     r'Function: \w+ replaced with injection: (?:decomp_|alloca_probe))', 'decompiler warning'),
     (r'UNRESOLVED', 'unresolved name'), (r'halt_baddata|halt_unimplemented|software_\w+\(|swi\(', 'bad instruction'),
     (r'\bLOCK\(\)|\bUNLOCK\(\)', 'locked instruction'), (r'_vbase_destructor|__alloca_probe', 'compiler helper'),
     (r'\bin_FS_OFFSET\b', 'TEB access'), (r'\bxRam|\bunique0x', 'unmapped storage'),
@@ -58,6 +58,7 @@ def slot_bytes(t):
     t = t.strip()
     return BYVALUE.get(t, 8 if t in WIDE else 4)
 machine = {}       # addr -> (register inputs, bytes popped by ret) from symbols/<game>_functions.tsv
+caller_regs = {}   # addr -> why the register inputs are the caller's context, not arguments (symbols/GAME_callerregs.tsv)
 ebp_in = {}        # functions that read EBP before setting it (funclets using their caller's frame)
 convs = {}         # addr -> (registers in parameter order, ret pop) of the prototypes as written out
 shifted = {}       # addr -> indexes of the stack parameters that fit_convention moved a register in front of
@@ -412,6 +413,12 @@ def load_machine(path):
             q = l.rstrip('\n').split('\t')
             if l[0] != '#' and q[2] == 'exact':
                 stack_slots[int(q[0], 16)] = int(q[1])
+    cr = path.replace('_functions.tsv', '_callerregs.tsv')
+    if os.path.exists(cr):
+        for l in open(cr):
+            q = l.rstrip('\n').split('\t')
+            if l[0] != '#':
+                caller_regs[int(q[0], 16)] = q[1] if len(q) > 1 else ''
 
 
 def fit_convention(a, pr):
@@ -432,7 +439,7 @@ def fit_convention(a, pr):
         return 'register parameter after a stack parameter'
     if len(set(regs)) != len(regs) or not set(regs) <= set(REG_ORDER):
         return 'odd register storage'
-    if not regs_in <= set(regs):
+    if not regs_in <= set(regs) and a not in caller_regs:
         return 'reads registers the prototype lacks (%s)' % ','.join(sorted(regs_in - set(regs)))
     stack = sum(slot_bytes(t) for (t, _), s in zip(plist, storage) if s == 'stack')
     if pop is None:             # never returns: what a ret would pop does not matter, the convention's is taken
@@ -941,6 +948,17 @@ def convert(f, protos, skip, imports, impnames):
     if a in skip:
         return None, 'hand-decompiled'
     code = f['code']
+    # a register input the prototype declares as a parameter ('in_eax' of ApplyRegParams' custom conventions) is
+    # no read the prototype lacks: its name is the decompiler's, and the definition and the adapter build.py makes
+    # carry the value; rename it so the name does not look like one
+    hm = re.match(r'[^(]*\((.*?)\)\s*\{', code.replace('\n', ' '), re.S)
+    for r in sorted(set(re.findall(r'\bin_([A-Z]{2,4})\b', hm.group(1) if hm else '')), key=len, reverse=True):
+        code = re.sub(r'\bin_%s\b' % r, 'reg_%s' % r.lower(), code)
+    # a stack input the decompiler declared and never used (its slot was read as part of a narrower parameter):
+    # drop the declaration
+    for v in set(re.findall(r'\bin_stack_(?!ff)\w+', code)):
+        if len(re.findall(r'\b%s\b' % v, code)) == 1:
+            code = re.sub(r'(?m)^[ \t]*\w+[ \t]+\**%s;\n' % v, '', code)
     if f.get('floatmix'):
         if not FORCE[0]:
             return None, 'float and integer bits mixed (%s)' % f['floatmix'].split(' at ')[0]
@@ -978,7 +996,8 @@ def convert(f, protos, skip, imports, impnames):
                 re.search(r'\b_param_%s\s*=\s*CONCAT' % n, code) or re.search(r'(?<![.>\w])param_%s\s*=[^=]' % n, code[i:]):
             continue
         t = hd.group(2)
-        body = re.sub(r'(?<![.>\w])param_%s\b' % n, '((%s)param_%s)' % (t, n), code[i:])
+        # (not the operand of '&': the byte's address is the slot's, and '&(byte)param_3' does not compile)
+        body = re.sub(r'(?<![.>\w&])(?<!&\s)param_%s\b' % n, '((%s)param_%s)' % (t, n), code[i:])
         body = re.sub(r'\b_param_%s\b' % n, 'param_%s' % n, body)
         code = code[:hd.start()] + '%s%s%sparam_%s%s' % (hd.group(1), 'uint', hd.group(3), n, hd.group(4)) + \
             code[hd.end():i] + body
@@ -1619,7 +1638,10 @@ def convert(f, protos, skip, imports, impnames):
     pnames = [re.findall(r'\w+', p)[-1] for p in params]
     stackp = [k for k, st in enumerate(pr[5]) if st == 'stack'] if len(pr[5]) == len(params) else []
     if stackp and any(re.search(r'&\s*\(?\s*%s\b' % pnames[k], body) for k in stackp):
-        if not custom and cc not in ('__cdecl', '__stdcall', '__thiscall'):
+        if not custom and cc not in ('__cdecl', '__stdcall', '__thiscall') and \
+                not (cc == '__fastcall' and pr[5][:2] == ['ECX', 'EDX']):
+            # (a native __fastcall with only ECX taken: the compiler would pass the next parameter in EDX,
+            # not where the machine code has it)
             if not FORCE[0]:
                 return None, 'address of a stack parameter in a function of a custom convention'
             NOTES.append('address of a stack parameter in a function of a custom convention')
@@ -1731,6 +1753,8 @@ def convert(f, protos, skip, imports, impnames):
         return None, 'unknown symbol %s' % e
     # a small constant the decompiler took for an address ('&((void *)G_00000004)' passed on: 0x431100)
     body = re.sub(r'&?\s*\(\((\w+(?:\s*\*)+)\)\s*G_(0000[0-9A-F]{4})\)', lambda m: '((%s)0x%X)' % (m.group(1), int(m.group(2), 16)), body)
+    # a global the newer symbol table scoped to its class ('CConfig::G_006C884C'): the address is the symbol
+    body = re.sub(r'(?<![\w:>])(?:[A-Za-z_]\w*::)+G_([0-9A-F]{8})\b', r'G_\1', body)
     for g in re.findall(r'\bG_([0-9A-F]{8})\b', body):
         ad = int(g, 16)
         if not (0x401000 <= ad < 0x1000000):        # (the headers at 400000 are no section)
@@ -1997,11 +2021,12 @@ def main():
     impnames = {}
     for addr, (dll, name) in pe.imports.items():
         impnames[addr] = ('__imp_' + name) if name.startswith('?') else ('__imp__' + name)
-    # functions already written by hand
+    # Hand-written replacements use AttT addresses. Valkyrie exports use their own addresses.
     skip = set()
-    for fn in glob.glob(os.path.join(REBUILD, 'src', '**', '*.c*'), recursive=True):
-        for m in re.finditer(r'DECOMP\(\s*([0-9A-Fa-f]{8})\s*\)', open(fn, encoding='utf-8').read()):
-            skip.add(int(m.group(1), 16))
+    if pe.pe.FILE_HEADER.TimeDateStamp != 0x4883FB4F:
+        for fn in glob.glob(os.path.join(REBUILD, 'src', '**', '*.c*'), recursive=True):
+            for m in re.finditer(r'DECOMP\(\s*([0-9A-Fa-f]{8})\s*\)', open(fn, encoding='utf-8').read()):
+                skip.add(int(m.group(1), 16))
     pre = os.path.join(a.outdir, 'auto_pre.h')
     types = open(a.types, encoding='utf-8').read()
     ONE_BYTE.update(re.findall(r'_Static_assert\(sizeof\((_Demangler_\w+)\) == 1,', types))

@@ -1,8 +1,9 @@
 // Export decompiled functions in a form that can be compiled again (for tools/autodecomp.py):
 // the C text is rebuilt from the decompiler's token tree, with every call written as sub_XXXXXXXX, every global
 // as G_XXXXXXXX and every string literal as a pointer to the original string, so nothing depends on names.
-// Also writes the C definitions of all structures/unions/enums/typedefs the functions use (types.h).
-// Args: out.jsonl types.h [maxFunctionSize]
+// Also writes the C definitions of all structures/unions/enums/typedefs the functions use (types.h), and
+// OUT.jsonl.failures.tsv: functions the decompiler could not render, with the reason and elapsed time.
+// Args: out.jsonl types.h [maxFunctionSize [addresses [timeoutSeconds]]]
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.*;
 import ghidra.app.decompiler.parallel.*;
@@ -14,6 +15,7 @@ import ghidra.program.model.symbol.*;
 import ghidra.util.task.TaskMonitor;
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.*;
 
 public class AutoExport extends GhidraScript {
     static String js(String s) {
@@ -562,7 +564,7 @@ public class AutoExport extends GhidraScript {
                 }
                 // a symbol name whose address is an input of the token's p-code op (vftable of a constructor): the
                 // name alone is ambiguous (a class has a vftable for each base), the address is not
-                if (vn == null && t.getPcodeOp() != null && text.matches("&?[A-Za-z_][\\w:<>,`' ]*") &&
+                if (vn == null && t.getPcodeOp() != null && text.matches("&?[A-Za-z_][\\w:<>,`' @]*") &&
                         !text.matches("(true|false|NULL)")) {
                     String bare = text.replace("&", "");
                     bare = bare.contains("::") ? bare.substring(bare.lastIndexOf("::") + 2) : bare;
@@ -583,7 +585,7 @@ public class AutoExport extends GhidraScript {
                     }
                 }
                 // addresses printed with a symbol name (vftable, LAB_, FUN_, PTR_...)
-                if (vn != null && vn.isConstant() && text.matches("&?[A-Za-z_][\\w:<>,`' ]*") && !text.matches("(true|false|NULL)")) {
+                if (vn != null && vn.isConstant() && text.matches("&?[A-Za-z_][\\w:<>,`' @]*") && !text.matches("(true|false|NULL)")) {
                     long a = vn.getOffset();
                     addrs.add(a);
                     // the type the decompiler gives the address: '&G + i * 4' counts elements of its pointee
@@ -632,10 +634,15 @@ public class AutoExport extends GhidraScript {
         int maxSize = getScriptArgs().length > 2 ? Integer.parseInt(getScriptArgs()[2]) : 200000;
         // (a fourth argument, addresses with commas: only those functions, to look at the output of a few)
         Set<Long> only = null;
-        if (getScriptArgs().length > 3) {
+        if (getScriptArgs().length > 3 && !getScriptArgs()[3].trim().isEmpty()) {
             only = new HashSet<>();
             for (String x : getScriptArgs()[3].split(",")) only.add(Long.parseLong(x, 16));
         }
+        int timeout = getScriptArgs().length > 4 ? Integer.parseInt(getScriptArgs()[4]) : 60;
+        Map<Long, String> failReason = new ConcurrentHashMap<>();
+        Map<Long, Long> failMs = new ConcurrentHashMap<>();
+        // ParallelDecompiler returns results in completion order, not in function order: keep the JSON by address
+        Map<Long, String> okJson = new ConcurrentHashMap<>();
         List<Function> funcs = new ArrayList<>();
         for (Function f : currentProgram.getFunctionManager().getFunctions(true))
             if (!f.isExternal() && !f.isThunk() && f.getBody().getNumAddresses() <= maxSize &&
@@ -648,8 +655,18 @@ public class AutoExport extends GhidraScript {
             }
         }) {
             public String process(DecompileResults r, TaskMonitor m) {
+                long started = System.nanoTime();
                 Function f = r.getFunction();
-                if (r.getDecompiledFunction() == null) return null;
+                long ea = f.getEntryPoint().getOffset();
+                if (r.getDecompiledFunction() == null) {
+                    String why = r.isTimedOut() ? "timed out" : r.isCancelled() ? "cancelled" :
+                                 r.failedToStart() ? "failed to start" : "no decompiled function";
+                    String err = r.getErrorMessage();
+                    if (err != null && !err.isEmpty()) why += ": " + err;
+                    failReason.put(ea, why.replaceAll("[\\t\\r\\n]+", " "));
+                    failMs.put(ea, (System.nanoTime() - started) / 1000000L);
+                    return null;
+                }
                 Map<Long, String> globals = new TreeMap<>(), callees = new TreeMap<>(), strings = new TreeMap<>();
                 Map<String, String> sized = new TreeMap<>();
                 Set<DataType> used = new HashSet<>();
@@ -657,7 +674,11 @@ public class AutoExport extends GhidraScript {
                 Set<SequenceNumber> bits = new HashSet<>();
                 Set<String> fixed = new HashSet<>();
                 try { code = render(r, f, globals, callees, used, strings, sized, bits, fixed); }
-                catch (Exception e) { return null; }
+                catch (Exception e) {
+                    failReason.put(ea, ("render: " + e).replaceAll("[\\t\\r\\n]+", " "));
+                    failMs.put(ea, (System.nanoTime() - started) / 1000000L);
+                    return null;
+                }
                 code = code.replaceAll("\\b(__\\w+?)_keep[A-Z]+\\b", "$1");
                 usedAll.addAll(used);
                 StringBuilder sb = new StringBuilder();
@@ -698,14 +719,31 @@ public class AutoExport extends GhidraScript {
                 first = true;
                 for (Long a : strings.keySet()) { if (!first) sb.append(','); first = false; sb.append(String.format("\"%08X\"", a)); }
                 sb.append("]}");
+                okJson.put(ea, sb.toString());
                 return sb.toString();
             }
         };
-        cb.setTimeout(60);
-        List<String> res = ParallelDecompiler.decompileFunctions(cb, funcs, monitor);
+        cb.setTimeout(timeout);
+        ParallelDecompiler.decompileFunctions(cb, funcs, monitor);
         cb.dispose();
+        int exported = 0, failures = 0;
         try (PrintWriter w = new PrintWriter(new OutputStreamWriter(new FileOutputStream(out), "UTF-8"))) {
-            for (String s : res) if (s != null) w.println(s);
+            for (Function f : funcs) {
+                String s = okJson.get(f.getEntryPoint().getOffset());
+                if (s != null) { w.println(s); exported++; }
+            }
+        }
+        try (PrintWriter w = new PrintWriter(new OutputStreamWriter(new FileOutputStream(out + ".failures.tsv"), "UTF-8"))) {
+            w.println("# address\tsize\treason\telapsed_ms");
+            for (Function f : funcs) {
+                long ea = f.getEntryPoint().getOffset();
+                if (okJson.containsKey(ea)) continue;
+                String why = failReason.get(ea);
+                if (why == null) why = "no callback result";
+                Long ms = failMs.get(ea);
+                w.printf("%08X\t%d\t%s\t%s%n", ea, f.getBody().getNumAddresses(), why, ms == null ? "" : ms.toString());
+                failures++;
+            }
         }
         // prototypes of every function (for the callees)
         try (PrintWriter w = new PrintWriter(new OutputStreamWriter(new FileOutputStream(out + ".protos"), "UTF-8"))) {
@@ -749,7 +787,7 @@ public class AutoExport extends GhidraScript {
             for (DataType d : usedAll) w.println(d.getPathName());
         }
         new TypesC(this).write(typesOut, usedAll);
-        println("exported " + res.size() + " functions, " + usedAll.size() + " types used");
+        println("exported " + exported + " functions, " + failures + " failures, " + usedAll.size() + " types used");
     }
 
 }

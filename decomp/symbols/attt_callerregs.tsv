@@ -1,0 +1,5 @@
+# Callees whose register reads are the caller's context, not arguments: tools/autodecomp.py does not require their
+# prototypes to declare those registers, and the callers call them with the stack arguments the machine code pushes.
+# The callee's own body stays original (it is rejected: it reads the return address).
+# address	why
+0047C4F0	crash report: the callee overwrites GetThreadContext's CONTEXT with the live registers of its caller (and stack-walks from the return address), so every register input is data it records, not a parameter

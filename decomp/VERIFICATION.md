@@ -5,6 +5,343 @@ Builds, generated sources, manifests and logs stay under `/home/attt-dev`.
 Windows is for user-facing playtest packages. The user explicitly authorized running anything within the
 home directory; game tests now run from private WSL copies under `/home/attt-dev/work`.
 
+## Extra output register class (phantom EDX) — 2026-11-08, uncommitted
+
+This milestone was produced in `/home/attt-dev/work/attt-debug-menu` (branch `decomp/continue`); the
+corrected project is `/home/attt-dev/work/attt/proj`.
+
+All 68 `extra output register` rejects were `extraout_EDX` variants with one cause: Ghidra had left 178
+functions whose machine code reads only ECX typed `__fastcall` with an EDX parameter
+(`symbols/attt_regparams.tsv` says ECX-only, and the machine code never reads EDX). A direct caller then
+had to supply EDX, but the original machine code never sets it, so the decompiler passed the undefined
+value on as an argument. Example: 0x431440 pushes only the stream pointer and sets ECX before
+`call 0x4313A0`, yet decompiled as `sub_004313A0(this, extraout_EDX)`; the callee's real prototype is
+`__thiscall` with one stack pointer.
+
+Fix: new `decomp/ghidra/FixPhantomEdx.java`, run from `decomp/tools/analyze.sh` right after
+`ApplyRegParams.java` for both games. For a function whose machine-code register inputs (minus EBP, as
+`ApplyRegParams` does) are only ECX, it drops the phantom register parameters, sets `__thiscall`, keeps
+the existing stack parameters at their slots and fills the list up to the `ret` pop; caller-pop functions
+(`ret 0`) keep the parameters their callers push. The project was repaired in place (178 prototypes;
+171 + 7 in two passes); a fresh analysis reproduces the same state from the same tables, but a fresh
+end-to-end `analyze.sh` run was not done.
+
+Measured on the same export/autodecomp/ic3 inputs as the previous checkpoint:
+
+| metric | before | after |
+|---|---|---|
+| compiled | 9,798 | **9,908** |
+| rejected | 1,384 | **1,274** |
+| extra output register | 68 | **0** |
+| stack outside the frame | 46 | **19** |
+| register input | 16 | **1** |
+
+Per-function diff: 110 rejected -> compiled, 0 compiled -> other. Of the remaining 1,274 rejects, 706 are
+the excluded Lua range and 504 are hand-decompiled, leaving ~64 actionable (`stack outside the frame` 19,
+`unaffected register` 18, `decompiler warning` 8, `catches exceptions` 5, float/integer bits mixed 6, and
+single instances of varargs, indirect call without a prototype, return-address-as-value and
+callee-reads-EBP). The 110 newly compiled functions include the callers that previously carried
+`extraout_EDX` (00424F20 is now `sub_00424A90(this, &local, &vec)`).
+
+Verification: `build.py --auto-only` links 9,908 replacements with 0 relink mismatches (4,607,828 bytes,
+86,592 pointers checked); 58 tooling tests pass. `autoverify.py` over the 110 newly compiled functions
+(4 calls each) reports 2 verified, 96 `lowcov` with the original and the replacement faulting at the same
+point, 12 `unsupported` (msvcp80 `basic_fstream/ostream` and string methods, winmm, mss32, d3dx9
+imports), and **0 differs / 0 faultdiff**. The stream serializers 004313A0/00431440/00431580 are among the
+unsupported ones: the Unicorn harness does not model their `basic_fstream` path, so their evidence is
+compile/link plus identical behavior up to the common fault point, not a normal return. No gameplay run
+was done. Evidence: `/home/attt-dev/work/attt-tooling-20261108/phantom-edx-20261108/` (`recheck3.jsonl`,
+`functions.tsv`, fix/export/autodecomp/build/verify logs, `recheck3_verify.tsv`) and the updated
+`tooling.patch`.
+
+Fixed (2026-11-08): re-annotating the project with the newer symbol table reintroduced 51 `C++ name left`
+rejects because class-scoped data names such as `CConfig::G_006C884C` tripped the blanket `'::' in body`
+check. `autodecomp.py` now strips a class/namespace scope from a `G_XXXXXXXX` token before that check
+(the address is the symbol, as for every other `G_`); any other leftover `::` still rejects. New
+`tests/test_global_scope.py` covers both sides. The fix is converter-only and the current export contains
+no scoped names, so regenerating `/tmp/recheck7_auto` with it gives byte-identical `functions.tsv`,
+`auto_pre.h` and all 67 `auto_*.c` files (9,936 compiled / 1,248 rejected). 63 tooling tests pass. It has not been exercised
+against the newer symbol table itself; the next fresh end-to-end analysis should confirm the 51 rejects
+are gone.
+
+## Stack outside the frame class (missing stack arguments) — 2026-11-08, uncommitted
+
+Same checkout (`/home/attt-dev/work/attt-debug-menu`, branch `decomp/continue`), same repaired project.
+
+The 19 `stack outside the frame` rejects fell into two groups.
+
+Dead declarations: 004761F0, 00476BB0, 004EC0B0 and 004FBF20 had an `in_stack_000000xx` declaration that
+nothing used (its slot was read through a narrower parameter). `autodecomp.py` now drops such a
+declaration when it is the only occurrence. That exposed a second, latent bug in the same converter: the
+rewrite that widens a narrow parameter to its whole dword also cast every use, and `&param_3` became the
+invalid `&((byte)param_3)`. The cast is now skipped for the operand of `&` (the address of the byte is the
+address of the slot).
+
+Missing prototypes: 13 functions whose decompiled body really read an incoming stack slot above their
+parameters were given the missing ones in Ghidra by the new `decomp/ghidra/AddStackArgs.java`. It reads
+the `ret` pop (`symbols/<game>_functions.tsv`) and the exact stack slots the machine code uses
+(`symbols/<game>_stackparams.tsv`), and adds parameters up to `max(pop, 4*slots)` at their own offsets
+for custom storage, appended for the decompiler's own. It only touches functions whose current
+decompilation shows such a slot and never goes past the tables (a lost stack depth is left alone); a
+third argument lists the hand-written functions (`DECOMP(...)` in `rebuild/src`, generated as
+`out/hand_decompiled.tsv` by `analyze.sh`) so their prototypes stay as that code was written. Two passes
+in the project: 13 targets repaired (0042A850/0042A8B0/0042AEE0/00430570/00430650, 004C1710, 004C1EB0,
+004F66D0, 005A0990/005A09B0/005A09F0/005A0A10/005A0A50) and, on the full table, 00401960 (inside the
+excluded Lua range).
+
+Measured on the same export/autodecomp/ic3 inputs as the phantom-EDX checkpoint:
+
+| metric | before | after |
+|---|---|---|
+| compiled | 9,908 | **9,925** |
+| rejected | 1,274 | **1,257** |
+| stack outside the frame | 19 | **2** |
+
+Per-function diff: 17 rejected -> compiled, 0 compiled -> other (`status_diff.tsv`). The two remaining
+are not parameter-count errors and were deferred: 00513FC1 is not a real function start (it begins 33
+bytes into 00513FA0 and continues that function's `cmp`; the next section identifies it as an SEH
+funclet of 00513FA0), and 00544848 has a lost stack depth (a 2,976-byte function whose `stackparams`
+entry claims 680 slots, so the >32-slot sanity cap skips it).
+
+Verification: `build.py --auto-only` links 9,925 replacements with 0 relink mismatches (4,607,681 bytes,
+86,591 pointers checked); 58 tooling tests pass. `autoverify.py` over the 17 newly compiled functions
+(4 calls each) reports 11 `lowcov` (the original and the replacement fault at the same point, some calls
+returning in both), 6 `unsupported` (kernel32 `GetModuleFileNameW` and `GetSystemDirectoryA` are not
+modeled), and **0 differs / 0 faultdiff**. No gameplay run was done. Evidence:
+`/home/attt-dev/work/attt-tooling-20261108/stackargs-20261108/` (`recheck4.jsonl`, `functions.tsv`,
+`status_diff.tsv`, export/autodecomp/build/verify logs, `recheck4_verify.tsv`).
+
+## Unaffected register class (SEH funclets and CRT runtime) — 2026-11-08, uncommitted
+
+Same checkout and project as the two sections above. This class was investigated, not "fixed": the
+finding is that it is not a decompiler bug in engine code.
+
+The 18 `unaffected register` rejects of recheck4 (0042FB4D..005FFA20) plus 00513FC1 from the
+stack-outside class were classified from their machine code, imports and callers
+(`seh-class-20261108/unaffected_class.tsv`):
+
+| class | addresses | what the code is |
+|---|---|---|
+| SEH finally continuations | 0042FB4D, 00447A0D, 004D4A70 | entered by `jmp`/state return from a parent's `__finally`; read the parent frame (`[ebp-0xc/-0x14/-0x28/-0x50]`, `fs:[0]`), end in `mov esp,ebp; pop ebp` |
+| SEH funclets | 004BAC50, 00527DF0, 00513FC1 | interior entries with no prologue that use the parent's EBP/EBX; 004BAC50 and 00527DF0 are inside hand-decompiled parents, 00513FC1 continues 00513FA0's own `cmp` (its `push esi` does not touch flags) |
+| crash-reporter context capture | 0047C4F0, 0047C710 | `GetCurrentThread`/`GetThreadContext(CONTEXT_FULL)`, `IsBadStringPtrA`, `MultiByteToWideChar`, `HeapAlloc`; store their own return address as `CONTEXT.Eip` (0047C4F0 called from 0042EF67; 0047C710 has no caller) |
+| CRT assertion handlers | 005E21F9, 005E23D7 | `_chkstk`, `MessageBoxW`/`MessageBoxA`, `DebugBreak`, `GetForegroundWindow` |
+| CRT startup and /GS | 005E4080 (_chkstk), 005E47CF (`__security_check_cookie`), 005E4CAC (fatal handler: `SetUnhandledExceptionFilter`/`TerminateProcess`), 005FFA20 (/GS failure thunk) | runtime code called from Lua and engine code |
+| SEH unwind helpers | 005E417F, 005E41E4 (filter callbacks), 005E4910, 005E4955 (unwind helper/trampoline) | restore `fs:[0]`, walk the parent frame, `mov esp,ebp; pop ebp` |
+| **real engine function** | **00472E20** | `CMainMenuScene::vf15` (RTTI, vtable 0060E718); see below |
+
+Only 00472E20 is an engine function. The decompiler mis-models its SEH prologue and a `rep movsd`
+struct copy at 00472F91 (17 dwords from the EAX returned by 0x435550 into `edi+0xa8`), which leaves
+`unaff_ESI`/`unaff_EDI`/`unaff_retaddr`. Everything else must stay original machine code:
+0047C4F0/0047C710 record their caller's context, so a `build.py` adapter (which calls the
+replacement through an extra frame) would capture the adapter's EIP/EBP/ESP; the funclets and
+continuations are not function entries at all.
+
+The same conclusion covers the rest of the SEH cluster, which is 26 of the 1,257 rejects: the 17
+non-engine `unaffected register` functions, the 5 `catches exceptions`, the 2 `return address as a
+value`, the callee-00447A0D-reads-EBP reject and 00513FC1. None is a decompilation defect to repair.
+
+No code or project change was made. There is no partial-replacement hazard: the parents (0042FA10,
+00447860, 004D48D0) and every other SEH parent are Ghidra thunks or rejected functions, so they are
+not exported and keep their original bytes; the interior entries are never emitted. The build from
+the stack-args checkpoint therefore stands unchanged (9,925 replacements, 0 relink mismatches, 58
+tests, 0 differs/0 faultdiff); no new export or autoverify run was needed. Evidence:
+`/home/attt-dev/work/attt-tooling-20261108/seh-class-20261108/` (`unaffected_class.tsv`).
+
+Deferred at the time: 00472E20 needed a Ghidra-side stack/SEH model fix or a hand draft; it is a single
+engine function and does not justify a converter rule that would also change the runtime fragments. It
+was hand-drafted later the same day (see "00472E20 hand decompilation" below).
+
+## Indirect calls, x87 results and the last engine rejects — 2026-11-08, uncommitted
+
+Same checkout and repaired project as the three sections above. This pass closes the remaining actionable
+rejects of the stack-args checkpoint (9,925 compiled, 1,257 rejected, 2 compile errors). The export of the same
+project now gives **9,936 compiled, 1,248 rejected, 0 compile errors** (`/tmp/recheck7_auto/functions.tsv`).
+Per-function diff against recheck4: 11 rejected/compile-error -> compiled, none the other way.
+
+| metric | before | after |
+|---|---|---|
+| compiled | 9,925 | **9,936** |
+| rejected | 1,257 | **1,248** |
+| compile errors | 2 | **0** |
+| float and integer bits mixed (argument) | 4 | **0** |
+| return address as a value (engine) | 2 | **1** (005E4A80, CRT) |
+
+Indirect calls (004268C0, 00478040, 00505FC0). `tools/icalls.py` now tells a register save from an argument: a
+`push` between the previous call and an indirect `call` is a save when nothing before it pushed for this callee
+(`saves_since_call`). The ESP balance of five call sites was set by hand in `symbols/attt_icall_pops.tsv`
+(0047819B/004781C8 pop 12, 0042692C pop 4, 0042696D pop 16, 00505FD7 pop 0). The ninth fact column records that
+the machine code reads ST0 after a call; `ICallOverride.java` types a call the decompiler found no result for as
+`double` when it does (an x87 callee returns there). `ICallOverride` also writes `OUT.failures.tsv` with the
+containing functions the decompiler could not render, and both Ghidra scripts now keep their output in function
+order (ParallelDecompiler returns completion order).
+
+Decompiler warning (0042F280). Its only warning was `Function: _alloca_probe replaced with injection:
+alloca_probe`; `autodecomp.py` allows that note (the injection is the runtime's own `_chkstk` call) and the
+function compiles. The seven remaining decompiler-warning rejects are the MSVC 2005 SEH-prolog helpers
+(005E3ED2/005E40D6/005E4134/005E4197/005E44A8/005E498C/005E4B32), left original.
+
+Float and integer bits mixed (004CAA00, 004F7390, 004F7780, 00586EC0). Two callees were typed from the pcode with
+`undefined4` stack parameters that only x87/SSE instructions read, so every caller had to pass a float's bits
+through `BITCAST`. Hand prototypes in `symbols/attt_protos.tsv` now say 004CA820 is `__thiscall` with four
+floats (ret 0x10) and 00586BA0 has four floats and an int (ret 0x14); the callers compile, and 004F7430's
+`BITCAST` is gone. The two `float copy/piece` rejects are the CRT `__ftol2` helpers (005E3FA0/005E3FD6).
+
+Return address as a value (005552D0). No code change: the earlier recheck had passed the 9-column facts file as
+`--icalls`, which is the overrides format, so the facts never loaded and the indirect `call ebp` at 0x555651
+had an unknown pop. With the pipeline's files (the 4-column overrides and the sibling `_icalls.tsv` facts, which
+`autodecomp.py` loads by itself) the `add esp, 0x18` cleanup is known, the stack depths are recovered and the
+four return addresses of the import calls become stack arguments. 005E4A80 (CRT initializer-table runner whose
+table is empty in this binary) stays original.
+
+Two compile errors. 0042EEF0 passed live EAX/EDX/EBX/ESI/EDI and an uninitialized ECX (`this`) to 0047C4F0,
+because 0047C4F0's exported fastcall prototype made every register it records an argument. 0047C4F0 is the
+crash-report helper that overwrites `GetThreadContext`'s CONTEXT with its caller's registers and stack-walks
+from the return address; its register reads are captured data, not parameters. A hand cdecl prototype
+(`frames`, `report`) now matches the machine code's two pushed arguments, and the new
+`symbols/attt_callerregs.tsv` tells `autodecomp.py` that this callee's register inputs are exempt from the
+"reads registers the prototype lacks" check. 005E37A0 registers the AIL shutdown function through the thunk at
+0x5E3790; AutoExport now accepts `@` in a decorated symbol name printed as an address, so the emitted
+`((void *)G_005E3790)` is a normal code-address reference (`d_005E3790` is defined at the original address by
+`build.py`). 0047C4F0 itself stays original (it reads the return address).
+
+Verification: `build.py --auto-only` links 9,936 replacements with 0 relink mismatches (4,607,605 bytes, 86,586
+pointers checked); 61 tooling tests pass (58 + the new `tests/test_caller_regs.py` covering the exemption and
+that it does not hide a stack mismatch). `autoverify.py` over the 9 functions this build replaces that are new or
+changed here (0042EEF0, 005E37A0, 004CA820, 004CAA00, 004F7390, 004F7430, 004F7780, 00586EC0, 005552D0;
+16 calls each) reports 3 `unsupported` (kernel32 `GetLocalTime`, mss32, msvcr80 `_decode_pointer`), 6 `lowcov`
+(the original and the replacement fault at the same point; 005552D0 returned normally in all 16 calls but its
+coverage is 0.11), and **0 differs / 0 faultdiff**. The other fixes are hand-decompiled and not part of an
+`--auto-only` build. No gameplay run was done. The full `analyze.sh` was not re-run end to end; the export was
+made on the repaired project, which is the state `analyze.sh` produces. Pipeline order was checked: `KeepRegisters`
+runs after `ManualProtos` but skips all four prototyped functions because they change ECX. Evidence:
+`/tmp/recheck7*.log`, `/tmp/recheck7_verify.tsv`, and `attt-tooling-20261108/actionables-20261108/left_original_20261108.tsv`
+(every reject that stays original with its evidence).
+
+## Full sweep of the 9,936-replacement build — 2026-11-08, uncommitted
+
+The recheck7 build was swept in full with `verify_sweep.py` (same settings as the 2026-11-04 candidate
+sweep: 30 cases, `--seed 1`, `--steps 5000000`, `--fpcw 0x27f`, `--fn-timeout 30`, native coverage,
+96 shards). All 96 shards exited 0 and `summary.json` reports `"complete": true`.
+
+| verdict | 2026-11-04 (9,661 rows) | 2026-11-08 (9,936 rows) |
+|---|---|---|
+| verified | 3,540 | **3,644** |
+| lowcov | 4,593 | **5,033** |
+| unsupported | 997 | **770** |
+| timeout | 521 | **476** |
+| faultdiff | 6 | **11** |
+| differs | 4 | **2** |
+
+The 275 extra rows are the replacements added since the previous checkpoint. The tool set itself also
+changed (VC8 string/`iostream` modeling), so the unsupported and timeout counts are not a clean
+before/after of the same verifier; `verified`/`lowcov` stay at ~37%/~51% of rows.
+
+Both `differs` were triaged:
+
+- **0055B850** (`CForestsCreator::loadForests`): `mem 2035FEB0: 0800000000000000 / e800000000000000` on
+  the synthetic case 0 only. The identical row appears in the 2026-11-04 candidate sweeps
+  (`sound-and-sweep-20261104/candidate-full/av_0.tsv`, `float-recheck`, `final-recheck`), and a targeted
+  run with a real forest object (`sound-and-sweep-20261104/final-filesystem-zero.tsv`) reports
+  `verified`. Only the uninitialized-`this` fuzz case exposes a `std::string` field left at a different
+  value (8 vs 0xE8), i.e. the same pre-existing synthetic-input artifact, not a regression.
+- **00427820** (`nScript::TableGet` deleting destructor): `eax 300FEFF0 FFFFFFFF`. The original installs
+  an SEH record, calls the un-replaced `00422000`, and returns that base destructor's incidental EAX,
+  which is the saved `fs:[0]` chain head (a stack address). `autodecomp` strips the `G_FFDFF000`
+  chain writes from replacements by design, so the call sees the harness's initial head and returns
+  `0xFFFFFFFF`. The function is absent from `symbols/attt_retlive.tsv` and its callers ignore the
+  result; accepted as an incidental-return difference. Fixing it would mean preserving SEH chain
+  writes in generated code, which the harness cannot support.
+
+The 11 `faultdiff` rows are all "original faults or does not return on a randomized invalid input, the
+replacement does not" (`faultdiff` never means the replacement crashed where the original survived).
+Six are pre-existing (`00477E00`, `004783C0`, `004E0E50`, `004E0E90`, `0051DB90`, `00553260`); the other
+five (`0047BF50`, `0051A390`, `005531A0`, `00553320`, `00555E80`) belong to functions that only became
+replacements in this build, so they had no prior verdict. They are a dropped-load/loop-count effect on
+garbage `this` pointers: e.g. 0047BF50's replacement sinks a pointer load into the `count > 1` branch
+where the original loads it unconditionally, and 00555E80 faults on the original's integer divide while
+the replacement returns. Valid-state behavior is not exercised by those cases; no action taken.
+
+Evidence: `/tmp/recheck7_sweep/` (`manifest.json` pins the original, rebuilt EXE/map/`replace.txt`,
+tools and symbol files; `summary.json`; 96 `av_*.tsv` shards), `/tmp/recheck7_focus.tsv` (00427820
+reproduction).
+
+## 00472E20 hand decompilation, the last engine reject — 2026-11-08, uncommitted
+
+00472E20 (`CMainMenuScene::vf15`, RTTI, vtable 0060E718) was the last rejected engine function. The
+decompiler loses its SEH prologue and the `rep movsd` copy at 00472F91, so this is a hand draft in
+`rebuild/src/fixed/f_00472E20.c`. Signature: `int __thiscall (char *this, void *name, void *args, int modal)`.
+The decompiler's leading by-value `_GUIScene` argument was fiction; the machine code reads three stack
+dwords and forwards them to `GUIScene::vf15` (00584190, whose adapter pops 0xC, matching the existing
+`f_00584190.c`).
+
+The body is: base `GUIScene::vf15`; script table 0060AD08 (004323E0 constructor, 00437870 lookup by name)
+and GUI table 0x60E72C (0057B4E0); the camera from 00424E70 gets its defaults (zero at +0x50/+0x54/+0x5c/
++0x60/+0x64/+0x214, the floats at +0x58/+0x68/+0x74/+0x78/+0x7c/+0x80, flags +0x70/+0x84, +0x211/+0x218
+cleared) and a `vtbl+0x18` call on `camera+4`; 0x44 bytes (17 dwords) from `00435550(camera, buf)` are
+copied to `this+0xA8`; both tables are destroyed and their last destructor result is returned.
+
+Verification: `rebuild/tests/test_00472E20.py` stubs the five callees, gives the camera a vtable slot
+0x18 that counts its call, and runs the original and the replacement from one snapshot
+(`tools/difftest.py ... test_00472E20.py`, report `/tmp/recheck8_00472E20_report.json`):
+`1 comparisons, 1 normal_return_pair, 0 mismatches` (`ok test_00472E20.py:test_main_menu_scene_vf15`).
+A second run asserts the state the comparison cannot see after `restore`: the vtbl method ran once, the
+camera fields are zeroed/set, and `scene+0xA8` holds the 0x44 `state` bytes. `autoverify.py` cannot take
+the function (`--only` accepts only active generated replacements; hand functions are not in `auto_*.c`),
+so the entry-wise harness is the evidence.
+
+The whole hand-function suite was run against this build: `tools/difftest.py` over all
+`rebuild/tests/*.py` gives **47 tests, 0 failed** — 55 functions, 821 entry comparisons, 0 mismatches
+and 0 one-sided faults (`/tmp/recheck8_tests_report.json`). This is the first full-suite run on a full
+(10,496-replacement) build rather than an `--auto-only` one, so generated and hand-decompiled
+replacements were exercised together.
+
+### Full sweep of the 10,496-replacement build
+
+The full build was swept with the same verifier settings as the 9,936 `--auto-only` sweep (30 cases,
+seed 1, fpcw 0x27f, 5M steps, 30 s function limit, native coverage, 96 shards; this run used 16
+workers). All 96 shards exited 0 and `summary.json` reports `"complete": true`.
+
+| verdict | 9,936 build (auto-only) | 10,496 build (full) |
+|---|---|---|
+| verified | 3,644 | 3,640 |
+| lowcov | 5,033 | 4,997 |
+| unsupported | 770 | 767 |
+| timeout | 476 | 520 |
+| faultdiff | 11 | 11 |
+| differs | 2 | 1 |
+
+- The 11 `faultdiff` addresses are identical to the previous sweep (the same dropped-load/loop-count
+  rows on garbage `this`).
+- The only `differs` is 0055B850, with the byte-identical row from every previous sweep (the
+  uninitialized-`this` synthetic case; a realistic forest input is `verified`). **00427820 became
+  `verified`**: in the full build the base destructor 00422000 is itself replaced
+  (`rebuild/src/fixed/f_00422000.c`), so both runs call the same code and the incidental SEH-chain EAX
+  matches instead of differing.
+- The other 93 rows moved only among `verified`/`lowcov`/`timeout`/`unsupported`: 44 to `timeout`
+  (30 from lowcov, 14 from verified), 39 coverage flips between verified and lowcov, 9
+  unsupported/lowcov flips. No row became `differs` or `faultdiff`. These are harness-class changes:
+  the sweep measures coverage over the whole rebuilt image, and the full build replaces the hand
+  functions that were still original bytes in the `--auto-only` build; wall-clock timeouts also depend
+  on machine load (16 workers here). A focused re-run of ten representative timeout rows on both builds
+  with 5 workers gives identical verdicts (8 verified, 2 lowcov, the same case and coverage counts in
+  each run), confirming the extra timeouts were load artifacts rather than a behavior change.
+
+Evidence: `/tmp/recheck8_sweep/` (`manifest.json` pins the original, rebuilt EXE/map/`replace.txt`,
+tools, symbol files and shard settings; `summary.json`; 96 `av_*.tsv` shards) and
+`/tmp/timeout_check7|8/` (the 10-address re-run on the 9,936 and 10,496 builds).
+
+Full build of the same checkout: `build.py` links **10,496 replaced functions** (4,603,015 bytes,
+86,482 pointers checked, 0 relink mismatches) to `/tmp/recheck8_build/ATThrone.exe`
+(`/tmp/recheck8_build.log`). Of the functions that are not structural artifacts, the engine rejects
+left are the five `catches exceptions` SEH wrappers — GameMainGuarded (0042F9B0, `__try`/`__except`
+with CrashFilter), WinMain (0042FA10), 00445AB0, 004D48D0 and 0057DB00 (the last four are ordinary
+`__CxxFrameHandler3` C++ EH tables, i.e. destructor/cleanup funclets around `std::string`, `ifstream`
+and stream state). They must stay original machine code: generated C cannot express the MSVC EH cleanup
+or crash filter, and hand C would silently drop it. Everything else still rejected is the excluded Lua
+range, hand-decompiled code, CRT/runtime helpers, SEH funclets/continuations, the crash-report context
+capture, or a callee that must keep the caller's frame (00447860). No gameplay run was done.
+
 ## VC8 formatting and string append coverage
 
 The verifier models a bounded subset of narrow C-locale `_vsnprintf` and `sprintf`.

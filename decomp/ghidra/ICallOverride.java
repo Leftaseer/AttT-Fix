@@ -7,8 +7,11 @@
 //   callee-pop, ECX set        __thiscall (ECX, stack arguments)   - harmless for a __stdcall callee: it ignores ECX
 //   callee-pop, ECX not set    __stdcall  (stack arguments)
 // returning undefined4 when the decompiler found a result in EAX, void when it found none, float/double for one in
-// ST0, undefined8 for 8 bytes in EDX:EAX.  Writes OUT.tsv: call address, convention, stack arguments, result.
-// Args: icalls.tsv out.tsv
+// ST0, undefined8 for 8 bytes in EDX:EAX.  A call the decompiler gave no output loses the ST0 an x87 callee
+// returns (0x4C805B 'call eax; fadd'): the machine-code fact 'reads ST0 after the call' (tools/icalls.py) makes it
+// double all the same.  Writes OUT.tsv: call address, convention, stack arguments, result,
+// and OUT.tsv.failures.tsv for containing functions the decompiler could not render.
+// Args: icalls.tsv out.tsv [timeoutSeconds]
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.*;
 import ghidra.app.decompiler.parallel.*;
@@ -19,14 +22,19 @@ import ghidra.program.model.pcode.*;
 import ghidra.util.task.TaskMonitor;
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.*;
 
 public class ICallOverride extends GhidraScript {
-    static class Fact { int ecx, cleanup, pushes, pop, args = -1, espsafe = 0; }
+    static class Fact { int ecx, cleanup, pushes, pop, args = -1, espsafe = 0, st0 = 0; }
     static class Site { long call; int nstack; Set<String> regs = new TreeSet<>(); String out; }
 
     @Override
     public void run() throws Exception {
         String in = getScriptArgs()[0], outPath = getScriptArgs()[1];
+        int timeout = getScriptArgs().length > 2 ? Integer.parseInt(getScriptArgs()[2]) : 60;
+        Map<Long, String> failReason = new ConcurrentHashMap<>();
+        // ParallelDecompiler returns results in completion order, not in function order: keep sites by address
+        Map<Long, List<Site>> okSites = new ConcurrentHashMap<>();
         Map<Long, Fact> facts = new HashMap<>();
         Set<Function> funcs = new HashSet<>();
         try (BufferedReader r = new BufferedReader(new FileReader(in))) {
@@ -37,6 +45,7 @@ public class ICallOverride extends GhidraScript {
                 f.ecx = Integer.parseInt(q[2]); f.cleanup = Integer.parseInt(q[3]); f.pushes = Integer.parseInt(q[4]);
                 f.pop = q.length > 5 ? Integer.parseInt(q[5]) : -1;
                 if (q.length > 7) { f.args = Integer.parseInt(q[6]); f.espsafe = Integer.parseInt(q[7]); }
+                if (q.length > 8) f.st0 = Integer.parseInt(q[8]);
                 long a = Long.parseLong(q[0], 16);
                 facts.put(a, f);
                 Function fn = getFunctionContaining(toAddr(a));
@@ -48,8 +57,17 @@ public class ICallOverride extends GhidraScript {
         }) {
             public List<Site> process(DecompileResults r, TaskMonitor m) {
                 List<Site> sites = new ArrayList<>();
+                Function f = r.getFunction();
+                long ea = f.getEntryPoint().getOffset();
                 HighFunction hf = r.getHighFunction();
-                if (hf == null) return sites;
+                if (hf == null) {
+                    String why = r.isTimedOut() ? "timed out" : r.isCancelled() ? "cancelled" :
+                                 r.failedToStart() ? "failed to start" : "no high function";
+                    String err = r.getErrorMessage();
+                    if (err != null && !err.isEmpty()) why += ": " + err;
+                    failReason.put(ea, why.replaceAll("[\\t\\r\\n]+", " "));
+                    return null;
+                }
                 Iterator<PcodeOpAST> it = hf.getPcodeOps();
                 while (it.hasNext()) {
                     PcodeOpAST op = it.next();
@@ -66,7 +84,12 @@ public class ICallOverride extends GhidraScript {
                         } else s.nstack++;
                     }
                     Varnode o = op.getOutput();
-                    if (o == null) s.out = "void";
+                    if (o == null) {
+                        // an x87 callee returns in ST0, which the decompiler drops for a call with no prototype;
+                        // the machine code reading ST0 after it ('call eax; fadd') says there is a result
+                        Fact fact = facts.get(s.call);
+                        s.out = fact != null && fact.st0 == 1 ? "double" : "void";
+                    }
                     else if (o.isRegister() && o.getSize() == 4 &&
                              "EAX".equals(currentProgram.getRegister(o.getAddress(), 4) == null ? null :
                                           currentProgram.getRegister(o.getAddress(), 4).getName())) s.out = "undefined4";
@@ -85,17 +108,32 @@ public class ICallOverride extends GhidraScript {
                     else s.out = "other";
                     sites.add(s);
                 }
+                okSites.put(ea, sites);
                 return sites;
             }
         };
-        cb.setTimeout(60);
-        List<List<Site>> res = ParallelDecompiler.decompileFunctions(cb, new ArrayList<>(funcs), monitor);
+        cb.setTimeout(timeout);
+        List<Function> funcList = new ArrayList<>(funcs);
+        funcList.sort(Comparator.comparingLong(f -> f.getEntryPoint().getOffset()));
+        ParallelDecompiler.decompileFunctions(cb, funcList, monitor);
         cb.dispose();
         DataTypeManager dtm = currentProgram.getDataTypeManager();
-        int written = 0, skipped = 0;
+        int written = 0, skipped = 0, failures = 0;
+        try (PrintWriter w = new PrintWriter(new FileWriter(outPath + ".failures.tsv"))) {
+            w.println("# function address\tsize\treason");
+            for (Function f : funcList) {
+                long ea = f.getEntryPoint().getOffset();
+                if (okSites.containsKey(ea)) continue;
+                String why = failReason.get(ea);
+                w.printf("%08X\t%d\t%s%n", ea, f.getBody().getNumAddresses(),
+                         why == null ? "no callback result" : why);
+                failures++;
+            }
+        }
         try (PrintWriter w = new PrintWriter(new FileWriter(outPath))) {
             w.println("# call address\tconvention\tstack arguments\tresult\t(or: skipped, reason)");
-            for (List<Site> sites : res) {
+            for (Function hostFn : funcList) {
+                List<Site> sites = okSites.get(hostFn.getEntryPoint().getOffset());
                 if (sites == null) continue;
                 for (Site s : sites) {
                     Fact f = facts.get(s.call);
@@ -143,6 +181,7 @@ public class ICallOverride extends GhidraScript {
                 }
             }
         }
-        println("indirect call overrides: " + written + " written, " + skipped + " skipped");
+        println("indirect call overrides: " + written + " written, " + skipped + " skipped, "
+                + failures + " function failures");
     }
 }

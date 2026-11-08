@@ -125,7 +125,7 @@ class Services:
                        env=self.env, check=True, capture_output=True)
         read_fd, write_fd = os.pipe()
         try:
-            xvfb = self.start_process(['Xvfb', display, '-displayfd', str(write_fd), '-screen', '0',
+            xvfb = self.start_process(['Xvfb', display, '-noreset', '-displayfd', str(write_fd), '-screen', '0',
                                       '%dx%dx24' % (self.width, self.height), '-nolisten', 'unix', '-nolisten', 'tcp',
                                       '-auth', str(authority), '-fp', 'built-ins'], 'xvfb', pass_fds=(write_fd,),
                                      env=dict(self.env, LD_PRELOAD=str(self.runtime / 'bind_loopback.so')))
@@ -181,9 +181,19 @@ def stage_game(assets, exe, directory, width, height, saves=None, test_input=Non
     if not (directory / 'Resource0.pak').exists():
         raise ValueError('asset directory has no Resource0.pak')
     for name in ('mss32.dll', 'binkw32.dll'):
-        shutil.copy2(assets / name, directory / name)
-        identities[name] = {'sha256': sha256(assets / name)}
-    shutil.copytree(assets / 'MSS', directory / 'MSS')
+        source = assets / name
+        if source.is_file():
+            shutil.copy2(source, directory / name)
+            identities[name] = {'sha256': sha256(source)}
+    # AttT uses external Miles plugins. Valkyrie uses loose audio and video files.
+    for name in ('MSS', 'Resource'):
+        source = assets / name
+        if source.is_dir():
+            shutil.copytree(source, directory / name)
+            for file in sorted(source.rglob('*')):
+                if file.is_file():
+                    identities[file.relative_to(assets).as_posix()] = {
+                        'bytes': file.stat().st_size, 'sha256': sha256(file)}
     cfg = bytearray((assets / 'graphic.cfg').read_bytes())
     if len(cfg) < 17:
         raise ValueError('graphic.cfg is too short')

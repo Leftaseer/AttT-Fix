@@ -1173,3 +1173,14 @@
 005E3EEA	0
 005E415F	0
 005E41BB	0
+# set by hand from the machine code (ESP balance), 2026-11-08: the indirect callee pops its own arguments, and the
+# two dwords below them are the following check call's (`push line; push file; ... call [reg]; push result; call
+# check; add esp, 0xC`), so the call has 3 stack arguments, not the 5 pushes before it
+0047819B	12
+004781C8	12
+# set by hand from the machine code (ESP balance): the loop keeps ESP balanced, so the callee pops its argument
+0042692C	4
+0042696D	16
+# set by hand from the machine code: every push before it is a register save (EBP/ESI/EDI), ECX is this, no stack
+# arguments and nothing popped
+00505FD7	0
