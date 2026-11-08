@@ -504,7 +504,14 @@ class Forests:
             entries[entry['file']] = build_fst(entry['records'])
         return entries
 
-    def export_pak(self, path, slot=None, overwrite=False):
+    def identity_files(self):
+        """WorldLevel plus every loaded zone file that makes up the base build."""
+        names = [CONFIG_FILE]
+        for zones in self.zones.values():
+            names.extend(entry['file'] for entry in zones.values())
+        return names
+
+    def export_pak(self, path, slot=None, overwrite=False, archive_set=None):
         entries = self.export_entries()
         if not entries:
             raise ForestError('no forest zones changed')
@@ -520,5 +527,11 @@ class Forests:
             used.discard(None)
             slot = max(used, default=0) + 1
         destination = folder / ('Resource%d.pak' % slot)
-        gres.write_pak(destination, entries, overwrite=overwrite)
+        identity = None
+        if archive_set is not None:
+            identity = gres.file_identity(archive_set,
+                                          self.identity_files() or list(entries))
+            if not identity['files']:
+                identity = None
+        gres.write_pak(destination, entries, overwrite=overwrite, identity=identity)
         return str(destination), entries

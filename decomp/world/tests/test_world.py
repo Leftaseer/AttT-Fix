@@ -446,6 +446,29 @@ class WorldTest(unittest.TestCase):
         with self.assertRaises(world.WorldError):
             sample_world().export_pak('/tmp')
 
+    def test_export_stamps_build_identity(self):
+        data = sample_world()
+        base = {}
+        for name, source in data.continents[1]['sources'].items():
+            source['file'] = world.MODULES[name][0] % 1
+            global_name = world.MODULES[name][1]
+            base[source['file']] = lua_data.emit_source(
+                {global_name: data.module(1, name)}, order=[global_name])
+        data.move_local(1, 'Town1', 'H1', 'tree', 1, x=2.0)
+        with tempfile.TemporaryDirectory() as folder:
+            game = os.path.join(folder, 'game')
+            out = os.path.join(folder, 'out')
+            os.makedirs(game)
+            os.makedirs(out)
+            gres.write_pak(os.path.join(game, 'Resource0.pak'), base)
+            with gres.ArchiveSet.open_folder(game) as archive_set:
+                expected = gres.file_identity(archive_set, data.identity_files())
+                path, _ = data.export_pak(out, archive_set=archive_set)
+            self.assertEqual(gres.read_identity(path), expected)
+            self.assertEqual(set(expected['files']), set(base))
+            with gres.ArchiveSet.open_folder(game) as archive_set:
+                self.assertEqual(gres.check_overlay(path, archive_set), (expected, []))
+
     def test_export_slot_skips_existing_archives(self):
         data = sample_world()
         data.move_local(1, 'Town1', 'H1', 'tree', 1, x=2.0)

@@ -475,9 +475,12 @@ def command_export(args):
               'export re-emits data-only source' %
               (source['continent'], source['module'], source['archive'], source['slot']),
               file=sys.stderr)
-    if args.game:
-        archive_set = open_game(args.game)
-        try:
+    archive_set = open_game(args.game) if args.game else None
+    try:
+        if archive_set is None:
+            print('warning: no --game given; overlay will have no build identity',
+                  file=sys.stderr)
+        else:
             units = load_units(archive_set)
             for continent in world.continents:
                 errors = [issue for issue in world.validate(continent, archive_set, units)
@@ -485,11 +488,17 @@ def command_export(args):
                 if errors:
                     raise SystemExit('refusing to export: %d validation error(s) on continent %d' %
                                      (len(errors), continent))
-        finally:
+        destination, entries = world.export_pak(args.out, slot=args.slot,
+                                                overwrite=args.overwrite,
+                                                archive_set=archive_set)
+    finally:
+        if archive_set is not None:
             archive_set.close()
-    destination, entries = world.export_pak(args.out, slot=args.slot, overwrite=args.overwrite)
     for name in sorted(entries):
         print('%s: %d bytes' % (name, len(entries[name])))
+    identity = gres.read_identity(destination)
+    if identity is not None:
+        print('build identity: %d file(s)' % len(identity['files']))
     print(destination)
 
 
@@ -664,9 +673,12 @@ def command_forest_validate(args):
 
 def command_forest_export(args):
     model = load_forests(args.forests)
-    if args.game:
-        archive_set = open_game(args.game)
-        try:
+    archive_set = open_game(args.game) if args.game else None
+    try:
+        if archive_set is None:
+            print('warning: no --game given; overlay will have no build identity',
+                  file=sys.stderr)
+        else:
             heightmaps = {}
             if not args.no_heightmap:
                 for continent in model.zones:
@@ -676,11 +688,17 @@ def command_forest_export(args):
                       if issue['level'] == 'error']
             if errors:
                 raise SystemExit('refusing to export: %d validation error(s)' % len(errors))
-        finally:
+        destination, entries = model.export_pak(args.out, slot=args.slot,
+                                                overwrite=args.overwrite,
+                                                archive_set=archive_set)
+    finally:
+        if archive_set is not None:
             archive_set.close()
-    destination, entries = model.export_pak(args.out, slot=args.slot, overwrite=args.overwrite)
     for name in sorted(entries):
         print('%s: %d bytes' % (name, len(entries[name])))
+    identity = gres.read_identity(destination)
+    if identity is not None:
+        print('build identity: %d file(s)' % len(identity['files']))
     print(destination)
 
 

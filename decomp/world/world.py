@@ -185,6 +185,13 @@ class World:
                                    'slot': source.get('slot')})
         return result
 
+    def identity_files(self):
+        """Source module names that make up this model's base build."""
+        return [source['file']
+                for _, entry in sorted(self.continents.items())
+                for source in entry.get('sources', {}).values()
+                if source.get('file')]
+
     def placement(self, continent, town, house, kind, index):
         town_entry, house_entry = self.house_entry(continent, town, house)
         section = SECTIONS[kind]
@@ -568,7 +575,7 @@ class World:
             entries[filename] = lua_data.emit_source({global_name: table}, order=[global_name])
         return entries
 
-    def export_pak(self, path, slot=None, overwrite=False):
+    def export_pak(self, path, slot=None, overwrite=False, archive_set=None):
         entries = self.export_entries()
         if not entries:
             raise WorldError('no modules changed')
@@ -584,7 +591,13 @@ class World:
             used.discard(None)
             slot = max(used, default=0) + 1
         destination = folder / ('Resource%d.pak' % slot)
-        gres.write_pak(destination, entries, overwrite=overwrite)
+        identity = None
+        if archive_set is not None:
+            identity = gres.file_identity(archive_set,
+                                          self.identity_files() or list(entries))
+            if not identity['files']:
+                identity = None
+        gres.write_pak(destination, entries, overwrite=overwrite, identity=identity)
         return str(destination), entries
 
 

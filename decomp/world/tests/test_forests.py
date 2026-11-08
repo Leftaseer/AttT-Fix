@@ -157,6 +157,7 @@ class ForestModelTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             destination, exported = model.export_pak(tmp)
             self.assertTrue(destination.endswith('Resource1.pak'))
+            self.assertIsNone(gres.read_identity(destination))
             with gres.ArchiveSet([destination]) as archive_set:
                 self.assertEqual(forests.parse_fst(archive_set.read('fzone1test.fst'))[0]['x'], 12.0)
 
@@ -273,7 +274,11 @@ class ForestCliTest(unittest.TestCase):
                                         '--out', self.out]), 0)
         overlay = os.path.join(self.out, 'Resource1.pak')
         self.assertTrue(os.path.exists(overlay))
+        identity = gres.read_identity(overlay)
+        self.assertIsNotNone(identity)
+        self.assertEqual(set(identity['files']), {'worldlevel.lua', 'fzone1test.fst'})
         with gres.ArchiveSet([os.path.join(self.game, 'Resource0.pak'), overlay]) as archive_set:
+            self.assertEqual(gres.check_overlay(overlay, archive_set), (identity, []))
             loaded = forests.Forests._from_set(archive_set, (1,))
             self.assertEqual(len(loaded.zone(1, 'fzone1test')['records']), 3)
 
