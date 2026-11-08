@@ -5,8 +5,9 @@ functions.  `lua_data` decodes the straight-line data part and represents each
 nested function as an opaque `Closure`; this module turns that into a stable,
 searchable document (function code is not exposed, only line/parameter counts).
 `StoryPatch` edits literal fields, creates or removes whole records through
-`lua_patch`, and exports the changed modules as an overlay PAK; function values
-are preserved byte-for-byte or copied from another record with `$ref`.
+`lua_patch`, and exports the changed modules as an overlay PAK.  Function
+values are preserved byte-for-byte, copied from another record with `$ref`, or
+generated from a JSON expression with `$expr` (see `lua_expr`).
 
 Layouts seen on all three retail continents::
 
@@ -24,6 +25,7 @@ from pathlib import Path
 
 import gres
 import lua_data
+import lua_expr
 import lua_patch
 
 FORMAT = 'attt-story/1'
@@ -35,13 +37,16 @@ MODULES = {
 }
 PHASES = ('Start', 'Finish')
 
-#: story-facing literal fields; functions (Condition/Action) are not editable
+#: story-facing literal fields; Condition/Action/Do additionally take `$expr`
 FIELDS = {
     'quest': {'display_name': 'DisplayName', 'description': 'Description',
               'level': 'Level'},
-    'trigger': {'want_live': 'WantLive'},
-    'dialogue': {'who': 'who', 'speech': 'speech', 'condition': 'Condition'},
+    'trigger': {'want_live': 'WantLive', 'condition': 'Condition',
+                'action': 'Action'},
+    'dialogue': {'who': 'who', 'speech': 'speech', 'condition': 'Condition',
+                 'action': 'Action', 'do': 'Do'},
 }
+FUNCTION_FIELDS = {'Condition', 'Action', 'Do'}
 KIND_MODULE = {'quest': 'quests', 'trigger': 'triggers', 'dialogue': 'dialogues'}
 
 
@@ -63,6 +68,8 @@ def _function(value):
 def _plain(value):
     if isinstance(value, lua_data.Closure):
         return _function(value)
+    if isinstance(value, lua_expr.Expr):
+        return {'$expr': value.spec}
     if isinstance(value, lua_patch.Ref):
         return {'$ref': list(value.path)}
     if isinstance(value, dict):
@@ -71,6 +78,30 @@ def _plain(value):
     if isinstance(value, list):
         return [_plain(item) for item in value]
     return value
+
+
+def _contains_function(value):
+    if isinstance(value, dict):
+        if set(value) in ({'$expr'}, {'$ref'}):
+            return True
+        return any(_contains_function(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_function(item) for item in value)
+    return False
+
+
+def _check_expression_keys(value, path, key=None):
+    if isinstance(value, dict):
+        if set(value) in ({'$expr'}, {'$ref'}):
+            if key not in FUNCTION_FIELDS:
+                raise StoryError('%s: function values are only allowed for '
+                                 'Condition, Action or Do' % path)
+            return
+        for name, item in value.items():
+            _check_expression_keys(item, '%s.%s' % (path, name), str(name))
+    elif isinstance(value, list):
+        for index, item in enumerate(value, 1):
+            _check_expression_keys(item, '%s[%d]' % (path, index), key)
 
 
 def _quests(raw):
@@ -421,10 +452,13 @@ class StoryPatch:
 
     A dialogue ``create`` without ``path`` makes a new dialogue record; with a
     path it appends a reply (the next free integer key, or ``"key"``).  Nested
-    tables are supported; function values cannot be synthesized.
+    tables are supported.
 
-    Dialogue ``condition`` is editable only where the stock node stores a
-    boolean; function-valued conditions and actions are preserved untouched.
+    ``condition``, ``action`` and ``do`` fields (and the matching
+    ``Condition``/``Action``/``Do`` keys inside a ``create`` payload) accept a
+    function value: ``{"$ref": [...]}`` copies an existing one and
+    ``{"$expr": ...}`` compiles a new one.  ``$expr`` is rejected in every
+    other field.
     """
 
     def __init__(self, archive_set):
@@ -567,12 +601,15 @@ class StoryPatch:
             keys = [table_name, name]
             label = '%s/%s' % (kind, name)
         try:
+            _check_expression_keys(payload, label)
+            if _contains_function(payload) and not module['bytecode']:
+                raise StoryError('%s: function values need a bytecode module' % label)
             new = lua_patch.validate_new(payload, label)
             lua_patch.resolve_refs(module['globals'], new, label)
         except lua_patch.LuaPatchError as error:
             raise StoryError(str(error))
-        if isinstance(new, lua_patch.Ref):
-            raise StoryError('%s must be a table, not a function reference' % label)
+        if isinstance(new, (lua_patch.Ref, lua_expr.Expr)):
+            raise StoryError('%s must be a table, not a function value' % label)
         self._record_edit(kind, continent, KIND_MODULE[kind], keys, new, label, name,
                           dialogue_path=dialogue_path, created=True)
 
@@ -636,6 +673,12 @@ class StoryPatch:
         path = self._path(continent, module, kind, name, field,
                           operation.get('path'))
         label = '%s/%s/%s' % (kind, name, field)
+        if (_contains_function(operation['value']) and
+                FIELDS[kind][field] not in FUNCTION_FIELDS):
+            raise StoryError('%s: function values are only allowed for '
+                             'Condition, Action or Do' % label)
+        if _contains_function(operation['value']) and not module['bytecode']:
+            raise StoryError('%s: function values need a bytecode module' % label)
         try:
             parent, key, old = lua_patch.lookup(module['globals'], path)
             if old is lua_patch.MISSING:

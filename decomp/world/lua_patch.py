@@ -18,13 +18,16 @@ prototype, local or upvalue changes; the final ``RETURN`` only moves down.
 
 A field that does not exist yet may be given a JSON object or array.  Those
 values are built with ``NEWTABLE`` plus ``SETTABLE``, which makes it possible to
-add a whole quest, trigger or dialogue node.  New function bodies cannot be
-synthesized, but a ``{"$ref": [...]}`` value copies an existing function.
+add a whole quest, trigger or dialogue node.  Function values come from either
+``{"$ref": [...]}``, which copies an existing function, or ``{"$expr": ...}``,
+which ``lua_expr`` compiles into a new leaf prototype appended after the stock
+ones.  A ``CLOSURE`` loads the new prototype and ``SETTABLE`` stores it.
 """
 import math
 import struct
 
 import lua_data
+import lua_expr
 from luadis import R
 
 HEADER = lua_data.HEADER
@@ -81,6 +84,13 @@ def encode_constant(value):
 
 
 def _same(left, right):
+    if isinstance(left, lua_expr.Expr) or isinstance(right, lua_expr.Expr):
+        if isinstance(left, lua_expr.Expr):
+            expression, other = left, right
+        else:
+            expression, other = right, left
+        return (isinstance(other, lua_data.Closure) and
+                expression.proto == other.proto)
     if isinstance(left, Ref) or isinstance(right, Ref):
         if isinstance(left, Ref):
             reference, other = left, right
@@ -158,9 +168,11 @@ class _Layout:
                               for _ in range(reader.u32())]
             self.k_end = reader.p
             self.protos_count_pos = reader.p
-            for _ in range(reader.u32()):
-                _skip_function(reader)
-            self.protos = bytes(data[self.protos_count_pos:reader.p])
+            self.prototype_count = reader.u32()
+            self.protos = []
+            for _ in range(self.prototype_count):
+                start, end = _skip_function(reader)
+                self.protos.append(bytes(data[start:end]))
             self.lineinfo = [reader.i32() for _ in range(reader.u32())]
             self.locals = []
             for _ in range(reader.u32()):
@@ -176,14 +188,18 @@ class _Layout:
             raise LuaPatchError('truncated Lua chunk: %s' % error)
         self.data = data
 
-    def rebuild(self, constants, code, lineinfo, locals_):
+    def rebuild(self, constants, code, lineinfo, locals_, extra_protos=()):
         out = bytearray(self.data[:self.prefix_end])
         out += struct.pack('<I', len(code))
         out += struct.pack('<%dI' % len(code), *code)
         out += struct.pack('<I', len(constants))
         for item in constants:
             out += item['raw']
-        out += self.protos
+        out += struct.pack('<I', len(self.protos) + len(extra_protos))
+        for item in self.protos:
+            out += item
+        for item in extra_protos:
+            out += item
         out += struct.pack('<I', len(lineinfo))
         if lineinfo:
             out += struct.pack('<%di' % len(lineinfo), *lineinfo)
@@ -227,6 +243,13 @@ def resolve(globals_, path):
 def coerce(value, old, path):
     if value is None:
         return None
+    if isinstance(old, (lua_data.Closure, bool)):
+        if isinstance(value, lua_expr.Expr):
+            return value
+        if _is_expr(value):
+            return _make_expr(value['$expr'], path)
+        if _is_ref(value):
+            return _make_ref(value['$ref'], path)
     if isinstance(old, bool):
         if not isinstance(value, bool):
             raise LuaPatchError('%s is a boolean; got %r' % (path, value))
@@ -261,6 +284,10 @@ def _is_ref(value):
     return isinstance(value, dict) and set(value) == {'$ref'}
 
 
+def _is_expr(value):
+    return isinstance(value, dict) and set(value) == {'$expr'}
+
+
 def _make_ref(value, path):
     if not isinstance(value, list) or not value:
         raise LuaPatchError('%s.$ref must be a non-empty array of table keys' % path)
@@ -268,12 +295,21 @@ def _make_ref(value, path):
     return Ref(keys)
 
 
+def _make_expr(value, path):
+    try:
+        return lua_expr.compile_expression(value, path)
+    except lua_expr.ExprError as error:
+        raise LuaPatchError(str(error))
+
+
 def validate_new(value, path):
-    """Check a literal, nested table or function reference for a new field."""
-    if isinstance(value, Ref):
+    """Check a literal, nested table or function value for a new field."""
+    if isinstance(value, (Ref, lua_expr.Expr)):
         return value
     if _is_ref(value):
         return _make_ref(value['$ref'], path)
+    if _is_expr(value):
+        return _make_expr(value['$expr'], path)
     if isinstance(value, (dict, list)):
         return normalize_table(value, path)
     if isinstance(value, bool):
@@ -321,10 +357,12 @@ def normalize_table(value, path):
         item_path = '%s[%s]' % (path, key)
         if item is None:
             raise LuaPatchError('%s cannot be nil inside a new table' % item_path)
-        if isinstance(item, Ref):
+        if isinstance(item, (Ref, lua_expr.Expr)):
             result[key] = item
         elif _is_ref(item):
             result[key] = _make_ref(item['$ref'], item_path)
+        elif _is_expr(item):
+            result[key] = _make_expr(item['$expr'], item_path)
         elif isinstance(item, (dict, list)):
             result[key] = normalize_table(item, item_path)
         else:
@@ -334,6 +372,8 @@ def normalize_table(value, path):
 
 def resolve_refs(globals_, value, path):
     """Resolve ``$ref`` placeholders to the functions they copy."""
+    if isinstance(value, lua_expr.Expr):
+        return
     if isinstance(value, Ref):
         if value.value is not MISSING:
             return
@@ -381,6 +421,7 @@ class ChunkEditor:
             raise LuaPatchError('line info does not match the instruction count')
         self.globals = lua_data.decode_chunk(data, allow_closures=True)
         self.constants = [dict(item) for item in self.layout.constants]
+        self.added_protos = []
         self.edits = []
 
     def _constant(self, value):
@@ -418,11 +459,33 @@ class ChunkEditor:
         return old, new
 
     def _instructions(self, edit):
+        if isinstance(edit['new'], lua_expr.Expr):
+            return self._expr_instructions(edit['keys'], edit['new'])
         if isinstance(edit['new'], Ref):
             return self._ref_instructions(edit['keys'], edit['new'])
         if isinstance(edit['new'], dict):
             return self._table_instructions(edit['keys'], edit['new'])
         return self._literal_instructions(edit['keys'], edit['new'])
+
+    def _add_proto(self, expression):
+        index = len(self.layout.protos) + len(self.added_protos)
+        self.added_protos.append(expression.raw)
+        return index
+
+    def _expr_instructions(self, keys, expression):
+        if self.layout.stack < 3:
+            raise LuaPatchError('main chunk frame has fewer than 3 registers')
+        table = self.layout.stack - 1
+        key_register = self.layout.stack - 2
+        value = self.layout.stack - 3
+        code = [_abx('GETGLOBAL', table, self._constant(keys[0]))]
+        for key in keys[1:-1]:
+            code.append(_abx('LOADK', key_register, self._constant(key)))
+            code.append(_abc('GETTABLE', table, table, key_register))
+        code.append(_abx('LOADK', key_register, self._constant(keys[-1])))
+        code.append(_abx('CLOSURE', value, self._add_proto(expression)))
+        code.append(_abc('SETTABLE', table, key_register, value))
+        return code
 
     def _literal_instructions(self, keys, new):
         table = self.layout.stack - 1
@@ -481,6 +544,11 @@ class ChunkEditor:
                 self._emit_table(code, child, item, key_register, value_register)
                 code.append(_abx('LOADK', key_register, self._constant(key)))
                 code.append(_abc('SETTABLE', register, key_register, child))
+            elif isinstance(item, lua_expr.Expr):
+                code.append(_abx('CLOSURE', value_register,
+                                 self._add_proto(item)))
+                code.append(_abx('LOADK', key_register, self._constant(key)))
+                code.append(_abc('SETTABLE', register, key_register, value_register))
             elif isinstance(item, Ref):
                 code.append(_abx('LOADK', key_register, self._constant(key)))
                 self._ref_load(code, value_register, key_register, item)
@@ -533,14 +601,16 @@ class ChunkEditor:
                 endpc += delta
             locals_.append({'name_raw': item['name_raw'], 'startpc': startpc,
                             'endpc': endpc})
-        data = self.layout.rebuild(self.constants, code, lineinfo, locals_)
+        data = self.layout.rebuild(self.constants, code, lineinfo, locals_,
+                                   extra_protos=self.added_protos)
         self._verify(data)
         return data
 
     def _verify(self, data):
         function = lua_data.parse_chunk(data)
         before = lua_data.parse_chunk(self.layout.data)
-        if len(function['protos']) != len(before['protos']):
+        expected = len(before['protos']) + len(self.added_protos)
+        if len(function['protos']) != expected:
             raise LuaPatchError('function prototype count changed')
         if not function['code'] or OPS[function['code'][-1] & 63] != 'RETURN':
             raise LuaPatchError('patched chunk does not end with RETURN')

@@ -321,6 +321,46 @@ def _execute(function, arguments, upvalues, globals_, allow_closures, depth, bud
                 pc += 1
         elif name == 'CONCAT':
             registers[a] = ''.join(_concat_string(rk(index)) for index in range(b, c + 1))
+        elif name in ('ADD', 'SUB', 'MUL', 'DIV', 'MOD', 'POW'):
+            left = _number(rk(b), name)
+            right = _number(rk(c), name)
+            if name == 'ADD':
+                value = left + right
+            elif name == 'SUB':
+                value = left - right
+            elif name == 'MUL':
+                value = left * right
+            elif name == 'DIV':
+                if right == 0:
+                    raise LuaDataError('%s by zero' % name.lower())
+                value = left / right
+            elif name == 'MOD':
+                if right == 0:
+                    raise LuaDataError('modulo by zero')
+                value = math.fmod(left, right)
+                if value != 0 and (value < 0) != (right < 0):
+                    value += right
+            else:
+                try:
+                    value = left ** right
+                except (OverflowError, ValueError):
+                    raise LuaDataError('pow failed for %r, %r' % (left, right))
+            registers[a] = struct.unpack('<f', struct.pack('<f', value))[0]
+        elif name == 'UNM':
+            registers[a] = -_number(rk(b), 'unm')
+        elif name == 'NOT':
+            registers[a] = rk(b) is None or rk(b) is False
+        elif name == 'LEN':
+            value = rk(b)
+            if isinstance(value, str):
+                registers[a] = float(len(value))
+            elif isinstance(value, dict):
+                length = 0
+                while length + 1 in value:
+                    length += 1
+                registers[a] = float(length)
+            else:
+                raise LuaDataError('cannot take the length of %r' % (value,))
         elif name == 'TEST':
             truthy = not (registers[a] is None or registers[a] is False)
             if (not truthy) == bool(c):
