@@ -4,6 +4,7 @@
 #include "game/globals.h"
 #include "game/config.h"
 #include "game/filesystem.h"
+#include "game/fsarchive.h"
 
 ORIG_DATA(0060B140); /* CSingleton<CFileSystem>::vftable */
 ORIG_DATA(0060B1A8); /* CFileSystem::vftable */
@@ -15,15 +16,10 @@ ORIG_DATA(00607BC8); /* "Ошибка при создании m_instance в CSin
 ORIG_DATA(00607E98); /* "e:\\prog\\att1\\singleton.h" */
 ORIG_DATA(006C04B4); /* the 16-byte key of the version 200 paks */
 ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
-ORIG_DATA(00607CCC); /* "list<T> too long" */
-ORIG_DATA(00607B18); /* std::length_error vftable */
-ORIG_DATA(00607B24); /* the vftable the thrown object ends up with */
-ORIG_DATA(00699050); /* std::length_error _ThrowInfo */
 
 /* the file system library's maps and files (their bodies stay generated; see the comments at the call sites) */
 ORIG_THISCALL(00451430, void, (void *map, const void *alloc, const void *comp)); /* ctor of map<string, PakEntry> */
 ORIG_THISCALL(00489710, void, (void *map, const void *alloc, const void *comp)); /* ctor of map<int, ifstream*> */
-ORIG_FASTCALL(00577C60, void *, (void *self));                                  /* ctor of the embedded fs object */
 ORIG_THISCALL(004CCC80, void, (void *vector, unsigned count, const void *value)); /* fill a vector with copies */
 ORIG_THISCALL(00553E40, void, (void *vector, unsigned count, const void *value)); /* resize the bucket vector */
 ORIG_THISCALL(00450AE0, void *, (void *self, void *stream, unsigned size, unsigned offset, bool encrypted));
@@ -31,7 +27,6 @@ ORIG_THISCALL(00450B20, void *, (void *self, const std::string *name));
 ORIG_FASTCALL(005224A0, void, (void *self));                                  /* break the string map's node list */
 ORIG_THISCALL(004EF350, void, (void *self, unsigned count, void *sentinelPtr)); /* refill the bucket vector */
 ORIG_FASTCALL(004EF7F0, void, (void *self));                                  /* clear the int map */
-ORIG_FASTCALL(00450F30, void, (void *self));                                  /* clear the embedded map */
 
 /* the hash map's case-folding string hash and its case-insensitive ordering (both pop their arguments) */
 ORIG_STDCALL(00579BB0, unsigned, (const std::string *key));
@@ -49,9 +44,6 @@ struct LDivResult {
     long rem;
 };
 DECOMP_C LDivResult(__cdecl *imp_006073C0)(long, long) __asm__("__imp__ldiv");
-
-/* std::exception's constructor, used to set up the length_error objects of the map size guards */
-DECOMP_C void (__thiscall *imp_006073A4)(void *) __asm__("__imp_??0exception@std@@QAE@XZ");
 
 /* The bucket of a key: the library's hash scrambles it by dividing through a prime and mixing the quotient and
  * the remainder; the bucket count is a power of two, and the range of a bucket ends where the next one starts. */
@@ -241,25 +233,6 @@ FsIntNode *__stdcall CreateStreamNode(FsIntNode *next, FsIntNode *prev, const in
     return node;
 }
 
-/* the length_error the map size guards throw: vftable, std::exception's what/dofree and the message string */
-struct FsLengthError {
-    void *vftable;       /* +00 */
-    const char *what;    /* +04 */
-    int doFree;          /* +08 */
-    std::string message; /* +0C */
-};
-
-static void ThrowMapSizeError()
-{
-    FsLengthError error;
-    imp_006073A4(&error);
-    error.vftable = d_00607B18;
-    new (&error.message) std::string(ORIG_STR(00607CCC));
-    error.vftable = d_00607B24;
-    _CxxThrowException(&error, d_00699050);
-    __builtin_unreachable();
-}
-
 /* The map size guards: the library's nodes are limited by their allocation size (0x28 bytes for the file
  * entries, 0x10 for the streams); growing past the limit throws std::length_error.  The guards see the
  * library's map view, which starts four bytes into FsHashMap. */
@@ -268,7 +241,7 @@ void __thiscall AddStringMapSize(void *mapObject, unsigned count)
 {
     unsigned &size = *(unsigned *)((char *)mapObject + 8);
     if (0x6666666u - size < count)
-        ThrowMapSizeError();
+        ThrowFsLengthError();
     size += count;
 }
 
@@ -277,7 +250,7 @@ void __thiscall AddIntMapSize(void *mapObject, unsigned count)
 {
     unsigned &size = *(unsigned *)((char *)mapObject + 8);
     if (0x1fffffffu - size < count)
-        ThrowMapSizeError();
+        ThrowFsLengthError();
     size += count;
 }
 
@@ -459,7 +432,7 @@ CFileSystem::CFileSystem()
     files.InitStringMap(allocator, &allocator);
     streams.InitIntMap(allocator, &allocator);
     lastEntry = nullptr;
-    sub_00577C60(embedded);
+    InitFolder(reinterpret_cast<FsFolder *>(embedded));
 }
 
 /* The archive name at +0x60 is destroyed by the compiler-generated part of this destructor after the body; the
@@ -483,13 +456,8 @@ CFileSystem::~CFileSystem()
 
     streams.ClearInt();
 
-    /* the embedded file system object: the map at +1C, its sentinel and its string at +0 (the bytes are opaque
-     * here, so that string needs destroying by hand; the archive name at +60 is a member and goes by itself) */
-    sub_00450F30(embedded + 0x1C);
-    void *&embeddedSentinel = *(void **)(embedded + 0x20);
-    operator delete(embeddedSentinel);
-    embeddedSentinel = nullptr;
-    ((std::basic_string<char> *)embedded)->~basic_string<char>();
+    /* the embedded archive folder: its children list, the sentinel and the name string */
+    DestroyFolder(reinterpret_cast<FsFolder *>(embedded));
 
     /* the rest of the maps: the bucket vectors, the nodes left by the generic map destructors and the sentinels */
     if (streams.begin)

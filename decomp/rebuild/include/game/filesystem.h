@@ -100,9 +100,8 @@ struct CFileSystem {
     unsigned char pad7D[3];
     std::ifstream *currentStream; /* +80 stream of the last pak */
     FsStringNode *lastEntry;      /* +84 node found by the last OpenFile */
-    unsigned char embedded[0x2C]; /* +88 file system archive object, built by 0x577C60: a std::string at +0
-                                   * (destroyed by hand in ~CFileSystem) and a tree map {pad, sentinel +4,
-                                   * size +8} at +1C */
+    unsigned char embedded[0x2C]; /* +88 the archive's root FsFolder (see game/fsarchive.h), constructed by
+                                   * 0x577C60; the bytes stay opaque so only ~CFileSystem destroys it */
     FsHashMap *prefixes;          /* +B4 the archive's map name -> directory, owned by the archive singleton */
 
     CFileSystem();                           /* 0x451E00 */
