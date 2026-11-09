@@ -15,6 +15,7 @@ ORIG_DATA(0060B1F4); /* "cannot open the file - " */
 ORIG_DATA(00607BC8); /* "Ошибка при создании m_instance в CSingleton" */
 ORIG_DATA(00607E98); /* "e:\\prog\\att1\\singleton.h" */
 ORIG_DATA(006C04B4); /* the 16-byte key of the version 200 paks */
+ORIG_DATA(006C7C90); /* the cp1251 lowercasing table {0..255}: A-Z and the Cyrillic capitals (and the 0xA8) fold */
 ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
 
 /* the file system library's maps and files (their bodies stay generated; see the comments at the call sites) */
@@ -26,10 +27,6 @@ ORIG_THISCALL(00450B20, void *, (void *self, const std::string *name));
 ORIG_FASTCALL(005224A0, void, (void *self));                                  /* break the string map's node list */
 ORIG_THISCALL(004EF350, void, (void *self, unsigned count, void *sentinelPtr)); /* refill the bucket vector */
 ORIG_FASTCALL(004EF7F0, void, (void *self));                                  /* clear the int map */
-
-/* the hash map's case-folding string hash and its case-insensitive ordering (both pop their arguments) */
-ORIG_STDCALL(00579BB0, unsigned, (const std::string *key));
-ORIG_STDCALL(00579C00, bool, (const std::string *a, const std::string *b));
 
 /* the exe imports operator new (?2) but implements new[]/?_U itself as a jmp to it; delete[] is imported */
 ORIG_FN(005E3B10, void *, (unsigned int size)); /* operator new[] */
@@ -79,19 +76,56 @@ void FsHashMap::FindInt(FsIntNode **node, const int *key) const
     *node = (FsIntNode *)sentinel;
 }
 
+/* The case-insensitive map's string hash: every (size/16+1)-st byte, lowercased through the cp1251 table, is
+ * added to 0xDEADBEEF.  The bucket of a key is this value masked, with no prime mixing (unlike HashName). */
+DECOMP(00579BB0)
+unsigned __stdcall HashStringNoCase(const std::string *key)
+{
+    const char *data = key->c_str();
+    const unsigned size = key->size();
+    unsigned hash = 0xdeadbeefu;
+    if (size != 0) {
+        const unsigned step = (size >> 4) + 1;
+        for (unsigned i = 0; i <= size - step; i += step)
+            hash += ((const unsigned char *)d_006C7C90)[(unsigned char)data[i]];
+    }
+    return hash;
+}
+
+/* The case-insensitive ordering of that map: the lowercased bytes decide a common prefix, and equal prefixes
+ * order by length.  Like the library's comparator it returns a bool (a strict less-than). */
+DECOMP(00579C00)
+bool __stdcall LessStringNoCase(const std::string *a, const std::string *b)
+{
+    const unsigned sizeA = a->size();
+    const unsigned sizeB = b->size();
+    const unsigned char *pa = (const unsigned char *)a->c_str();
+    const unsigned char *pb = (const unsigned char *)b->c_str();
+    const unsigned char *table = (const unsigned char *)d_006C7C90;
+    unsigned common = sizeA < sizeB ? sizeA : sizeB;
+    if (common != 0) {
+        unsigned i = 0;
+        while (--common != 0 && table[pa[i]] == table[pb[i]])
+            i++;
+        if (table[pa[i]] != table[pb[i]])
+            return table[pa[i]] < table[pb[i]];
+    }
+    return sizeA < sizeB;
+}
+
 /* The string-keyed twin of FindInt: every bucket is a range of the one node list, the keys are ordered
  * case-insensitively, and a greater key ends the search. */
 DECOMP(00450E60)
 void FsHashMap::FindString(FsStringNode **node, const std::string *key) const
 {
     FsStringNode **buckets = (FsStringNode **)begin;
-    unsigned bucket = sub_00579BB0(key) & mask;
+    unsigned bucket = HashStringNoCase(key) & mask;
     if (count <= bucket)
         bucket += -1 - (mask >> 1);
     FsStringNode *endNode = buckets[bucket + 1];
     for (FsStringNode *it = buckets[bucket]; it != endNode; it = it->next) {
-        if (!sub_00579C00(&it->key, key)) {
-            if (!sub_00579C00(key, &it->key)) {
+        if (!LessStringNoCase(&it->key, key)) {
+            if (!LessStringNoCase(key, &it->key)) {
                 *node = it;
                 return;
             }
