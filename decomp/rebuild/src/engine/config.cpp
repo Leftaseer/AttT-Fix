@@ -1,17 +1,24 @@
 /* CConfig: the settings object (graphic.cfg / game.cfg), its lifetime and the graphic.cfg format. */
 #include "game/common.h"
+#include "game/globals.h"
 #include "game/config.h"
 #include "msvc8/fstream.h"
 
 ORIG_DATA(0060A290);                    /* CSingleton<CConfig>::vftable */
 ORIG_DATA(0060A298);                    /* CConfig::vftable */
 ORIG_DATA(0060A2A8);                    /* "graphic.cfg" */
+ORIG_DATA(00607BC8);                    /* "Ошибка при создании m_instance в CSingleton" */
+ORIG_DATA(00607E98);                    /* "e:\\prog\\att1\\singleton.h" */
 ORIG_DATA(006C8958);                    /* float: screen height of the current mode */
 ORIG_DATA(006C895C);                    /* float: screen width */
 ORIG_DATA(006C8960);                    /* int: screen height */
 ORIG_DATA(006C8964);                    /* int: screen width */
 
+ORIG_THISCALL(004426E0, CConsole *, (void *self));   /* CConsole::CConsole (0x1658 bytes) */
+
 #define GRAPHIC_CFG ORIG_STR(0060A2A8)
+
+inline void *operator new(unsigned int, void *p) { return p; }
 
 /* The game folder follows the exe path ("<folder>\"); CConfig copies it to +0x20 and makes +0x04 the config folder
  * from it and the directory passed to LoadGraphicCfg. */
@@ -33,6 +40,33 @@ void CConsole::OpenLog(const std::string &name)
     folder = path;
     folder = folder.substr(0, folder.rfind("\\", std::string::npos));
     folder += "\\";
+}
+
+/* The singleton accessors: the object is built on the first request, and a failed allocation throws the
+ * CSingleton error instead of returning null. */
+DECOMP(00427990)
+CConfig *CConfig::Instance()
+{
+    if (!g_configInstance) {
+        void *memory = operator new(sizeof(CConfig));
+        g_configInstance = memory ? new (memory) CConfig() : nullptr;
+        if (!g_configInstance)
+            ThrowGameException(ORIG_STR(00607BC8), ORIG_STR(00607E98), 16);
+    }
+    return g_configInstance;
+}
+
+DECOMP(0042F050)
+CConsole *CConsole::Instance()
+{
+    CConsole *&instance = (CConsole *&)g_consoleInstance;
+    if (!instance) {
+        void *memory = operator new(0x1658);
+        instance = memory ? ORIG_CALL(004426E0)(memory) : nullptr;
+        if (!instance)
+            ThrowGameException(ORIG_STR(00607BC8), ORIG_STR(00607E98), 16);
+    }
+    return instance;
 }
 
 DECOMP(00441D10)
