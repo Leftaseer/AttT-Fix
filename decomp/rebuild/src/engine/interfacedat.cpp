@@ -23,13 +23,13 @@ ORIG_FASTCALL(004A1CA0, void, (float *floats));    /* 0x149: x, y and optionally
 
 extern "C" __declspec(dllimport) char *__cdecl _strlwr(char *s); /* 0x607414 */
 
-/* vector assignment of the element types (std::vector::operator= of the game's own classes) */
-ORIG_THISCALL(004A5360, void *, (void *vector, const void *other)); /* 0x4C-byte elements */
-ORIG_THISCALL(004A5580, void *, (void *vector, const void *other)); /* 0x48-byte elements */
-ORIG_THISCALL(004A57A0, void *, (void *vector, const void *other)); /* 0x2C-byte elements */
-ORIG_THISCALL(004A69E0, void *, (void *vector, const void *other)); /* 0x64-byte elements */
-ORIG_THISCALL(004A5A10, void *, (void *vector, const void *other)); /* 0xE4-byte elements */
-ORIG_THISCALL(004A5C50, void *, (void *vector, const void *other)); /* 0x118-byte elements */
+/* the vector assignments (defined with the elements, below) */
+InterfaceVector *__thiscall AssignItems4C(InterfaceVector *vector, const InterfaceVector *other);
+InterfaceVector *__thiscall AssignItems48(InterfaceVector *vector, const InterfaceVector *other);
+InterfaceVector *__thiscall AssignItems2C(InterfaceVector *vector, const InterfaceVector *other);
+InterfaceVector *__thiscall AssignItems64(InterfaceVector *vector, const InterfaceVector *other);
+InterfaceVector *__thiscall AssignItemsE4(InterfaceVector *vector, const InterfaceVector *other);
+InterfaceVector *__thiscall AssignItems118(InterfaceVector *vector, const InterfaceVector *other);
 
 /* The element copy the vectors make: the strings copy themselves, the numbers follow one by one. The flag is a
  * lone byte, so the three padding bytes after it keep whatever the destination held. */
@@ -37,6 +37,80 @@ DECOMP(00421020)
 InterfaceItem4C::InterfaceItem4C(const InterfaceItem4C &other)
     : name(other.name), text(other.text), flag(other.flag), x(other.x), y(other.y), x2(other.x2), y2(other.y2)
 {
+}
+
+/* The element assignments the vector operator= makes. Except for 0x146, the original stores each flag as a lone
+ * byte, so the padding behind it stays as the destination had it; 0x146 moves the flag with its three padding
+ * bytes as one dword. */
+InterfaceItem4C &InterfaceItem4C::operator=(const InterfaceItem4C &other)
+{
+    name = other.name;
+    text = other.text;
+    flag = other.flag;
+    x = other.x;
+    y = other.y;
+    x2 = other.x2;
+    y2 = other.y2;
+    return *this;
+}
+
+InterfaceItem64 &InterfaceItem64::operator=(const InterfaceItem64 &other)
+{
+    name = other.name;
+    x = other.x;
+    y = other.y;
+    *(unsigned *)((char *)this + 0x24) = *(const unsigned *)((const char *)&other + 0x24); /* flag and padding */
+    text1 = other.text1;
+    z = other.z;
+    text2 = other.text2;
+    return *this;
+}
+
+InterfaceItemE4 &InterfaceItemE4::operator=(const InterfaceItemE4 &other)
+{
+    name = other.name;
+    x = other.x;
+    y = other.y;
+    flag = other.flag;
+    text1 = other.text1;
+    z = other.z;
+    text2 = other.text2;
+    u = other.u;
+    v = other.v;
+    flag2 = other.flag2;
+    text3 = other.text3;
+    w = other.w;
+    text4 = other.text4;
+    text5 = other.text5;
+    text6 = other.text6;
+    return *this;
+}
+
+InterfaceItem118 &InterfaceItem118::operator=(const InterfaceItem118 &other)
+{
+    name = other.name;
+    x = other.x;
+    y = other.y;
+    flag = other.flag;
+    text1 = other.text1;
+    z = other.z;
+    text2 = other.text2;
+    u = other.u;
+    v = other.v;
+    w = other.w;
+    flag2 = other.flag2;
+    text3 = other.text3;
+    a = other.a;
+    text4 = other.text4;
+    b = other.b;
+    text5 = other.text5;
+    c = other.c;
+    d = other.d;
+    flag3 = other.flag3;
+    text6 = other.text6;
+    e = other.e;
+    text7 = other.text7;
+    return *this;
 }
 
 /* An item keeps some of its strings 0x20 apart; the compiler-generated destructors release the later one first.
@@ -245,23 +319,23 @@ InterfaceRecord &InterfaceRecord::operator=(const InterfaceRecord &other)
     text142[1] = other.text142[1];
 
     items143.title = other.items143.title;
-    sub_004A5360(&items143.allocator, &other.items143.allocator);
+    AssignItems4C((InterfaceVector *)&items143.allocator, (const InterfaceVector *)&other.items143.allocator);
 
     items144.title = other.items144.title;
-    sub_004A5580(&items144.allocator, &other.items144.allocator);
+    AssignItems48((InterfaceVector *)&items144.allocator, (const InterfaceVector *)&other.items144.allocator);
 
     items145.title = other.items145.title;
-    sub_004A57A0(&items145.allocator, &other.items145.allocator);
+    AssignItems2C((InterfaceVector *)&items145.allocator, (const InterfaceVector *)&other.items145.allocator);
 
-    sub_004A69E0(&items146, &other.items146);
+    AssignItems64(&items146, &other.items146);
 
     text147 = other.text147;
     number14B = other.number14B;
     for (int i = 0; i < 4; i++)
         floats149[i] = other.floats149[i];
 
-    sub_004A5A10(&items14A, &other.items14A);
-    sub_004A5C50(&items14C, &other.items14C);
+    AssignItemsE4(&items14A, &other.items14A);
+    AssignItems118(&items14C, &other.items14C);
     return *this;
 }
 
@@ -386,6 +460,113 @@ DECOMP(004A5DF0)
 void __thiscall PushItem118(InterfaceVector *vector, const InterfaceItem118 *item)
 {
     PushBack(vector, item);
+}
+
+/* The vector copy assignment: the other vector's elements are copied over this one.  With room for them all the
+ * old elements are assigned and the extra ones destroyed; when only the spare capacity is short the old ones are
+ * assigned and the rest constructed at the end; otherwise the old buffer goes and one of exactly the source's
+ * size takes its place.  An empty source just clears this vector. */
+template <typename T>
+static void AssignVector(InterfaceVector *vector, const InterfaceVector *other)
+{
+    if (vector == other)
+        return;
+
+    T *src = (T *)other->begin;
+    if (src) {
+        T *srcEnd = (T *)other->end;
+        unsigned count = (unsigned)(srcEnd - src);
+        if (count != 0) {
+            T *begin = (T *)vector->begin;
+            T *end = (T *)vector->end;
+            unsigned size = begin ? (unsigned)(end - begin) : 0;
+
+            if (count <= size) {
+                T *p = begin;
+                for (const T *s = src; s != srcEnd; s++, p++)
+                    *p = *s;
+                for (; p != end; p++)
+                    p->~T();
+                vector->end = begin + count;
+                return;
+            }
+
+            if (!begin || (unsigned)((T *)vector->limit - begin) < count) {
+                if (begin) {
+                    for (T *p = begin; p != end; p++)
+                        p->~T();
+                    operator delete(begin);
+                }
+                T *data = (T *)operator new(count * sizeof(T));
+                T *p = data;
+                for (const T *s = src; s != srcEnd; s++, p++)
+                    ::new (p) T(*s);
+                vector->begin = data;
+                vector->end = data + count;
+                vector->limit = data + count;
+                return;
+            }
+
+            T *p = begin;
+            const T *s = src;
+            for (; p != end; s++, p++)
+                *p = *s;
+            for (; s != srcEnd; s++, p++)
+                ::new (p) T(*s);
+            vector->end = p;
+            return;
+        }
+    }
+
+    T *begin = (T *)vector->begin;
+    T *end = (T *)vector->end;
+    if (begin != end) {
+        for (T *p = begin; p != end; p++)
+            p->~T();
+        vector->end = begin;
+    }
+}
+
+DECOMP(004A5360)
+InterfaceVector *__thiscall AssignItems4C(InterfaceVector *vector, const InterfaceVector *other)
+{
+    AssignVector<InterfaceItem4C>(vector, other);
+    return vector;
+}
+
+DECOMP(004A5580)
+InterfaceVector *__thiscall AssignItems48(InterfaceVector *vector, const InterfaceVector *other)
+{
+    AssignVector<InterfaceItem48>(vector, other);
+    return vector;
+}
+
+DECOMP(004A57A0)
+InterfaceVector *__thiscall AssignItems2C(InterfaceVector *vector, const InterfaceVector *other)
+{
+    AssignVector<InterfaceItem2C>(vector, other);
+    return vector;
+}
+
+DECOMP(004A69E0)
+InterfaceVector *__thiscall AssignItems64(InterfaceVector *vector, const InterfaceVector *other)
+{
+    AssignVector<InterfaceItem64>(vector, other);
+    return vector;
+}
+
+DECOMP(004A5A10)
+InterfaceVector *__thiscall AssignItemsE4(InterfaceVector *vector, const InterfaceVector *other)
+{
+    AssignVector<InterfaceItemE4>(vector, other);
+    return vector;
+}
+
+DECOMP(004A5C50)
+InterfaceVector *__thiscall AssignItems118(InterfaceVector *vector, const InterfaceVector *other)
+{
+    AssignVector<InterfaceItem118>(vector, other);
+    return vector;
 }
 
 /* A titled block: "title { lines }"; the opening brace is read and dropped, the block ends on token 0x103. */

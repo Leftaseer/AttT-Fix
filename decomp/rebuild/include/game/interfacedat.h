@@ -25,6 +25,7 @@ struct InterfaceItem4C {
 
     InterfaceItem4C() {} /* the parser's stack item: the strings start empty, the numbers fill later */
     InterfaceItem4C(const InterfaceItem4C &other); /* 0x421020 */
+    InterfaceItem4C &operator=(const InterfaceItem4C &other);
     void Read(); /* 0x4A1A60 */
 };
 static_assert(sizeof(InterfaceItem4C) == 0x4C, "InterfaceItem4C is 0x4C bytes");
@@ -70,6 +71,8 @@ struct InterfaceItem64 {
     std::string text1;    /* +028 */
     float z;              /* +044 */
     std::string text2;    /* +048 */
+
+    InterfaceItem64 &operator=(const InterfaceItem64 &other); /* +024 goes as one dword */
 };
 static_assert(sizeof(InterfaceItem64) == 0x64, "InterfaceItem64 is 0x64 bytes");
 static_assert(__builtin_offsetof(InterfaceItem64, flag) == 0x024, "InterfaceItem64::flag");
@@ -96,6 +99,7 @@ struct InterfaceItemE4 {
     std::string text6;    /* +0C8 the name without its last character, lowercased */
 
     ~InterfaceItemE4(); /* 0x420F10 */
+    InterfaceItemE4 &operator=(const InterfaceItemE4 &other);
 };
 static_assert(sizeof(InterfaceItemE4) == 0xE4, "InterfaceItemE4 is 0xE4 bytes");
 static_assert(__builtin_offsetof(InterfaceItemE4, flag) == 0x024, "InterfaceItemE4::flag");
@@ -129,6 +133,7 @@ struct InterfaceItem118 {
     std::string text7;    /* +0FC */
 
     ~InterfaceItem118(); /* 0x420F90 */
+    InterfaceItem118 &operator=(const InterfaceItem118 &other);
 };
 static_assert(sizeof(InterfaceItem118) == 0x118, "InterfaceItem118 is 0x118 bytes");
 static_assert(__builtin_offsetof(InterfaceItem118, flag) == 0x024, "InterfaceItem118::flag");
