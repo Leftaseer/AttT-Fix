@@ -5,6 +5,7 @@
 struct CEngine;
 struct CConfig;
 struct CFileSystem;
+struct CMapHeight;
 
 ORIG_DATA(006BF6E0);  /* bool: the window is active (WM_ACTIVATEAPP) */
 #define g_appActive          ORIG_VAR(006BF6E0, bool)
@@ -34,6 +35,8 @@ ORIG_DATA(006C88B8);  /* CSingleton<CEngine>::m_instance */
 #define g_engineInstance     ORIG_VAR(006C88B8, CEngine *)
 ORIG_DATA(006C884C);  /* CSingleton<CConfig>::m_instance */
 #define g_configInstance     ORIG_VAR(006C884C, CConfig *)
+ORIG_DATA(006C88E4);  /* CSingleton<CMapHeight>::m_instance */
+#define g_mapHeight          ORIG_VAR(006C88E4, CMapHeight *)
 ORIG_DATA(006C8C28);  /* CSingleton<CFileSystem>::m_instance */
 #define g_fileSystemInstance ORIG_VAR(006C8C28, CFileSystem *)
 ORIG_DATA(006C8C10);  /* the Direct3D device */
