@@ -6,6 +6,7 @@
  * and clears +2C. The game keeps one instance (0x6CA280) and the loaders open it in turn. */
 #pragma once
 #include "game/common.h"
+#include "game/engine.h"
 
 /* the file object CFileSystem::OpenFile returns: the virtual table at +00 (deleting dtor, then read), its
  * size at +08 */
@@ -15,9 +16,7 @@ struct FsFile {
     unsigned size; /* +08 */
 };
 
-struct CGameFile {
-    void *vftable;    /* +00 0x60B71C */
-    int objectFlag;   /* +04 the CGameObject flag its base dtor checks */
+struct CGameFile : CGameObject {
     std::string name; /* +08 */
     FsFile *file;     /* +24 */
     char *data;       /* +28 the whole file */

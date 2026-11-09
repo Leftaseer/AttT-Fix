@@ -9,8 +9,6 @@ ORIG_DATA(0060B160); /* CArchFile::vftable */
 ORIG_DATA(0060B174); /* "Файл не найден: " */
 ORIG_DATA(0060B18C); /* CFstreamFile::vftable */
 
-ORIG_THISCALL(00424C70, void, (void *self)); /* CGameObject::~CGameObject */
-
 DECOMP_C void *(__thiscall *imp_006072D4)(void *, void *) __asm__(
     "__imp_?tellg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAE?AV?$fpos@H@2@XZ");
 DECOMP_C void *(__cdecl *imp_006071D8)(void *, const char *, const void *) __asm__(
@@ -35,7 +33,7 @@ static void AnnounceMissingFile(const std::string &path)
 DECOMP(00450A80)
 CBaseFile::CBaseFile()
 {
-    objectFlag = 0;
+    owner = nullptr;
     vftable = d_0060B148;
     size = 0;
 }
@@ -44,7 +42,6 @@ DECOMP(00450AA0)
 CBaseFile::~CBaseFile()
 {
     vftable = d_0060B148;
-    sub_00424C70(this);
 }
 
 DECOMP(00450AB0)
@@ -59,7 +56,7 @@ void *CBaseFile::Destroy(int flags)
 DECOMP(00450AE0)
 CArchFile::CArchFile(void *pakStream, unsigned fileSize, unsigned fileOffset, bool isEncrypted)
 {
-    objectFlag = 0;
+    owner = nullptr;
     position = 0;
     stream = pakStream;
     offset = fileOffset;
@@ -91,7 +88,7 @@ unsigned CArchFile::Tell()
 DECOMP(00450B20)
 CFstreamFile::CFstreamFile(const std::string &path)
 {
-    objectFlag = 0;
+    owner = nullptr;
     size = 0;
     vftable = d_0060B18C;
 

@@ -8,7 +8,6 @@ ORIG_DATA(006C8DE0); /* number of live CGameFile readers */
 ORIG_DATA(006C8DE4); /* the file system the readers open through */
 
 ORIG_FN(005E3B10, void *, (unsigned int size));       /* operator new[] */
-ORIG_THISCALL(00424C70, void, (void *self));          /* CGameObject::~CGameObject */
 
 inline void *operator new(unsigned int, void *p) { return p; }
 
@@ -24,7 +23,7 @@ DECOMP(00459200)
 CGameFile::CGameFile() : name()
 {
     vftable = d_0060B71C;
-    objectFlag = 0;
+    owner = nullptr;
     file = nullptr;
     data = nullptr;
     opened = false;
@@ -49,7 +48,6 @@ CGameFile::~CGameFile()
     }
     opened = false;
     ORIG_VAR(006C8DE0, int)--;
-    sub_00424C70(this);
 }
 
 /* no buffer: keep the whole file in data, sized to the file (with its ending NUL) unless another size was asked

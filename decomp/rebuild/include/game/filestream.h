@@ -6,10 +6,9 @@
  * MSVCP80 std::ifstream and reads the file straight from disk.  CFileSystem::OpenFile builds one or the other. */
 #pragma once
 #include "game/common.h"
+#include "game/engine.h"
 
-struct CBaseFile {
-    void *vftable;  /* +00 0x60B148 */
-    int objectFlag; /* +04 the CGameObject flag its base destructor checks */
+struct CBaseFile : CGameObject {
     unsigned size;  /* +08 size of the file in bytes */
 
     CBaseFile();              /* 0x450A80 */
