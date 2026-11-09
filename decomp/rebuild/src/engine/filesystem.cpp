@@ -22,10 +22,8 @@ ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
 /* the file system library's maps and files (their bodies stay generated; see the comments at the call sites) */
 ORIG_THISCALL(00451430, void, (void *map, const void *alloc, const void *comp)); /* ctor of map<string, PakEntry> */
 ORIG_THISCALL(00489710, void, (void *map, const void *alloc, const void *comp)); /* ctor of map<int, ifstream*> */
-ORIG_THISCALL(00553E40, void, (void *vector, unsigned count, const void *value)); /* resize the bucket vector */
-ORIG_FASTCALL(005224A0, void, (void *self));                                  /* break the string map's node list */
-ORIG_THISCALL(004EF350, void, (void *self, unsigned count, void *sentinelPtr)); /* refill the bucket vector */
-ORIG_FASTCALL(004EF7F0, void, (void *self));                                  /* clear the int map */
+ORIG_FASTCALL(005224A0, void, (void *self)); /* break the string map's node list */
+ORIG_FASTCALL(004EF7F0, void, (void *self)); /* clear the int map */
 
 /* the exe imports operator new (?2) but implements new[]/?_U itself as a jmp to it; delete[] is imported */
 ORIG_FN(005E3B10, void *, (unsigned int size)); /* operator new[] */
@@ -193,6 +191,113 @@ void __thiscall InitPointerVector(void *vector, unsigned count, const void *valu
     begin[1] = data + count;
 }
 
+/* The bucket vector's out-of-line fill insert (std::vector<void*>::_Insert_n): count copies of *value are put
+ * at position.  A short capacity reallocates to half again as much (or to the new size, whichever is larger)
+ * and moves the two ranges; otherwise the tail either moves after the new elements when it is shorter than
+ * count, or the last count elements are first copied into the grown raw tail and then the middle shifts. */
+DECOMP(00553970)
+void __thiscall InsertPointerVector(void *vector, void **position, unsigned count, const void *value)
+{
+    void **begin = *(void ***)((char *)vector + 4);
+    void **end = *(void ***)((char *)vector + 8);
+    void **limit = *(void ***)((char *)vector + 0xC);
+    void *fill = *(void *const *)value;
+
+    if (count == 0)
+        return;
+
+    unsigned size = begin ? (unsigned)(end - begin) : 0;
+    unsigned capacity = begin ? (unsigned)(limit - begin) : 0;
+    if (size > 0x3FFFFFFFu - count)
+        ThrowVectorLengthError();
+
+    if (capacity < size + count) {
+        unsigned grown = capacity > 0x3FFFFFFFu - capacity / 2 ? 0 : capacity + capacity / 2;
+        if (grown < size + count)
+            grown = size + count;
+        void **data = (void **)operator new(grown * 4);
+        void **dst = data;
+        for (void **p = begin; p != position; p++)
+            *dst++ = *p;
+        for (unsigned i = 0; i < count; i++)
+            *dst++ = fill;
+        for (void **p = position; p != end; p++)
+            *dst++ = *p;
+        if (begin)
+            operator delete(begin);
+        *(void ***)((char *)vector + 0xC) = data + grown;
+        *(void ***)((char *)vector + 8) = data + size + count;
+        *(void ***)((char *)vector + 4) = data;
+        return;
+    }
+
+    unsigned tail = (unsigned)(end - position);
+    if (tail < count) {
+        void **dst = position + count;
+        for (void **p = position; p != end; p++)
+            *dst++ = *p;
+        for (unsigned i = 0; i < count - tail; i++)
+            end[i] = fill;
+        *(void ***)((char *)vector + 8) = end + count;
+        for (void **p = position; p != end; p++)
+            *p = fill;
+        return;
+    }
+
+    void **dst = end;
+    for (void **p = end - count; p != end; p++)
+        *dst++ = *p;
+    *(void ***)((char *)vector + 8) = end + count;
+    void **shift = end;
+    for (void **p = end - count; p != position;)
+        *--shift = *--p;
+    for (void **p = position; p != position + count; p++)
+        *p = fill;
+}
+
+/* Erases [first, last) of the bucket vector: the elements after last move down over the erased range and the
+ * end follows them; the first iterator is reported through result. */
+DECOMP(00451350)
+void __thiscall ErasePointerVector(void *vector, void ***result, void **first, void **last)
+{
+    if (first != last) {
+        void **end = *(void ***)((char *)vector + 8);
+        void **dst = first;
+        while (last != end)
+            *dst++ = *last++;
+        *(void ***)((char *)vector + 8) = dst;
+    }
+    *result = first;
+}
+
+/* Resizes the bucket vector to count elements: a growth appends copies of the value, a shrink erases the tail. */
+DECOMP(00553E40)
+void __thiscall ResizePointerVector(void *vector, unsigned count, const void *value)
+{
+    void **begin = *(void ***)((char *)vector + 4);
+    void **end = *(void ***)((char *)vector + 8);
+    unsigned size = begin ? (unsigned)(end - begin) : 0;
+    if (size < count) {
+        InsertPointerVector(vector, end, count - size, &value);
+    } else if (begin && count < size) {
+        void **result;
+        ErasePointerVector(vector, &result, begin + count, end);
+    }
+}
+
+/* Assigns count copies of the value to the bucket vector: the old elements are dropped and the insert refills
+ * the vector from its begin. */
+DECOMP(004EF350)
+void __thiscall AssignPointerVector(void *vector, unsigned count, const void *value)
+{
+    void **begin = *(void ***)((char *)vector + 4);
+    void **end = *(void ***)((char *)vector + 8);
+    void *fill = *(void *const *)value;
+    if (begin != end)
+        *(void ***)((char *)vector + 8) = begin;
+    InsertPointerVector(vector, begin, count, &fill);
+}
+
 /* The two map constructors: an empty node list through a sentinel sized for the map's node, a zero size and
  * the nine slots of the initial bucket vector all holding the sentinel; the allocator byte comes from the
  * caller and the comparison object is never read.  Both return the map in EAX, as the ctors do. */
@@ -243,7 +348,7 @@ void FsHashMap::ClearInt()
         node = next;
     }
     void *headValue = head;
-    sub_004EF350(&vectorAlloc, 9, &headValue);
+    AssignPointerVector(&vectorAlloc, 9, &headValue);
     mask = 1;
     count = 1;
 }
@@ -321,7 +426,7 @@ void FsHashMap::GrowBuckets(bool stringKeys)
             mask = mask * 2 + 1;
     } else {
         mask = slots * 2 - 3;
-        sub_00553E40(&vectorAlloc, slots * 2 - 1, sentinel);
+        ResizePointerVector(&vectorAlloc, slots * 2 - 1, sentinel);
     }
 
     unsigned split = count - (mask >> 1) - 1;
@@ -500,7 +605,7 @@ CFileSystem::~CFileSystem()
     /* break the files node list (0x5224A0 works on the tree part at map+4) and refill its 9 empty buckets */
     ClearStringNodeList((char *)&files + 4);
     void *filesSentinel = files.sentinel;
-    sub_004EF350(&files.vectorAlloc, 9, &filesSentinel);
+    AssignPointerVector(&files.vectorAlloc, 9, &filesSentinel);
     files.mask = 1;
     files.count = 1;
 
