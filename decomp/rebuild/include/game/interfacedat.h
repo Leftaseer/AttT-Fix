@@ -92,6 +92,8 @@ struct InterfaceItemE4 {
     std::string text4;    /* +090 */
     std::string text5;    /* +0AC */
     std::string text6;    /* +0C8 the name without its last character, lowercased */
+
+    ~InterfaceItemE4(); /* 0x420F10 */
 };
 static_assert(sizeof(InterfaceItemE4) == 0xE4, "InterfaceItemE4 is 0xE4 bytes");
 static_assert(__builtin_offsetof(InterfaceItemE4, flag) == 0x024, "InterfaceItemE4::flag");
@@ -123,14 +125,17 @@ struct InterfaceItem118 {
     std::string text6;    /* +0DC */
     float e;              /* +0F8 */
     std::string text7;    /* +0FC */
+
+    ~InterfaceItem118(); /* 0x420F90 */
 };
 static_assert(sizeof(InterfaceItem118) == 0x118, "InterfaceItem118 is 0x118 bytes");
 static_assert(__builtin_offsetof(InterfaceItem118, flag) == 0x024, "InterfaceItem118::flag");
 static_assert(__builtin_offsetof(InterfaceItem118, text3) == 0x074, "InterfaceItem118::text3");
 static_assert(__builtin_offsetof(InterfaceItem118, text7) == 0x0FC, "InterfaceItem118::text7");
 
-/* an engine vector: an empty allocator and the three pointers. Its elements are the interface items above
- * (their destructors are the originals at 0x422B90 / 0x422BF0 / 0x422C50 / 0x420F10 / 0x420F90). */
+/* an engine vector: an empty allocator and the three pointers. Its elements are the interface items above;
+ * the range destroyers free their strings (0x422B90 / 0x422BF0 / 0x422C50) and the vector destructors
+ * release the element buffer (0x497C10 / 0x423210 / 0x423260). */
 struct InterfaceVector {
     unsigned char allocator[4]; /* +00 */
     void *begin;                /* +04 */

@@ -37,13 +37,153 @@ ORIG_THISCALL(004A69E0, void *, (void *vector, const void *other)); /* 0x64-byte
 ORIG_THISCALL(004A5A10, void *, (void *vector, const void *other)); /* 0xE4-byte elements */
 ORIG_THISCALL(004A5C50, void *, (void *vector, const void *other)); /* 0x118-byte elements */
 
-/* the element range destructors / container clears the record destructor uses */
-ORIG_FASTCALL(004A5270, void, (void *collection));               /* clear: title = "" and destroy 0x4C elements */
-ORIG_FASTCALL(004A52D0, void, (void *collection));               /* clear: title = "" and destroy 0x48 elements */
-ORIG_FASTCALL(00497C10, void, (void *vector));                   /* destroy 0x2C elements and free the buffer */
-ORIG_FN(00422C50, void, (void *first, void *last));              /* destroy 0x64 elements */
-ORIG_FASTCALL(00423210, void, (void *vector));                   /* destroy 0xE4 elements and free the buffer */
-ORIG_FASTCALL(00423260, void, (void *vector));                   /* destroy 0x118 elements and free the buffer */
+/* An item keeps some of its strings 0x20 apart; the compiler-generated destructors release the later one first.
+ * 0x420910 is that pair destructor: the string at +0x2C, then the one at +0x0C. */
+DECOMP(00420910)
+void __fastcall DestroyStringPair(char *pair)
+{
+    ((std::string *)(pair + 0x2C))->~basic_string();
+    ((std::string *)(pair + 0x0C))->~basic_string();
+}
+
+/* The two largest elements destroy their strings from the last one back, in the order the original does: the
+ * pairs go through 0x420910, the lone strings directly. */
+DECOMP(00420F10)
+InterfaceItemE4::~InterfaceItemE4()
+{
+    text6.~basic_string();
+    text5.~basic_string();
+    DestroyStringPair((char *)this + 0x64); /* text4 and text3 */
+    DestroyStringPair((char *)this + 0x1C); /* text2 and text1 */
+    name.~basic_string();
+}
+
+DECOMP(00420F90)
+InterfaceItem118::~InterfaceItem118()
+{
+    DestroyStringPair((char *)this + 0xD0); /* text7 and text6 */
+    text5.~basic_string();
+    DestroyStringPair((char *)this + 0x68); /* text4 and text3 */
+    DestroyStringPair((char *)this + 0x1C); /* text2 and text1 */
+    name.~basic_string();
+}
+
+/* The range destroyers the clears and assignments use: every element releases its strings, latest first. */
+DECOMP(00422B90)
+void DestroyItems4C(InterfaceItem4C *first, InterfaceItem4C *last)
+{
+    for (; first != last; first++) {
+        first->text.~basic_string();
+        first->name.~basic_string();
+    }
+}
+
+DECOMP(00422BF0)
+void DestroyItems48(InterfaceItem48 *first, InterfaceItem48 *last)
+{
+    for (; first != last; first++) {
+        first->text.~basic_string();
+        first->name.~basic_string();
+    }
+}
+
+DECOMP(00422C50)
+void DestroyItems64(InterfaceItem64 *first, InterfaceItem64 *last)
+{
+    for (; first != last; first++) {
+        first->text2.~basic_string();
+        first->text1.~basic_string();
+        first->name.~basic_string();
+    }
+}
+
+/* The vector destructors: the elements go, then their buffer, and the three pointers are zeroed. */
+DECOMP(00497C10)
+void __fastcall DestroyVector2C(InterfaceVector *vector)
+{
+    InterfaceItem2C *first = (InterfaceItem2C *)vector->begin;
+    if (first) {
+        InterfaceItem2C *last = (InterfaceItem2C *)vector->end;
+        for (; first != last; first++)
+            first->name.~basic_string();
+        operator delete[](vector->begin);
+    }
+    vector->begin = vector->end = vector->limit = nullptr;
+}
+
+DECOMP(00423210)
+void __fastcall DestroyVectorE4(InterfaceVector *vector)
+{
+    InterfaceItemE4 *first = (InterfaceItemE4 *)vector->begin;
+    if (first) {
+        InterfaceItemE4 *last = (InterfaceItemE4 *)vector->end;
+        for (; first != last; first++)
+            first->~InterfaceItemE4();
+        operator delete[](vector->begin);
+    }
+    vector->begin = vector->end = vector->limit = nullptr;
+}
+
+DECOMP(00423260)
+void __fastcall DestroyVector118(InterfaceVector *vector)
+{
+    InterfaceItem118 *first = (InterfaceItem118 *)vector->begin;
+    if (first) {
+        InterfaceItem118 *last = (InterfaceItem118 *)vector->end;
+        for (; first != last; first++)
+            first->~InterfaceItem118();
+        operator delete[](vector->begin);
+    }
+    vector->begin = vector->end = vector->limit = nullptr;
+}
+
+/* The clears: the elements go and the end drops to the begin, but the buffer stays allocated. */
+DECOMP(004A4C00)
+void __fastcall ClearVector4C(InterfaceVector *vector)
+{
+    InterfaceItem4C *first = (InterfaceItem4C *)vector->begin;
+    InterfaceItem4C *last = (InterfaceItem4C *)vector->end;
+    if (first != last) {
+        DestroyItems4C(first, last);
+        vector->end = first;
+    }
+}
+
+DECOMP(004A4C50)
+void __fastcall ClearVector48(InterfaceVector *vector)
+{
+    InterfaceItem48 *first = (InterfaceItem48 *)vector->begin;
+    InterfaceItem48 *last = (InterfaceItem48 *)vector->end;
+    if (first != last) {
+        DestroyItems48(first, last);
+        vector->end = first;
+    }
+}
+
+/* The titled collections clear the same way: the title empties first, then the elements go. */
+DECOMP(004A5270)
+void __fastcall ClearCollection4C(InterfaceCollection *collection)
+{
+    collection->title = "";
+    InterfaceItem4C *first = (InterfaceItem4C *)collection->begin;
+    InterfaceItem4C *last = (InterfaceItem4C *)collection->end;
+    if (first != last) {
+        DestroyItems4C(first, last);
+        collection->end = first;
+    }
+}
+
+DECOMP(004A52D0)
+void __fastcall ClearCollection48(InterfaceCollection *collection)
+{
+    collection->title = "";
+    InterfaceItem48 *first = (InterfaceItem48 *)collection->begin;
+    InterfaceItem48 *last = (InterfaceItem48 *)collection->end;
+    if (first != last) {
+        DestroyItems48(first, last);
+        collection->end = first;
+    }
+}
 
 /* The record starts empty: all vectors are null and the named strings are empty. The vectors' allocator bytes stay
  * uninitialised, as in the original. */
@@ -70,29 +210,29 @@ InterfaceRecord::~InterfaceRecord()
     text142[0] = "";
     text142[1] = "";
 
-    sub_004A5270(&items143);
+    ClearCollection4C(&items143);
     if (items143.begin) {
         operator delete[](items143.begin);
         items143.begin = items143.end = items143.limit = nullptr;
     }
 
-    sub_004A52D0(&items144);
+    ClearCollection48(&items144);
     if (items144.begin) {
         operator delete[](items144.begin);
         items144.begin = items144.end = items144.limit = nullptr;
     }
 
     items145.title = "";
-    sub_00497C10(&items145.allocator);
+    DestroyVector2C((InterfaceVector *)&items145.allocator);
 
     if (items146.begin) {
-        sub_00422C50(items146.begin, items146.end);
+        DestroyItems64((InterfaceItem64 *)items146.begin, (InterfaceItem64 *)items146.end);
         operator delete[](items146.begin);
         items146.begin = items146.end = items146.limit = nullptr;
     }
 
-    sub_00423210(&items14A);
-    sub_00423260(&items14C);
+    DestroyVectorE4(&items14A);
+    DestroyVector118(&items14C);
 }
 
 DECOMP(004A6E90)
