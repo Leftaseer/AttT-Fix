@@ -70,6 +70,8 @@ struct FsHashMap {
     static unsigned __stdcall HashName(const std::string *key);         /* 0x422A20 */
     FsHashMap *InitStringMap(const unsigned char &allocator, const void *compare); /* 0x451430 */
     FsHashMap *InitIntMap(const unsigned char &allocator, const void *compare);    /* 0x489710 */
+    FsHashMap *InitStringMapCopy(const FsHashMap &source);                         /* 0x452510 */
+    void CopyFrom(const FsHashMap &source);                                        /* 0x451CF0 */
     void ClearInt();                                                               /* 0x4EF7F0 */
     void InsertName(FsInsertResult *result, const PakEntry *entry);                /* 0x451770 */
     void InsertInt(FsInsertResult *result, const int *entry);                      /* 0x451A50 */
@@ -80,6 +82,12 @@ static_assert(sizeof(FsHashMap) == 0x28, "FsHashMap is 0x28 bytes");
 /* The fill constructor of the engine's pointer vectors (the maps' bucket vectors): an empty vector of count
  * copies of the pointer value; more than 0x3FFFFFFF elements throw std::length_error. */
 void __thiscall InitPointerVector(void *vector, unsigned count, const void *value); /* 0x4CCC80 */
+
+/* The 0x30-byte sentinel of the string-keyed maps and the copy of their node list: [first, last) is appended
+ * to the map object's list (the library's map view at FsHashMap+4) as fresh nodes with copied values. */
+FsStringNode *__stdcall CreateStringMapSentinel(); /* 0x5AD510 */
+void __thiscall CopyStringMapNodes(char *mapObject, FsStringNode *sentinel, FsStringNode *first,
+                                   FsStringNode *last, const FsHashMap *source); /* 0x451170 */
 
 /* breaks the node list of a string-keyed map (the map's tree part, i.e. the map address + 4), destroying the
  * keys and freeing the nodes; the sentinel/first node pointer is left at map+8 */
@@ -117,6 +125,7 @@ struct CFileSystem {
     static CFileSystem *Instance();          /* 0x44ABE0 */
     void OpenPaks(const std::string &name);  /* 0x451E90 */
     void *OpenFile(const std::string &name); /* 0x4514B0 */
+    FsHashMap *GetFiles(FsHashMap *out);     /* 0x452760 copies the pak directory into out */
     bool ResolvePath(const std::string &name, std::string *path); /* 0x451220 */
 };
 static_assert(sizeof(CFileSystem) == 0xB8, "CFileSystem is 0xB8 bytes");

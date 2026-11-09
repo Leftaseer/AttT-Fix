@@ -393,6 +393,16 @@ FsIntNode *__stdcall CreateStreamNode(FsIntNode *next, FsIntNode *prev, const in
     return node;
 }
 
+/* the sentinel of the 0x30-byte string-map nodes: an allocated node linked to itself, its value unconstructed */
+DECOMP(005AD510)
+FsStringNode *__stdcall CreateStringMapSentinel()
+{
+    FsStringNode *node = (FsStringNode *)operator new(0x30);
+    node->next = node;
+    node->prev = node;
+    return node;
+}
+
 /* The map size guards: the library's nodes are limited by their allocation size (0x28 bytes for the file
  * entries, 0x10 for the streams); growing past the limit throws std::length_error.  The guards see the
  * library's map view, which starts four bytes into FsHashMap. */
@@ -412,6 +422,63 @@ void __thiscall AddIntMapSize(void *mapObject, unsigned count)
     if (0x1fffffffu - size < count)
         ThrowFsLengthError();
     size += count;
+}
+
+/* Copies the source nodes [first, last) before the destination sentinel, each as a fresh node built from its
+ * pak entry; the map size grows with every copy. */
+DECOMP(00451170)
+void __thiscall CopyStringMapNodes(char *mapObject, FsStringNode *sentinel, FsStringNode *first,
+                                   FsStringNode *last, const FsHashMap *source)
+{
+    for (FsStringNode *node = first; node != last; node = node->next) {
+        FsPakNode *copy = CreatePakNode(sentinel, sentinel->prev, &((FsPakNode *)node)->value);
+        AddStringMapSize(mapObject, 1);
+        sentinel->prev = (FsStringNode *)copy;
+        copy->prev->next = (FsStringNode *)copy;
+    }
+}
+
+/* Map assignment: the bucket vector takes the source's bucket count, the mask and count are copied, the node
+ * list is rebuilt from copies of the source nodes, and every destination bucket start is moved to its copy. */
+DECOMP(00451CF0)
+void FsHashMap::CopyFrom(const FsHashMap &source)
+{
+    unsigned buckets = source.begin ? (unsigned)(((char *)source.end - (char *)source.begin) / 4) : 0;
+    ResizePointerVector(&vectorAlloc, buckets, sentinel);
+    mask = source.mask;
+    count = source.count;
+    ClearStringNodeList((char *)this + 4);
+    CopyStringMapNodes((char *)this + 4, (FsStringNode *)sentinel, ((FsStringNode *)source.sentinel)->next,
+                       (FsStringNode *)source.sentinel, &source);
+    *(unsigned char *)this = *(const unsigned char *)&source;
+
+    FsStringNode *srcNode = ((FsStringNode *)source.sentinel)->next;
+    FsStringNode *dstNode = ((FsStringNode *)sentinel)->next;
+    unsigned i = 0;
+    while (begin && i < (unsigned)(((char *)end - (char *)begin) / 4)) {
+        if (srcNode == ((FsStringNode **)source.begin)[i]) {
+            ((FsStringNode **)begin)[i] = dstNode;
+            i++;
+        } else {
+            srcNode = srcNode->next;
+            dstNode = dstNode->next;
+        }
+    }
+}
+
+/* The copy constructor: the allocator byte, a fresh sentinel and empty bucket pointers, then the assignment
+ * fills the map; the vector's allocator byte at +10 is left as the caller had it. */
+DECOMP(00452510)
+FsHashMap *FsHashMap::InitStringMapCopy(const FsHashMap &source)
+{
+    *(unsigned char *)this = *(const unsigned char *)&source;
+    sentinel = CreateStringMapSentinel();
+    size = 0;
+    begin = nullptr;
+    end = nullptr;
+    limit = nullptr;
+    CopyFrom(source);
+    return this;
 }
 
 /* The library's table growth, the same in both inserts: once a bucket holds more than four nodes the mask
@@ -757,6 +824,13 @@ void CFileSystem::OpenPaks(const std::string &name)
 
     if (i == 0)
         ThrowFsError(ORIG_STR(0060B1F4) + archiveName, 0x58);
+}
+
+/* copies the pak directory of all opened paks into out (the archive starts from it) and returns out */
+DECOMP(00452760)
+FsHashMap *__thiscall CFileSystem::GetFiles(FsHashMap *out)
+{
+    return out->InitStringMapCopy(files);
 }
 
 /* A name without a drive is looked up in the archive's prefix map: a known name resolves to its mapped

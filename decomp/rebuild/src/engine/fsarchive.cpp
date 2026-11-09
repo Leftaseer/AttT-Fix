@@ -304,8 +304,6 @@ ORIG_DATA(006C88D0); /* the archive singleton */
 ORIG_DATA(008D10A8); /* the sprintf buffer of IntToString */
 ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
 
-ORIG_THISCALL(00452760, void *, (void *self, void *out));                        /* CFileSystem::GetFiles */
-ORIG_THISCALL(00451CF0, void *, (void *self, const void *other));                /* map<string,PakEntry>::operator= */
 ORIG_FN(005E3B10, void *, (unsigned int size));                                  /* operator new[] */
 
 /* The original passes the entry to InsertName by value: the caller builds the entry, then the argument copy of
@@ -480,9 +478,9 @@ FileSystemArchive *__thiscall InitFileSystemArchive(FileSystemArchive *archive)
 
     /* the archive starts from the file system's own directory of all opened paks */
     FsHashMap filesCopy;
-    sub_00452760(CFileSystem::Instance(), &filesCopy);
+    CFileSystem::Instance()->GetFiles(&filesCopy);
     if (&archive->files != &filesCopy)
-        sub_00451CF0(&archive->files, &filesCopy);
+        archive->files.CopyFrom(filesCopy);
     if (filesCopy.begin)
         operator delete(filesCopy.begin);
     filesCopy.begin = nullptr;
