@@ -43,8 +43,12 @@ public:
     MSVCP80_IMPORT void open(const E *name, int mode, int prot)
         __asm__("?open@?$basic_ifstream@DU?$char_traits@D@std@@@std@@QAEXPBDHH@Z");
     MSVCP80_IMPORT void close() __asm__("?close@?$basic_ifstream@DU?$char_traits@D@std@@@std@@QAEXXZ");
-    MSVCP80_IMPORT void read(E *buf, int n)
+    /* the imports are basic_istream members but the stream begins at the ifstream's address, so the reference
+     * they return is the object itself */
+    MSVCP80_IMPORT basic_ifstream &read(E *buf, int n)
         __asm__("?read@?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV12@PADH@Z");
+    MSVCP80_IMPORT basic_ifstream &seekg(long off, int dir)
+        __asm__("?seekg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV12@JH@Z");
 
     bool fail() const { return ios_base_operator_not(stream_ios_base(this)); }
     bool operator!() const { return fail(); }
