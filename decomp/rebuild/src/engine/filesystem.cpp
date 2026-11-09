@@ -5,6 +5,7 @@
 #include "game/config.h"
 #include "game/filesystem.h"
 #include "game/fsarchive.h"
+#include "game/filestream.h"
 
 ORIG_DATA(0060B140); /* CSingleton<CFileSystem>::vftable */
 ORIG_DATA(0060B1A8); /* CFileSystem::vftable */
@@ -22,8 +23,6 @@ ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
 ORIG_THISCALL(00451430, void, (void *map, const void *alloc, const void *comp)); /* ctor of map<string, PakEntry> */
 ORIG_THISCALL(00489710, void, (void *map, const void *alloc, const void *comp)); /* ctor of map<int, ifstream*> */
 ORIG_THISCALL(00553E40, void, (void *vector, unsigned count, const void *value)); /* resize the bucket vector */
-ORIG_THISCALL(00450AE0, void *, (void *self, void *stream, unsigned size, unsigned offset, bool encrypted));
-ORIG_THISCALL(00450B20, void *, (void *self, const std::string *name));
 ORIG_FASTCALL(005224A0, void, (void *self));                                  /* break the string map's node list */
 ORIG_THISCALL(004EF350, void, (void *self, unsigned count, void *sentinelPtr)); /* refill the bucket vector */
 ORIG_FASTCALL(004EF7F0, void, (void *self));                                  /* clear the int map */
@@ -679,7 +678,10 @@ void *CFileSystem::OpenFile(const std::string &name)
             std::string path;
             if (ResolvePath(name, &path)) {
                 void *file = operator new(0x98);
-                return file ? sub_00450B20(file, &path) : nullptr;
+                if (!file)
+                    return nullptr;
+                new (file) CFstreamFile(path);
+                return file;
             }
             return nullptr;
         }
@@ -688,7 +690,7 @@ void *CFileSystem::OpenFile(const std::string &name)
         if (probe) {
             void *file = operator new(0x98);
             if (file)
-                file = sub_00450B20(file, &name);
+                new (file) CFstreamFile(name);
             probe.close();
             return file;
         }
@@ -715,6 +717,7 @@ void *CFileSystem::OpenFile(const std::string &name)
     int pak = *(int *)((char *)node + 0x2C);
     FsIntNode *streamNode;
     streams.FindInt(&streamNode, &pak);
-    return sub_00450AE0(file, streamNode->value, *(unsigned *)((char *)node + 0x28),
-                        *(unsigned *)((char *)node + 0x24), pakVersion == 200);
+    new (file) CArchFile(streamNode->value, *(unsigned *)((char *)node + 0x28),
+                         *(unsigned *)((char *)node + 0x24), pakVersion == 200);
+    return file;
 }
