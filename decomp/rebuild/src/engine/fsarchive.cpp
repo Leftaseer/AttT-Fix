@@ -17,6 +17,7 @@
 #include "game/fsarchive.h"
 
 ORIG_DATA(00607CCC); /* "list<T> too long" */
+ORIG_DATA(00607B78); /* "vector<T> too long" */
 ORIG_DATA(00607B18); /* std::length_error vftable */
 ORIG_DATA(00607B24); /* the vftable the thrown object ends up with */
 ORIG_DATA(00699050); /* std::length_error _ThrowInfo */
@@ -39,6 +40,18 @@ void ThrowFsLengthError()
     imp_006073A4(&error);
     error.vftable = d_00607B18;
     new (&error.message) std::string(ORIG_STR(00607CCC));
+    error.vftable = d_00607B24;
+    _CxxThrowException(&error, d_00699050);
+    __builtin_unreachable();
+}
+
+/* the twin thrower of the vector size guard (0x493740): the same object with the vector's message */
+void ThrowVectorLengthError()
+{
+    FsLengthError error;
+    imp_006073A4(&error);
+    error.vftable = d_00607B18;
+    new (&error.message) std::string(ORIG_STR(00607B78));
     error.vftable = d_00607B24;
     _CxxThrowException(&error, d_00699050);
     __builtin_unreachable();
@@ -291,7 +304,6 @@ ORIG_DATA(006C88D0); /* the archive singleton */
 ORIG_DATA(008D10A8); /* the sprintf buffer of IntToString */
 ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
 
-ORIG_THISCALL(004CCC80, void, (void *vector, unsigned count, const void *value)); /* fill a vector with copies */
 ORIG_THISCALL(00452760, void *, (void *self, void *out));                        /* CFileSystem::GetFiles */
 ORIG_THISCALL(00451CF0, void *, (void *self, const void *other));                /* map<string,PakEntry>::operator= */
 ORIG_FN(005E3B10, void *, (unsigned int size));                                  /* operator new[] */
@@ -451,7 +463,7 @@ FileSystemArchive *__thiscall InitFileSystemArchive(FileSystemArchive *archive)
     archive->nameIndex.size = 0;
     {
         void *sentinel = archive->nameIndex.sentinel;
-        sub_004CCC80(&archive->nameIndex.vectorAlloc, 9, &sentinel);
+        InitPointerVector(&archive->nameIndex.vectorAlloc, 9, &sentinel);
     }
     archive->nameIndex.mask = 1;
     archive->nameIndex.count = 1;

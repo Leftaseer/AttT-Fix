@@ -77,6 +77,10 @@ struct FsHashMap {
 };
 static_assert(sizeof(FsHashMap) == 0x28, "FsHashMap is 0x28 bytes");
 
+/* The fill constructor of the engine's pointer vectors (the maps' bucket vectors): an empty vector of count
+ * copies of the pointer value; more than 0x3FFFFFFF elements throw std::length_error. */
+void __thiscall InitPointerVector(void *vector, unsigned count, const void *value); /* 0x4CCC80 */
+
 /* breaks the node list of a string-keyed map (the map's tree part, i.e. the map address + 4), destroying the
  * keys and freeing the nodes; the sentinel/first node pointer is left at map+8 */
 void __fastcall ClearStringNodeList(char *mapObject); /* 0x5224A0 */

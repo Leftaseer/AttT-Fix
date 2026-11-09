@@ -12,8 +12,6 @@ ORIG_DATA(006CA2BC); /* the token the lexer returned last */
 ORIG_DATA(006C9060); /* the numeric value of the last token (a float) */
 ORIG_DATA(006C9068); /* the text of the last token */
 
-ORIG_THISCALL(004A7040, void *, (void *map, const void *alloc, const void *comp)); /* ctor of map<string, entry> */
-ORIG_FASTCALL(00422AD0, void, (void *self));                           /* clear the record map */
 ORIG_THISCALL(004EF350, void, (void *vector, unsigned count, void *sentinel)); /* refill the bucket vector */
 ORIG_FN(00470410, int, ());                                            /* the next token of the file */
 ORIG_THISCALL(00424270, void *, (void *map, const void *key));         /* find the record's node, or insert one */
@@ -442,13 +440,59 @@ void InterfaceRecord::Read()
     }
 }
 
+/* The record map's sentinel: a bare 0x15C-byte node linking to itself.  Like the map's other sentinels it
+ * never carries a key or a value, so neither is constructed. */
+DECOMP(004A2B40)
+InterfaceRecordNode *__stdcall CreateRecordNodeSentinel()
+{
+    InterfaceRecordNode *node = (InterfaceRecordNode *)operator new(sizeof(InterfaceRecordNode));
+    node->next = node;
+    node->prev = node;
+    return node;
+}
+
+/* The record map's constructor: the allocator byte from the caller, the node sentinel, a zero size and the
+ * nine initial buckets all pointing at the sentinel.  Like the generic map ctors it returns the map in EAX. */
+DECOMP(004A7040)
+FsHashMap *__thiscall InitRecordMap(FsHashMap *map, const unsigned char *allocator, const void *compare)
+{
+    *(unsigned char *)map = *allocator;
+    map->sentinel = CreateRecordNodeSentinel();
+    map->size = 0;
+    void *sentinel = map->sentinel;
+    InitPointerVector(&map->vectorAlloc, 9, &sentinel);
+    map->mask = 1;
+    map->count = 1;
+    return map;
+}
+
+/* Empties the record map: every node's record and key are destroyed and the node freed.  The library's view
+ * of the map begins at FsHashMap+4, so the head sentinel is the map's field at +8 and the size the field at
+ * +0xC.  This is ClearStringNodeList's twin for the record-valued nodes (the record sits at +0x24). */
+DECOMP(00422AD0)
+void __fastcall ClearRecordNodeList(char *mapObject)
+{
+    InterfaceRecordNode *head = *(InterfaceRecordNode **)(mapObject + 4);
+    InterfaceRecordNode *node = head->next;
+    head->next = head;
+    head->prev = head;
+    *(unsigned *)(mapObject + 8) = 0;
+    while (node != head) {
+        InterfaceRecordNode *next = node->next;
+        node->value.~InterfaceRecord();
+        node->key.~basic_string();
+        operator delete(node);
+        node = next;
+    }
+}
+
 /* the original hands the map ctor an uninitialised stack byte for the empty allocator; nothing reads it */
 DECOMP(004A7160)
 CReadInterfaceDat::CReadInterfaceDat()
 {
     char allocator = 0;
     vftable = d_00610088;
-    sub_004A7040(&map, &allocator, &allocator);
+    InitRecordMap(&map, (const unsigned char *)&allocator, &allocator);
 }
 
 DECOMP(004A70C0)
@@ -463,7 +507,7 @@ CReadInterfaceDat::~CReadInterfaceDat()
     map.limit = nullptr;
 
     /* the tree part at map+4 destroys the keys and the records and frees the nodes */
-    sub_00422AD0((char *)&map + 4);
+    ClearRecordNodeList((char *)&map + 4);
     operator delete(map.sentinel);
     map.sentinel = nullptr;
 
@@ -480,7 +524,7 @@ void CReadInterfaceDat::Load(const std::string &name)
     reader->Open(name, 1);
     ORIG_VAR(006CA278, unsigned) = reader->file->size;
 
-    sub_00422AD0((char *)&map + 4);
+    ClearRecordNodeList((char *)&map + 4);
     void *sentinel = map.sentinel;
     sub_004EF350(&map.vectorAlloc, 9, &sentinel);
     map.mask = 1;

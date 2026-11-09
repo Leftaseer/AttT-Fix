@@ -20,7 +20,6 @@ ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
 /* the file system library's maps and files (their bodies stay generated; see the comments at the call sites) */
 ORIG_THISCALL(00451430, void, (void *map, const void *alloc, const void *comp)); /* ctor of map<string, PakEntry> */
 ORIG_THISCALL(00489710, void, (void *map, const void *alloc, const void *comp)); /* ctor of map<int, ifstream*> */
-ORIG_THISCALL(004CCC80, void, (void *vector, unsigned count, const void *value)); /* fill a vector with copies */
 ORIG_THISCALL(00553E40, void, (void *vector, unsigned count, const void *value)); /* resize the bucket vector */
 ORIG_THISCALL(00450AE0, void *, (void *self, void *stream, unsigned size, unsigned offset, bool encrypted));
 ORIG_THISCALL(00450B20, void *, (void *self, const std::string *name));
@@ -138,6 +137,29 @@ void FsHashMap::FindName(FsStringNode **node, const std::string *key) const
     *node = (FsStringNode *)sentinel;
 }
 
+/* The fill constructor of a bucket vector.  The vector's own allocator byte stays as it was; the three
+ * pointers start empty, then an allocation of count pointers is filled with copies of *value.  The original
+ * allocates through the vector's allocator (0x4DEE50), whose overflow guard the length check makes unreachable. */
+DECOMP(004CCC80)
+void __thiscall InitPointerVector(void *vector, unsigned count, const void *value)
+{
+    void **begin = (void **)((char *)vector + 4);
+    begin[0] = nullptr;
+    begin[1] = nullptr;
+    begin[2] = nullptr;
+    if (count == 0)
+        return;
+    if (count > 0x3FFFFFFFu)
+        ThrowVectorLengthError();
+    void **data = (void **)operator new(count * 4);
+    begin[2] = data + count;
+    begin[0] = data;
+    begin[1] = data;
+    for (unsigned i = 0; i < count; i++)
+        data[i] = *(void *const *)value;
+    begin[1] = data + count;
+}
+
 /* The two map constructors: an empty node list through a sentinel sized for the map's node, a zero size and
  * the nine slots of the initial bucket vector all holding the sentinel; the allocator byte comes from the
  * caller and the comparison object is never read.  Both return the map in EAX, as the ctors do. */
@@ -151,7 +173,7 @@ FsHashMap *FsHashMap::InitStringMap(const unsigned char &allocator, const void *
     sentinel = head;
     size = 0;
     void *headValue = head;
-    sub_004CCC80(&vectorAlloc, 9, &headValue);
+    InitPointerVector(&vectorAlloc, 9, &headValue);
     mask = 1;
     count = 1;
     return this;
@@ -167,7 +189,7 @@ FsHashMap *FsHashMap::InitIntMap(const unsigned char &allocator, const void *com
     sentinel = head;
     size = 0;
     void *headValue = head;
-    sub_004CCC80(&vectorAlloc, 9, &headValue);
+    InitPointerVector(&vectorAlloc, 9, &headValue);
     mask = 1;
     count = 1;
     return this;

@@ -121,6 +121,9 @@ void __thiscall InsertFileRange(FsFileList *list, FsFileNode *position, FsFileNo
 /* std::length_error("list<T> too long"), thrown by the list size guards of both the folders and the maps */
 [[noreturn]] void ThrowFsLengthError(); /* the object is laid out as MSVC 8's std::length_error */
 
+/* std::length_error("vector<T> too long"), thrown by the bucket vector's fill constructor and size guard */
+[[noreturn]] void ThrowVectorLengthError();
+
 /* The archive singleton.  Its ctor opens Resource.pak next to the exe for its size, copies CFileSystem's whole
  * pak directory into +38, then walks the ResourceN.pak chain for as long as it opens: every pak's signature,
  * version and directory are read, version 200 paks are decrypted and every record goes into +38.  +10 keeps the

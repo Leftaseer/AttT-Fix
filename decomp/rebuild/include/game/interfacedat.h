@@ -191,6 +191,22 @@ static_assert(__builtin_offsetof(InterfaceRecord, floats149) == 0x108, "Interfac
 static_assert(__builtin_offsetof(InterfaceRecord, items14A) == 0x118, "InterfaceRecord::items14A");
 static_assert(__builtin_offsetof(InterfaceRecord, items14C) == 0x128, "InterfaceRecord::items14C");
 
+/* a node of the record map: the library's links, the key string and the record value (0x15C bytes) */
+struct InterfaceRecordNode {
+    InterfaceRecordNode *next; /* +00 */
+    InterfaceRecordNode *prev; /* +04 */
+    std::string key;           /* +08 */
+    InterfaceRecord value;     /* +24 */
+};
+static_assert(sizeof(InterfaceRecordNode) == 0x15C, "InterfaceRecordNode is 0x15C bytes");
+static_assert(__builtin_offsetof(InterfaceRecordNode, key) == 0x08, "InterfaceRecordNode::key");
+static_assert(__builtin_offsetof(InterfaceRecordNode, value) == 0x24, "InterfaceRecordNode::value");
+
+/* the record map: the same bucket map as CFileSystem's, but its sentinel is a whole record node */
+InterfaceRecordNode *__stdcall CreateRecordNodeSentinel(); /* 0x4A2B40 */
+FsHashMap *__thiscall InitRecordMap(FsHashMap *map, const unsigned char *allocator, const void *compare); /* 0x4A7040 */
+void __fastcall ClearRecordNodeList(char *mapObject); /* 0x422AD0 the map's tree part (map + 4) */
+
 struct CReadInterfaceDat {
     void *vftable; /* +00 CSingleton<CReadInterfaceDat> */
     FsHashMap map; /* +04 the loaded records */
