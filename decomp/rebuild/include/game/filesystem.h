@@ -45,6 +45,9 @@ struct FsHashMap {
     void FindString(FsStringNode **node, const std::string *key) const; /* 0x450E60 case-insensitive */
     void FindName(FsStringNode **node, const std::string *key) const;   /* 0x422D80 case-sensitive */
     static unsigned __stdcall HashName(const std::string *key);         /* 0x422A20 */
+    FsHashMap *InitStringMap(const unsigned char &allocator, const void *compare); /* 0x451430 */
+    FsHashMap *InitIntMap(const unsigned char &allocator, const void *compare);    /* 0x489710 */
+    void ClearInt();                                                               /* 0x4EF7F0 */
 };
 static_assert(sizeof(FsHashMap) == 0x28, "FsHashMap is 0x28 bytes");
 

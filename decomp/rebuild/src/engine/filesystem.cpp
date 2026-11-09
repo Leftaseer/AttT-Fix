@@ -22,6 +22,7 @@ ORIG_THISCALL(00489710, void, (void *map, const void *alloc, const void *comp));
 ORIG_FASTCALL(00577C60, void *, (void *self));                                  /* ctor of the embedded fs object */
 ORIG_THISCALL(00451770, void, (void *map, void *result, const void *value));    /* insert a name in files */
 ORIG_THISCALL(00451A50, void, (void *map, void *result, const void *value));    /* insert a stream in streams */
+ORIG_THISCALL(004CCC80, void, (void *vector, unsigned count, const void *value)); /* fill a vector with copies */
 ORIG_THISCALL(00450AE0, void *, (void *self, void *stream, unsigned size, unsigned offset, bool encrypted));
 ORIG_THISCALL(00450B20, void *, (void *self, const std::string *name));
 ORIG_FASTCALL(005224A0, void, (void *self));                                  /* break the string map's node list */
@@ -139,6 +140,79 @@ void FsHashMap::FindName(FsStringNode **node, const std::string *key) const
     *node = (FsStringNode *)sentinel;
 }
 
+/* The two map constructors: an empty node list through a sentinel sized for the map's node, a zero size and
+ * the nine slots of the initial bucket vector all holding the sentinel; the allocator byte comes from the
+ * caller and the comparison object is never read.  Both return the map in EAX, as the ctors do. */
+DECOMP(00451430)
+FsHashMap *FsHashMap::InitStringMap(const unsigned char &allocator, const void *compare)
+{
+    *(unsigned char *)this = allocator;
+    FsStringNode *head = (FsStringNode *)operator new(0x30);
+    head->next = head;
+    head->prev = head;
+    sentinel = head;
+    size = 0;
+    void *headValue = head;
+    sub_004CCC80(&vectorAlloc, 9, &headValue);
+    mask = 1;
+    count = 1;
+    return this;
+}
+
+DECOMP(00489710)
+FsHashMap *FsHashMap::InitIntMap(const unsigned char &allocator, const void *compare)
+{
+    *(unsigned char *)this = allocator;
+    FsIntNode *head = (FsIntNode *)operator new(0x10);
+    head->next = head;
+    head->prev = head;
+    sentinel = head;
+    size = 0;
+    void *headValue = head;
+    sub_004CCC80(&vectorAlloc, 9, &headValue);
+    mask = 1;
+    count = 1;
+    return this;
+}
+
+/* Empties the node list of an int-keyed map and resets its buckets to the initial nine-slot vector. */
+DECOMP(004EF7F0)
+void FsHashMap::ClearInt()
+{
+    FsIntNode *head = (FsIntNode *)sentinel;
+    FsIntNode *node = head->next;
+    head->next = head;
+    head->prev = head;
+    size = 0;
+    while (node != head) {
+        FsIntNode *next = node->next;
+        operator delete(node);
+        node = next;
+    }
+    void *headValue = head;
+    sub_004EF350(&vectorAlloc, 9, &headValue);
+    mask = 1;
+    count = 1;
+}
+
+/* Empties the node list of a string-keyed map, destroying the keys.  The library's view of the map begins at
+ * FsHashMap+4, so the head sentinel is the map's field at +8 and the size the field at +0xC. */
+DECOMP(005224A0)
+void __fastcall ClearStringNodeList(char *mapObject)
+{
+    FsStringNode *head = *(FsStringNode **)(mapObject + 4);
+    FsStringNode *node = head->next;
+    head->next = head;
+    head->prev = head;
+    *(unsigned *)(mapObject + 8) = 0;
+    while (node != head) {
+        FsStringNode *next = node->next;
+        node->key.~basic_string();
+        operator delete(node);
+        node = next;
+    }
+}
+
 static void ThrowFsError(const std::string &msg, int line)
 {
     CGameException e(msg, ORIG_STR(0060B1E0), line);
@@ -166,8 +240,8 @@ CFileSystem::CFileSystem()
      * allocator; nothing ever reads the value */
     char allocator = 0;
     vftable = d_0060B1A8;
-    sub_00451430(&files, &allocator, &allocator);
-    sub_00489710(&streams, &allocator, &allocator);
+    files.InitStringMap(allocator, &allocator);
+    streams.InitIntMap(allocator, &allocator);
     lastEntry = nullptr;
     sub_00577C60(embedded);
 }
@@ -180,7 +254,7 @@ CFileSystem::~CFileSystem()
     vftable = d_0060B1A8;
 
     /* break the files node list (0x5224A0 works on the tree part at map+4) and refill its 9 empty buckets */
-    sub_005224A0((char *)&files + 4);
+    ClearStringNodeList((char *)&files + 4);
     void *filesSentinel = files.sentinel;
     sub_004EF350(&files.vectorAlloc, 9, &filesSentinel);
     files.mask = 1;
@@ -191,7 +265,7 @@ CFileSystem::~CFileSystem()
     for (FsIntNode *node = streamEnd->next; node != streamEnd; node = node->next)
         delete (std::ifstream *)node->value;
 
-    sub_004EF7F0(&streams);
+    streams.ClearInt();
 
     /* the embedded file system object: the map at +1C, its sentinel and its string at +0 (the bytes are opaque
      * here, so that string needs destroying by hand; the archive name at +60 is a member and goes by itself) */

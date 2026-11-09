@@ -51,8 +51,11 @@ def _make_string_map(h, entries, mask, count, bucket=None, order=None):
         h.uc.mem_write(node + 0x24, struct.pack('<I', payload))
         nodes[key] = node
     ordered = [nodes[key] for key, _ in entries]
-    for here, following in zip(ordered, ordered[1:] + [sentinel]):
+    ring = [sentinel] + ordered + [sentinel]
+    for here, following in zip(ring, ring[1:]):
         h.uc.mem_write(here, struct.pack('<I', following))
+    for here, previous in zip(ring[1:], ring):
+        h.uc.mem_write(here + 4, struct.pack('<I', previous))
 
     buckets = h.alloc((count + 1) * 4, b'\0' * ((count + 1) * 4))
     for i in range(count + 1):
@@ -125,8 +128,11 @@ def _make_map(h, entries, mask, count):
     for key, payload in entries:
         nodes[key] = h.alloc(0x10, struct.pack('<IIII', 0, 0, key, payload))
     ordered = [nodes[key] for key, _ in entries]
-    for here, following in zip(ordered, ordered[1:] + [sentinel]):
+    ring = [sentinel] + ordered + [sentinel]
+    for here, following in zip(ring, ring[1:]):
         h.uc.mem_write(here, struct.pack('<I', following))
+    for here, previous in zip(ring[1:], ring):
+        h.uc.mem_write(here + 4, struct.pack('<I', previous))
 
     buckets = h.alloc((count + 1) * 4, b'\0' * ((count + 1) * 4))
     for i in range(count + 1):
@@ -311,4 +317,90 @@ def test_file_system_instance(h):
         return ['returned null']
     if _u32(h, 0x006C8C28) != obj:
         return ['singleton %08X, returned %08X' % (_u32(h, 0x006C8C28), obj)]
+    return None
+
+
+def _check_initial_map(h, mapobj, sentinel, allocator):
+    if _u32(h, mapobj) & 0xFF != allocator:
+        return ['allocator byte %02X, want %02X' % (_u32(h, mapobj) & 0xFF, allocator)]
+    if not sentinel:
+        return ['no sentinel']
+    if _u32(h, sentinel) != sentinel or _u32(h, sentinel + 4) != sentinel:
+        return ['sentinel does not link to itself']
+    if _u32(h, mapobj + 0xC) != 0:
+        return ['size %d' % _u32(h, mapobj + 0xC)]
+    if struct.unpack('<II', h.uc.mem_read(mapobj + 0x20, 8)) != (1, 1):
+        return ['mask/count %r' % (h.uc.mem_read(mapobj + 0x20, 8),)]
+    begin = _u32(h, mapobj + 0x14)
+    if _u32(h, mapobj + 0x18) - begin != 36:
+        return ['bucket vector is %d bytes' % (_u32(h, mapobj + 0x18) - begin)]
+    for i in range(9):
+        if _u32(h, begin + 4 * i) != sentinel:
+            return ['bucket slot %d is %08X' % (i, _u32(h, begin + 4 * i))]
+    return None
+
+
+def _test_init_map(h, addr, allocator_value):
+    mapobj = h.alloc(0x28, bytes(0x28))
+    allocator = h.alloc(4, struct.pack('<I', allocator_value))
+    args = [allocator, allocator]
+    diffs = h.compare(addr, args=args, regs={UC_X86_REG_ECX: mapobj}, ret='eax')
+    if diffs:
+        return diffs
+    res = h.call(addr, args=args, regs={UC_X86_REG_ECX: mapobj})
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    if res['eax'] != mapobj:
+        return ['returned %08X, want %08X' % (res['eax'], mapobj)]
+    sentinel = _u32(h, mapobj + 8)
+    return _check_initial_map(h, mapobj, sentinel, allocator_value)
+
+
+def test_init_string_map(h):
+    return _test_init_map(h, 0x00451430, 0x5A)
+
+
+def test_init_int_map(h):
+    return _test_init_map(h, 0x00489710, 0xC3)
+
+
+def test_clear_string_nodes(h):
+    """0x5224A0 takes the library's map object at FsHashMap+4 and frees every node, destroying its key."""
+    mask, count = 7, 8
+    keys = [b'alpha', b'Beta', b'gamma']
+    mapobj, sentinel, nodes = _make_string_map(h, [(k, 0xD0 + i) for i, k in enumerate(keys)], mask, count)
+    diffs = h.compare(0x005224A0, regs={UC_X86_REG_ECX: mapobj + 4}, ret=None)
+    if diffs:
+        return diffs
+    res = h.call(0x005224A0, regs={UC_X86_REG_ECX: mapobj + 4})
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    if _u32(h, sentinel) != sentinel or _u32(h, sentinel + 4) != sentinel:
+        return ['node list not emptied']
+    if _u32(h, mapobj + 0xC) != 0:
+        return ['size %d' % _u32(h, mapobj + 0xC)]
+    return None
+
+
+def test_clear_int(h):
+    """0x4EF7F0 frees the int map's nodes and resets the bucket vector, mask and count."""
+    mask, count = 7, 8
+    keys = [3, 9, 17]
+    mapobj, sentinel, nodes = _make_map(h, [(k, k * 3) for k in keys], mask, count)
+    diffs = h.compare(0x004EF7F0, regs={UC_X86_REG_ECX: mapobj}, ret=None)
+    if diffs:
+        return diffs
+    res = h.call(0x004EF7F0, regs={UC_X86_REG_ECX: mapobj})
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    if _u32(h, sentinel) != sentinel or _u32(h, sentinel + 4) != sentinel:
+        return ['node list not emptied']
+    if _u32(h, mapobj + 0xC) != 0:
+        return ['size %d' % _u32(h, mapobj + 0xC)]
+    if struct.unpack('<II', h.uc.mem_read(mapobj + 0x20, 8)) != (1, 1):
+        return ['mask/count %r' % (h.uc.mem_read(mapobj + 0x20, 8),)]
+    begin = _u32(h, mapobj + 0x14)
+    for i in range(9):
+        if _u32(h, begin + 4 * i) != sentinel:
+            return ['bucket slot %d is %08X' % (i, _u32(h, begin + 4 * i))]
     return None
