@@ -23,6 +23,8 @@ struct InterfaceItem4C {
     float x2;              /* +044 */
     float y2;              /* +048 */
 
+    InterfaceItem4C() {} /* the parser's stack item: the strings start empty, the numbers fill later */
+    InterfaceItem4C(const InterfaceItem4C &other); /* 0x421020 */
     void Read(); /* 0x4A1A60 */
 };
 static_assert(sizeof(InterfaceItem4C) == 0x4C, "InterfaceItem4C is 0x4C bytes");

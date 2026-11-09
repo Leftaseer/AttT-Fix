@@ -13,19 +13,13 @@ ORIG_DATA(006CA2BC); /* the token the lexer returned last */
 ORIG_DATA(006C9060); /* the numeric value of the last token (a float) */
 ORIG_DATA(006C9068); /* the text of the last token */
 
+inline void *operator new(unsigned int, void *p) { return p; }
+
 ORIG_THISCALL(004EF350, void, (void *vector, unsigned count, void *sentinel)); /* refill the bucket vector */
 ORIG_THISCALL(00424270, void *, (void *map, const void *key));         /* find the record's node, or insert one */
 
 /* the keyword parsers of the record fields (they read through the same lexer and leave the token global advanced) */
 ORIG_FASTCALL(004A1CA0, void, (float *floats));    /* 0x149: x, y and optionally x2, y2 */
-
-/* the vector append of each element type */
-ORIG_THISCALL(004A54F0, void, (void *vector, const void *item)); /* 0x4C-byte elements */
-ORIG_THISCALL(004A5710, void, (void *vector, const void *item)); /* 0x48-byte elements */
-ORIG_THISCALL(004A5930, void, (void *vector, const void *item)); /* 0x2C-byte elements */
-ORIG_THISCALL(004A6B70, void, (void *vector, const void *item)); /* 0x64-byte elements */
-ORIG_THISCALL(004A5BB0, void, (void *vector, const void *item)); /* 0xE4-byte elements */
-ORIG_THISCALL(004A5DF0, void, (void *vector, const void *item)); /* 0x118-byte elements */
 
 extern "C" __declspec(dllimport) char *__cdecl _strlwr(char *s); /* 0x607414 */
 
@@ -36,6 +30,14 @@ ORIG_THISCALL(004A57A0, void *, (void *vector, const void *other)); /* 0x2C-byte
 ORIG_THISCALL(004A69E0, void *, (void *vector, const void *other)); /* 0x64-byte elements */
 ORIG_THISCALL(004A5A10, void *, (void *vector, const void *other)); /* 0xE4-byte elements */
 ORIG_THISCALL(004A5C50, void *, (void *vector, const void *other)); /* 0x118-byte elements */
+
+/* The element copy the vectors make: the strings copy themselves, the numbers follow one by one. The flag is a
+ * lone byte, so the three padding bytes after it keep whatever the destination held. */
+DECOMP(00421020)
+InterfaceItem4C::InterfaceItem4C(const InterfaceItem4C &other)
+    : name(other.name), text(other.text), flag(other.flag), x(other.x), y(other.y), x2(other.x2), y2(other.y2)
+{
+}
 
 /* An item keeps some of its strings 0x20 apart; the compiler-generated destructors release the later one first.
  * 0x420910 is that pair destructor: the string at +0x2C, then the one at +0x0C. */
@@ -313,6 +315,79 @@ void InterfaceItem48::Read()
     ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
 }
 
+/* The vector append of the interface element types (std::vector<T>::push_back): one copy of the item at the end.
+ * The item is copied before the vector is touched, an empty or full vector grows to half again (at least one
+ * more element), the elements move to the new buffer and the old buffer goes; the element copies are the
+ * compiler's (the string copy constructor is the same import the original's copy constructors call). */
+template <typename T>
+static void PushBack(InterfaceVector *vector, const T *item)
+{
+    T *begin = (T *)vector->begin;
+    T *end = (T *)vector->end;
+    unsigned size = begin ? (unsigned)(end - begin) : 0;
+    unsigned capacity = begin ? (unsigned)((T *)vector->limit - begin) : 0;
+
+    if (begin && size < capacity) {
+        ::new (end) T(*item);
+        vector->end = end + 1;
+        return;
+    }
+
+    T copy(*item);
+    unsigned grown = capacity + capacity / 2;
+    if (grown < size + 1)
+        grown = size + 1;
+    T *data = (T *)operator new(grown * sizeof(T));
+    unsigned i = 0;
+    for (; i < size; i++)
+        ::new (data + i) T(begin[i]);
+    ::new (data + size) T(copy);
+    if (begin) {
+        for (T *p = begin; p != end; p++)
+            p->~T();
+        operator delete(begin);
+    }
+    vector->begin = data;
+    vector->end = data + size + 1;
+    vector->limit = data + grown;
+}
+
+DECOMP(004A54F0)
+void __thiscall PushItem4C(InterfaceVector *vector, const InterfaceItem4C *item)
+{
+    PushBack(vector, item);
+}
+
+DECOMP(004A5710)
+void __thiscall PushItem48(InterfaceVector *vector, const InterfaceItem48 *item)
+{
+    PushBack(vector, item);
+}
+
+DECOMP(004A5930)
+void __thiscall PushItem2C(InterfaceVector *vector, const InterfaceItem2C *item)
+{
+    PushBack(vector, item);
+}
+
+DECOMP(004A6B70)
+void __thiscall PushItem64(InterfaceVector *vector, const InterfaceItem64 *item)
+{
+    PushBack(vector, item);
+}
+
+DECOMP(004A5BB0)
+void __thiscall PushItemE4(InterfaceVector *vector, const InterfaceItemE4 *item)
+{
+    PushBack(vector, item);
+}
+
+DECOMP(004A5DF0)
+void __thiscall PushItem118(InterfaceVector *vector, const InterfaceItem118 *item)
+{
+    PushBack(vector, item);
+}
+
 /* A titled block: "title { lines }"; the opening brace is read and dropped, the block ends on token 0x103. */
 DECOMP(004A5F00)
 void InterfaceCollection::ReadItems4C()
@@ -325,7 +400,7 @@ void InterfaceCollection::ReadItems4C()
     ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     while (ORIG_VAR(006CA2BC, int) != 0x103) {
         item.Read();
-        sub_004A54F0(&allocator, &item);
+        PushItem4C((InterfaceVector *)&allocator, &item);
     }
 }
 
@@ -340,7 +415,7 @@ void InterfaceCollection::ReadItems48()
     ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     while (ORIG_VAR(006CA2BC, int) != 0x103) {
         item.Read();
-        sub_004A5710(&allocator, &item);
+        PushItem48((InterfaceVector *)&allocator, &item);
     }
 }
 
@@ -370,7 +445,7 @@ void InterfaceCollection::ReadItems2C()
             item.x2 = 0;
             item.y2 = 0;
         }
-        sub_004A5930(&allocator, &item);
+        PushItem2C((InterfaceVector *)&allocator, &item);
     }
 }
 
@@ -396,7 +471,7 @@ void InterfaceVector::ReadItems64()
         DatLexerNextToken();
         item.text2 = (const char *)d_006C9068;
 
-        sub_004A6B70(this, &item);
+        PushItem64(this, &item);
         ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     }
 }
@@ -443,7 +518,7 @@ void InterfaceVector::ReadItemsE4()
         DatLexerNextToken();
         item.text5 = (const char *)d_006C9068;
 
-        sub_004A5BB0(this, &item);
+        PushItemE4(this, &item);
         ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     }
 }
@@ -500,7 +575,7 @@ void InterfaceVector::ReadItems118()
         DatLexerNextToken();
         item.text7 = (const char *)d_006C9068;
 
-        sub_004A5DF0(this, &item);
+        PushItem118(this, &item);
         ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     }
 }
