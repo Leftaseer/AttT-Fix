@@ -3,13 +3,20 @@
 #pragma once
 #include "game/common.h"
 
+/* CGameObject: the base of the engine's game objects (8 bytes, vtable 0x607D14 with only the deleting
+ * destructor).  The pointer at +4 must be null when the object goes: the destructor throws otherwise. */
+struct CGameObject {
+    void *vftable;                           /* +00 */
+    void *owner;                             /* +04 */
+    ~CGameObject();                          /* 0x424C70 */
+};
+static_assert(sizeof(CGameObject) == 0x08, "CGameObject is 8 bytes");
+
 /* CUpdateObject: the updatable base of the engine's object tree (0x38 bytes, vtable 0x607D5C); the frame update
  * (slot 1, UpdateObjectFrame in updateobject.cpp) accumulates the time and runs Tick in fixed steps.  Its vtable is
  * a plain field as in the other translated classes and the slots are called through it.  A derived class replaces
  * slot 1 (CInput's reads DirectInput), so callers outside the tree dispatch it (UpdateObject). */
-struct CUpdateObject {
-    void *vftable;                           /* +00 */
-    void *link;                              /* +04 */
+struct CUpdateObject : CGameObject {
     std::string name;                        /* +08 */
     float interval;                          /* +24 ms between fixed updates (33.33) */
     float accumulator;                       /* +28 */
@@ -18,6 +25,7 @@ struct CUpdateObject {
     bool attached;                           /* +34 */
 
     CUpdateObject(const std::string &name, CUpdateObject *parent);   /* 0x424D00 */
+    ~CUpdateObject();                        /* 0x424E00 */
     void Tick() { ((void (__thiscall *)(CUpdateObject *))((void **)vftable)[5])(this); }
     void StepsDone(int count) { ((void (__thiscall *)(CUpdateObject *, int))((void **)vftable)[9])(this, count); }
     void Render() { ((void (__thiscall *)(CUpdateObject *))((void **)vftable)[2])(this); }
