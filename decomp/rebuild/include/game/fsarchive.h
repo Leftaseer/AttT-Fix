@@ -171,6 +171,7 @@ struct FsFileEntry {
 
     FsFileEntry(const std::string &fileName); /* 0x432200 */
     void Locate(const std::string &fileName); /* 0x432010 */
+    bool HasName() const;                     /* 0x432070 whether the archive knows the name */
     char *Read();                             /* 0x576820 */
 };
 static_assert(sizeof(FsFileEntry) == 0x28, "FsFileEntry is 0x28 bytes");

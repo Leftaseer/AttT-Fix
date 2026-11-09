@@ -396,6 +396,13 @@ void __thiscall FsFileEntry::Locate(const std::string &fileName)
         name = ORIG_STR(0060FA8B);
 }
 
+/* Whether the archive gave the entry a name: a name it didn't know was cleared in Locate. */
+DECOMP(00432070)
+bool __thiscall FsFileEntry::HasName() const
+{
+    return !name.empty();
+}
+
 /* Reads the whole file into a new buffer.  A name with a drive is opened as is, any other name through the
  * ResourceN.pak it was found in; the buffer gets one terminating zero past the size.  The path is then replaced
  * with the opened-files log (a debug leftover of the original; the assignment never takes effect). */
