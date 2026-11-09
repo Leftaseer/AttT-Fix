@@ -50,6 +50,9 @@ STRING_ALIAS = {
     '?size@' + _S + 'QBEIXZ': 'str_size', '?length@' + _S + 'QBEIXZ': 'str_size',
     '?swap@' + _S + 'QAEXAAV12@@Z': 'str_swap',
     '??Y' + _S + 'QAEAAV01@PBD@Z': 'str_append_cstr',
+    '??Y' + _S + 'QAEAAV01@D@Z': 'str_append_char',
+    '??A' + _S + 'QAEAADU_Size_type_nosscl@01@@Z': 'str_index',
+    '?erase@' + _S + 'QAEAAV12@II@Z': 'str_erase',
     '?substr@' + _S + 'QBE?AV12@II@Z': 'str_substr', '?find@' + _S + 'QBEIDI@Z': 'str_find_char',
     # (free operators, __cdecl: a result string through a hidden pointer first)
     _OP + '?HDU' + _T + 'YA?AV' + _B + 'ABV10@PBD@Z': 'str_plus_cstr',
@@ -268,7 +271,7 @@ class Harness:
         try:
             this = self._ecx()
             r = fn(this)
-        except (ValueError, UcError):
+        except (Unsupported, ValueError, UcError):
             self.uc.emu_stop(); self.fault = 'bad std::string'; return
         self._ret(this if ret_this else r, pop)
 
@@ -297,48 +300,96 @@ class Harness:
         self.uc.mem_write(other + 4, a)
         self._ret(other, 4)
 
+    def _str_append(self, this, source, suffix):
+        """validate the object and append suffix, growing like VC8; returns this; raises Unsupported"""
+        if not this or (source is not None and not source):
+            raise Unsupported('null object or source')
+        size, cap = struct.unpack('<II', self.uc.mem_read(this + 20, 8))
+        if not 15 <= cap <= IMPORT_STRING_LIMIT or size > cap:
+            raise Unsupported('invalid or oversized object')
+        data = this + 4
+        if cap >= 16:
+            data, = struct.unpack('<I', self.uc.mem_read(data, 4))
+        if not data or self.uc.mem_read(data + size, 1) != b'\0':
+            raise Unsupported('invalid string storage')
+        if source is not None and data + size < source <= data + cap:
+            raise Unsupported('source points past the end of the string')
+        new_size = size + len(suffix)
+        if new_size > IMPORT_STRING_LIMIT:
+            raise Unsupported('output exceeds verifier limit')
+        if new_size > cap:
+            new_cap = new_size | 15
+            if new_cap // 3 < cap // 2:
+                new_cap = cap + cap // 2
+            if new_cap > IMPORT_STRING_LIMIT:
+                raise Unsupported('capacity exceeds verifier limit')
+            allocation = (self.heap_ptr + 15) & ~15
+            if allocation + new_cap + 1 > HEAP + HEAP_SIZE:
+                raise Unsupported('verifier heap exhausted')
+            prefix = bytes(self.uc.mem_read(data, size))
+            data = self.alloc(new_cap + 1, prefix)
+            self.uc.mem_write(this + 4, struct.pack('<I', data))
+            self.uc.mem_write(this + 24, struct.pack('<I', new_cap))
+        if suffix:
+            self.uc.mem_write(data + size, suffix + b'\0')
+            self.uc.mem_write(this + 20, struct.pack('<I', new_size))
+        return this
+
     def crt_str_append_cstr(self):
         this, source = self._ecx(), self._arg(0)
         try:
             if not this or not source:
                 raise Unsupported('null object or source')
-            size, cap = struct.unpack('<II', self.uc.mem_read(this + 20, 8))
-            if not 15 <= cap <= IMPORT_STRING_LIMIT or size > cap:
-                raise Unsupported('invalid or oversized object')
-            data = this + 4
-            if cap >= 16:
-                data, = struct.unpack('<I', self.uc.mem_read(data, 4))
-            if not data or self.uc.mem_read(data + size, 1) != b'\0':
-                raise Unsupported('invalid string storage')
-            if data + size < source <= data + cap:
-                raise Unsupported('source points past the end of the string')
             # Read before reallocating. For an internal source, VC8 retains its offset
             # across a grow, so a suffix can be appended to the same object.
             suffix = self._bounded_cstr(source)
-            new_size = size + len(suffix)
-            if new_size > IMPORT_STRING_LIMIT:
-                raise Unsupported('output exceeds verifier limit')
-            if new_size > cap:
-                new_cap = new_size | 15
-                if new_cap // 3 < cap // 2:
-                    new_cap = cap + cap // 2
-                if new_cap > IMPORT_STRING_LIMIT:
-                    raise Unsupported('capacity exceeds verifier limit')
-                allocation = (self.heap_ptr + 15) & ~15
-                if allocation + new_cap + 1 > HEAP + HEAP_SIZE:
-                    raise Unsupported('verifier heap exhausted')
-                prefix = bytes(self.uc.mem_read(data, size))
-                data = self.alloc(new_cap + 1, prefix)
-                self.uc.mem_write(this + 4, struct.pack('<I', data))
-                self.uc.mem_write(this + 24, struct.pack('<I', new_cap))
-            if suffix:
-                self.uc.mem_write(data + size, suffix + b'\0')
-                self.uc.mem_write(this + 20, struct.pack('<I', new_size))
+            self._str_append(this, source, suffix)
         except (Unsupported, UcError) as error:
             self.uc.emu_stop()
             self.fault = 'unsupported std::string::append: %s' % error
             return
         self._ret(this, 4)
+
+    def crt_str_append_char(self):
+        this = self._ecx()
+        try:
+            self._str_append(this, None, bytes([self._arg(0) & 0xFF]))
+        except (Unsupported, UcError) as error:
+            self.uc.emu_stop()
+            self.fault = 'unsupported std::string::append: %s' % error
+            return
+        self._ret(this, 4)
+
+    def crt_str_index(self):
+        def go(t):
+            i = self._arg(0)
+            b = self._str_get(t)
+            if i > len(b):
+                raise Unsupported('index %d past size %d' % (i, len(b)))
+            res = struct.unpack('<I', self.uc.mem_read(t + 24, 4))[0]
+            data = (t + 4) if res < 16 else struct.unpack('<I', self.uc.mem_read(t + 4, 4))[0]
+            return data + i
+        self._str_op(go, 4, ret_this=False)
+
+    def crt_str_erase(self):
+        # VC8 moves the tail left in place, keeps the capacity and leaves the old tail bytes after the new NUL
+        try:
+            this, off, count = self._ecx(), self._arg(0), self._arg(1)
+            b = self._str_get(this)
+            if off > len(b):
+                raise Unsupported('erase offset %d past size %d' % (off, len(b)))
+            n = len(b) - off if count == 0xFFFFFFFF else min(count, len(b) - off)
+            res = struct.unpack('<I', self.uc.mem_read(this + 24, 4))[0]
+            data = (this + 4) if res < 16 else struct.unpack('<I', self.uc.mem_read(this + 4, 4))[0]
+            tail = bytes(self.uc.mem_read(data + off + n, len(b) - off - n))
+            self.uc.mem_write(data + off, tail)
+            self.uc.mem_write(this + 20, struct.pack('<I', len(b) - n))
+            self.uc.mem_write(data + len(b) - n, b'\0')
+        except (Unsupported, ValueError, UcError) as error:
+            self.uc.emu_stop()
+            self.fault = 'unsupported std::string::erase: %s' % error
+            return
+        self._ret(this, 8)
 
     def crt_str_substr(self):
         def go(t):

@@ -4,6 +4,12 @@
 
 ORIG_DATA(0060A560); /* CDatFile::vftable */
 ORIG_DATA(0060A4C4); /* CSingleton<CDatFile>::vftable */
+ORIG_DATA(0060A4B0); /* int[2]: the keyword count of each format set (3 and 8) */
+
+/* the dat reader of LoadSource (CDelCom, 0xB0 bytes: vftable, the current character, an ifstream, the text) */
+ORIG_THISCALL(00444AD0, void *, (void *self));                                     /* constructor */
+ORIG_THISCALL(00444B40, void, (void *self));                                       /* destructor */
+ORIG_THISCALL(00445630, void *, (void *self, void *result, const std::string *name)); /* reads the file into result */
 
 inline void *operator new(unsigned int, void *p) { return p; }
 
@@ -90,4 +96,95 @@ CDatFile::~CDatFile()
     }
 
     vftable = d_0060A4C4;
+}
+
+/* the stack reader LoadSource constructs: only its address crosses the calls to 0x444AD0 / 0x445630 / 0x444B40 */
+struct DatReader {
+    alignas(4) unsigned char storage[0xB0];
+};
+
+/* the ten sources are a cache keyed by the file name: a hit just makes it current, a miss reads the file through
+ * the reader (0x444AD0-0x444B40) and appends it (the table stops at 9). The original also catches the reader's
+ * CGameException and rethrows it with " in file '<name>')" and DatFile.cpp:443; without exceptions the reader's
+ * own error propagates instead. Returns true in both paths. */
+DECOMP(00445AB0)
+bool CDatFile::LoadSource(const std::string &file)
+{
+    sourcePos = 0;
+    tokenText = "";
+
+    for (int i = 0; i < sourceCount; i++)
+        if (sources[i].name == file) {
+            currentSource = i;
+            return true;
+        }
+
+    DatReader reader;
+    sub_00444AD0(&reader);
+    sources[sourceCount].name = file;
+    /* the reader returns its text through the hidden result of a copy constructor into uninitialised storage */
+    alignas(std::string) unsigned char textStorage[sizeof(std::string)];
+    sub_00445630(&reader, textStorage, &file);
+    std::string &text = *reinterpret_cast<std::string *>(textStorage);
+    sources[sourceCount].text = text;
+    text.~basic_string();
+    currentSource = sourceCount;
+    if (sourceCount < 9)
+        sourceCount++;
+    sub_00444B40(&reader);
+    return true;
+}
+
+/* the character at sourcePos; the position stops on the last character rather than running past the text */
+DECOMP(00445240)
+void CDatFile::ReadChar()
+{
+    const std::string &text = sources[currentSource].text;
+    token = text.c_str()[sourcePos];
+    if (text.size() <= ++sourcePos)
+        sourcePos--;
+}
+
+/* spaces before a token (the original's state machine never re-reads there, so it would spin on one), then the
+ * token up to the next space, line break or the end of the text */
+DECOMP(00445C60)
+void CDatFile::ReadToken()
+{
+    tokenText = "";
+    do
+        ReadChar();
+    while (token == ' ');
+    if (token == '\0' || token == '\n')
+        return;
+    do {
+        tokenText += token;
+        ReadChar();
+    } while (token != ' ' && token != '\n' && token != '\0');
+}
+
+/* finds the keyword in the current format set, then reads tokens up to the "#keyword" line */
+DECOMP(00445CD0)
+bool CDatFile::SelectKeyword(const std::string &keyword)
+{
+    const int count = ((const int *)d_0060A4B0)[formatSet];
+    DatPair *const pairs = formatSets[formatSet];
+    int i = 0;
+
+    if (count <= 0)
+        return false;
+    while (!(pairs[i].keyword == keyword))
+        if (++i >= count)
+            return false;
+
+    keywordIndex = i;
+    ReadToken();
+    while (!tokenText.empty()) {
+        if (tokenText.c_str()[0] == '#') {
+            tokenText.erase(0, 1);
+            if (tokenText == keyword)
+                return true;
+        }
+        ReadToken();
+    }
+    return false;
 }

@@ -48,6 +48,11 @@ struct CDatFile {
 
     CDatFile();  /* 0x444D50 */
     ~CDatFile(); /* 0x445130 */
+
+    bool LoadSource(const std::string &file);       /* 0x445AB0 caches the file text (or reuses a cached one) */
+    void ReadChar();                                /* 0x445240 takes the next character of the current source */
+    void ReadToken();                               /* 0x445C60 takes the next token into tokenText */
+    bool SelectKeyword(const std::string &keyword); /* 0x445CD0 finds the keyword line ("#keyword") in the source */
 };
 static_assert(sizeof(CDatFile) == 0xBFC, "CDatFile is 0xBFC bytes");
 static_assert(__builtin_offsetof(CDatFile, tokenText) == 0x008, "CDatFile::tokenText");
