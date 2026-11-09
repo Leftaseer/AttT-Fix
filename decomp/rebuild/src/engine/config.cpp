@@ -7,14 +7,15 @@
 ORIG_DATA(0060A290);                    /* CSingleton<CConfig>::vftable */
 ORIG_DATA(0060A298);                    /* CConfig::vftable */
 ORIG_DATA(0060A2A8);                    /* "graphic.cfg" */
+ORIG_DATA(0060A2B8);                    /* CSingleton<CConsole>::vftable */
+ORIG_DATA(0060A2C0);                    /* CConsole::vftable */
+ORIG_DATA(0060A2C8);                    /* CConsole::vftable_4 (the updater at +4) */
 ORIG_DATA(00607BC8);                    /* "Ошибка при создании m_instance в CSingleton" */
 ORIG_DATA(00607E98);                    /* "e:\\prog\\att1\\singleton.h" */
 ORIG_DATA(006C8958);                    /* float: screen height of the current mode */
 ORIG_DATA(006C895C);                    /* float: screen width */
 ORIG_DATA(006C8960);                    /* int: screen height */
 ORIG_DATA(006C8964);                    /* int: screen width */
-
-ORIG_THISCALL(004426E0, CConsole *, (void *self));   /* CConsole::CConsole (0x1658 bytes) */
 
 #define GRAPHIC_CFG ORIG_STR(0060A2A8)
 
@@ -25,7 +26,18 @@ inline void *operator new(unsigned int, void *p) { return p; }
 DECOMP(00441C50)
 std::string &CConsole::GameFolder()
 {
-    return *(std::string *)((char *)this + 0x1638);
+    return gameFolder;
+}
+
+/* The CUpdateObject base at +4 (the updater tree's root gets an empty name), the console's vtables, the line
+ * history and the two strings. */
+DECOMP(004426E0)
+CConsole::CConsole() : vftable(d_0060A2B8), updater(std::string(""), nullptr)
+{
+    updater.vftable = d_0060A2C8;
+    vftable = d_0060A2C0;
+    unknown3C = "";
+    gameFolder = "";
 }
 
 /* Despite the name, the original never reads the log file name: it recomputes the game folder from the exe's full
@@ -61,8 +73,8 @@ CConsole *CConsole::Instance()
 {
     CConsole *&instance = (CConsole *&)g_consoleInstance;
     if (!instance) {
-        void *memory = operator new(0x1658);
-        instance = memory ? ORIG_CALL(004426E0)(memory) : nullptr;
+        void *memory = operator new(sizeof(CConsole));
+        instance = memory ? new (memory) CConsole() : nullptr;
         if (!instance)
             ThrowGameException(ORIG_STR(00607BC8), ORIG_STR(00607E98), 16);
     }

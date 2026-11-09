@@ -3,19 +3,29 @@
 #pragma once
 #include "game/common.h"
 
-/* Interfaces of other engine objects, only the virtual slots the engine calls (thiscall). */
-struct CUpdateObject {                       /* vtable of the updatable part of an object */
-    virtual void Release(int flags);         /* 0: scalar deleting destructor */
-    virtual void Update(float dt);           /* 1: once per frame (CUpdateObject::Update accumulates and calls Tick) */
-    virtual void Render();                   /* 2 */
-    virtual void Slot3();
-    virtual void Slot4();
-    virtual void Tick(float stepMs);         /* 5: fixed 33.3 ms steps */
-};
+/* CUpdateObject: the updatable base of the engine's object tree (0x38 bytes, vtable 0x607D5C); the frame update
+ * calls Update, which accumulates the time and runs Tick in fixed steps.  Its vtable is a plain field as in the
+ * other translated classes and the slots are called through it. */
+struct CUpdateObject {
+    void *vftable;                           /* +00 */
+    void *link;                              /* +04 */
+    std::string name;                        /* +08 */
+    float interval;                          /* +24 ms between fixed updates (33.33) */
+    float accumulator;                       /* +28 */
+    CUpdateObject *parent;                   /* +2C */
+    CUpdateObject *next;                     /* +30 */
+    bool attached;                           /* +34 */
 
-/* A CUpdateObject embedded in a larger object (CInput +4, the GUI +4): its vtable is the one of the owner's class
- * (CInput's Update reads DirectInput).  A member declared as CUpdateObject would tell the compiler its exact type,
- * and it calls CUpdateObject::Update directly instead of through the vtable; this goes through the pointer. */
+    CUpdateObject(const std::string &name, CUpdateObject *parent);   /* 0x424D00 */
+    void Update(float dt) { ((void (__thiscall *)(CUpdateObject *, float))((void **)vftable)[1])(this, dt); }
+    void Render() { ((void (__thiscall *)(CUpdateObject *))((void **)vftable)[2])(this); }
+};
+static_assert(sizeof(CUpdateObject) == 0x38, "CUpdateObject is 0x38 bytes");
+static_assert(__builtin_offsetof(CUpdateObject, name) == 0x08, "CUpdateObject::name");
+static_assert(__builtin_offsetof(CUpdateObject, parent) == 0x2C, "CUpdateObject::parent");
+
+/* A CUpdateObject embedded in a larger object (CInput +4, the GUI +4): only its vtable is named here, the rest of
+ * the 0x38 bytes belongs to the owner's layout. */
 struct CUpdatePart {
     void *vftable;
     CUpdateObject *operator->() { return (CUpdateObject *)this; }

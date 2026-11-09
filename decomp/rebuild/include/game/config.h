@@ -3,6 +3,7 @@
  * two caps bytes, three option bytes, three volumes, three option bytes, four floats, gamma. */
 #pragma once
 #include "game/common.h"
+#include "game/engine.h"
 
 struct CConfig {
     void *vftable;                           /* +00 CSingleton<CConfig> */
@@ -53,11 +54,21 @@ static_assert(__builtin_offsetof(CConfig, depthFormat) == 0x5C, "CConfig::depthF
 static_assert(__builtin_offsetof(CConfig, gamma) == 0x80, "CConfig::gamma");
 static_assert(__builtin_offsetof(CConfig, musicVolume) == 0x88, "CConfig::musicVolume");
 
-struct CConsole {
+struct CConsole {                            /* 0x1658 bytes */
+    void *vftable;                           /* +0000 CSingleton<CConsole> */
+    CUpdateObject updater;                   /* +0004 the console's own updater (vtable 0x60A2C8) */
+    std::string unknown3C;                   /* +003C */
+    std::string lines[200];                  /* +0058 the console's line history */
+    std::string gameFolder;                  /* +1638 "<folder of the exe>\" */
+    char pad1654[4];                         /* +1654 the allocation is 0x1658 bytes; neither ctor nor dtor touches it */
+
+    CConsole();                              /* 0x4426E0 */
     static CConsole *Instance();             /* 0x42F050 */
     void OpenLog(const std::string &name);   /* 0x4425E0 */
-    std::string &GameFolder();               /* 0x441C50: "<folder of the exe>\" at +0x1638 */
+    std::string &GameFolder();               /* 0x441C50 */
 };
+static_assert(sizeof(CConsole) == 0x1658, "CConsole is 0x1658 bytes");
+static_assert(__builtin_offsetof(CConsole, gameFolder) == 0x1638, "CConsole::gameFolder");
 
 namespace nCfg {
 struct GamePath {                            /* 0x3C bytes */
