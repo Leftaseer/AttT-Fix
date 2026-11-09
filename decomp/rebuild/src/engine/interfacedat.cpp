@@ -16,9 +16,6 @@ ORIG_DATA(006C9068); /* the text of the last token */
 
 inline void *operator new(unsigned int, void *p) { return p; }
 
-/* the keyword parsers of the record fields (they read through the same lexer and leave the token global advanced) */
-ORIG_FASTCALL(004A1CA0, void, (float *floats));    /* 0x149: x, y and optionally x2, y2 */
-
 extern "C" __declspec(dllimport) char *__cdecl _strlwr(char *s); /* 0x607414 */
 
 /* the vector assignments (defined with the elements, below) */
