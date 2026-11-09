@@ -1,4 +1,5 @@
-/* CDatFile: the keyword database and its lifetime (0x444D50 / 0x445130 / 0x445DB0). */
+/* CDatFile: the keyword database and its lifetime (0x444D50 / 0x445130 / 0x445DB0), the tokenizer
+ * (0x445240 / 0x445C60 / 0x445CD0) and the number parser of the token reader (0x4452A0). */
 #include "game/common.h"
 #include "game/datfile.h"
 #include "game/delcom.h"
@@ -19,9 +20,9 @@ ORIG_DATA(0060A684); /* "Can't load file '" */
 ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
 
 ORIG_FN(005E3B10, void *, (unsigned int size)); /* operator new[] */
-ORIG_STDCALL(004452A0, unsigned char, (std::string text, float *out)); /* parses a token (the string by value) */
 
 extern "C" __declspec(dllimport) int __cdecl msvc_tolower(int c) __asm__("_tolower");
+extern "C" __declspec(dllimport) int __cdecl msvc_isdigit(int c) __asm__("_isdigit");
 
 inline void *operator new(unsigned int, void *p) { return p; }
 
@@ -243,6 +244,113 @@ static void AllocateRecord(CDatFile &dat, unsigned words, unsigned numbers)
         record.numbers = (float *)sub_005E3B10(numbers * sizeof(float));
 }
 
+/* The by-value std::string of 0x4452A0's argument: the original takes the token copy on the stack (seven
+ * dwords), parses it and destroys it.  Keeping that layout lets the original callers jump straight into the
+ * replacement. */
+typedef struct { unsigned words[7]; } DatTokenText;
+
+/* 0x4452A0: a whole token as a decimal number - an optional sign, digits and an optional fraction, and nothing
+ * else.  The original appends a NUL to its copy of the token so the state machine can stop on the end; the
+ * products and the fraction accumulate in x87 precision, so the value rounds exactly like the original's. */
+static bool ParseTokenNumberText(std::string &text, float *out)
+{
+    text += '\0';
+
+    unsigned pos = 0, divisor = 1;
+    int state = 0;
+    bool negative = false;
+    float value = 0.0f;
+
+    for (;;) {
+        const char c = text[pos];
+        switch (state) {
+        case 0: /* before anything: empty fails, a digit, a point or a sign start the number */
+            if (c == '\0')
+                return false;
+            if (msvc_isdigit(c)) {
+                value = (float)(c - '0');
+                pos++;
+                state = 2;
+            } else if (c == '.') {
+                pos++;
+                state = 5;
+            } else if (c == '-' || c == '+') {
+                negative = c == '-';
+                state = 1;
+                pos++;
+            } else {
+                return false;
+            }
+            break;
+        case 1: /* after a sign: a digit or a point */
+            if (msvc_isdigit(c))
+                state = 2;
+            else if (c == '.') {
+                state = 4;
+                pos++;
+            } else {
+                return false;
+            }
+            break;
+        case 2: /* integer digits */
+            if (msvc_isdigit(c)) {
+                const int digit = c - '0';
+                pos++;
+                value = (float)((long double)value * 10.0L + digit);
+            } else if (c == '.') {
+                pos++;
+                state = 4;
+            } else if (c == '\0') {
+                goto done;
+            } else {
+                return false;
+            }
+            break;
+        case 3: /* fraction digits, each one over the growing divisor */
+            if (msvc_isdigit(c)) {
+                const int digit = c - '0';
+                divisor *= 10;
+                pos++;
+                value = (float)((long double)digit / (long double)divisor + (long double)value);
+            } else if (c == '\0') {
+                goto done;
+            } else {
+                return false;
+            }
+            break;
+        case 4: /* after the point: a digit starts the fraction, the end leaves a whole number ("12.") */
+            if (msvc_isdigit(c))
+                state = 3;
+            else if (c == '\0')
+                goto done;
+            else
+                return false;
+            break;
+        default: /* 5: after a leading point ("+.5") */
+            if (msvc_isdigit(c))
+                state = 3;
+            else
+                return false;
+            break;
+        }
+    }
+done:
+    /* the original negates with the constant at 0x608088: -0.0 - value, which keeps "-0" negative */
+    *out = negative ? -0.0f - value : value;
+    return true;
+}
+
+/* The original's entry: the copy of the token arrives in its argument area and the function owns it, so it is
+ * destroyed here at both exits. */
+DECOMP(004452A0)
+bool __stdcall ParseTokenNumber(DatTokenText text, float *out)
+{
+    std::string &copy = *(std::string *)(void *)&text;
+    const bool ok = ParseTokenNumberText(copy, out);
+    copy.~basic_string();
+    return ok;
+}
+
 /* one format character of the current record: a word is the token, a number is the token parsed (a token that is
  * not a number returns false) */
 static bool ReadField(CDatFile &dat, char format, unsigned &wordIndex, unsigned &numberIndex)
@@ -253,7 +361,8 @@ static bool ReadField(CDatFile &dat, char format, unsigned &wordIndex, unsigned 
         wordIndex++;
     } else if (format == 'n') {
         float value;
-        if (!sub_004452A0(dat.tokenText, &value))
+        std::string token(dat.tokenText);
+        if (!ParseTokenNumberText(token, &value))
             return false;
         record.numbers[numberIndex] = value;
         numberIndex++;
