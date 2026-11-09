@@ -19,12 +19,6 @@ ORIG_DATA(006C04B4); /* the 16-byte key of the version 200 paks */
 ORIG_DATA(006C7C90); /* the cp1251 lowercasing table {0..255}: A-Z and the Cyrillic capitals (and the 0xA8) fold */
 ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
 
-/* the file system library's maps and files (their bodies stay generated; see the comments at the call sites) */
-ORIG_THISCALL(00451430, void, (void *map, const void *alloc, const void *comp)); /* ctor of map<string, PakEntry> */
-ORIG_THISCALL(00489710, void, (void *map, const void *alloc, const void *comp)); /* ctor of map<int, ifstream*> */
-ORIG_FASTCALL(005224A0, void, (void *self)); /* break the string map's node list */
-ORIG_FASTCALL(004EF7F0, void, (void *self)); /* clear the int map */
-
 /* the exe imports operator new (?2) but implements new[]/?_U itself as a jmp to it; delete[] is imported */
 ORIG_FN(005E3B10, void *, (unsigned int size)); /* operator new[] */
 inline void *operator new(unsigned int, void *p) { return p; }

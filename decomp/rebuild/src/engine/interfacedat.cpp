@@ -3,6 +3,7 @@
 #include "game/common.h"
 #include "game/interfacedat.h"
 #include "game/gamefile.h"
+#include "game/datlexer.h"
 
 ORIG_DATA(00610088); /* CReadInterfaceDat::vftable */
 ORIG_DATA(00610080); /* CSingleton<CReadInterfaceDat>::vftable */
@@ -13,7 +14,6 @@ ORIG_DATA(006C9060); /* the numeric value of the last token (a float) */
 ORIG_DATA(006C9068); /* the text of the last token */
 
 ORIG_THISCALL(004EF350, void, (void *vector, unsigned count, void *sentinel)); /* refill the bucket vector */
-ORIG_FN(00470410, int, ());                                            /* the next token of the file */
 ORIG_THISCALL(00424270, void *, (void *map, const void *key));         /* find the record's node, or insert one */
 
 /* the keyword parsers of the record fields (they read through the same lexer and leave the token global advanced) */
@@ -129,60 +129,60 @@ DECOMP(004A1A60)
 void InterfaceItem4C::Read()
 {
     name = _strlwr(d_006C9068);
-    sub_00470410();
+    DatLexerNextToken();
     text = (const char *)d_006C9068;
-    sub_00470410();
+    DatLexerNextToken();
     flag = (unsigned char)(int)ORIG_VAR(006C9060, float);
-    sub_00470410();
+    DatLexerNextToken();
     x = ORIG_VAR(006C9060, float);
-    sub_00470410();
+    DatLexerNextToken();
     y = ORIG_VAR(006C9060, float);
 
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     if (ORIG_VAR(006CA2BC, int) != 0x105) {
         x2 = 0;
         y2 = 0;
         return;
     }
     x2 = ORIG_VAR(006C9060, float);
-    sub_00470410();
+    DatLexerNextToken();
     y2 = ORIG_VAR(006C9060, float);
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
 }
 
 DECOMP(004A1B10)
 void InterfaceItem48::Read()
 {
     name = _strlwr(d_006C9068);
-    sub_00470410();
+    DatLexerNextToken();
     text = (const char *)d_006C9068;
-    sub_00470410();
+    DatLexerNextToken();
     x = ORIG_VAR(006C9060, float);
-    sub_00470410();
+    DatLexerNextToken();
     y = ORIG_VAR(006C9060, float);
 
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     if (ORIG_VAR(006CA2BC, int) != 0x105) {
         x2 = 0;
         y2 = 0;
         return;
     }
     x2 = ORIG_VAR(006C9060, float);
-    sub_00470410();
+    DatLexerNextToken();
     y2 = ORIG_VAR(006C9060, float);
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
 }
 
 /* A titled block: "title { lines }"; the opening brace is read and dropped, the block ends on token 0x103. */
 DECOMP(004A5F00)
 void InterfaceCollection::ReadItems4C()
 {
-    sub_00470410();
+    DatLexerNextToken();
     title = (const char *)d_006C9068;
-    sub_00470410();
+    DatLexerNextToken();
 
     InterfaceItem4C item;
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     while (ORIG_VAR(006CA2BC, int) != 0x103) {
         item.Read();
         sub_004A54F0(&allocator, &item);
@@ -192,12 +192,12 @@ void InterfaceCollection::ReadItems4C()
 DECOMP(004A5FD0)
 void InterfaceCollection::ReadItems48()
 {
-    sub_00470410();
+    DatLexerNextToken();
     title = (const char *)d_006C9068;
-    sub_00470410();
+    DatLexerNextToken();
 
     InterfaceItem48 item;
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     while (ORIG_VAR(006CA2BC, int) != 0x103) {
         item.Read();
         sub_004A5710(&allocator, &item);
@@ -207,25 +207,25 @@ void InterfaceCollection::ReadItems48()
 DECOMP(004A60A0)
 void InterfaceCollection::ReadItems2C()
 {
-    sub_00470410();
+    DatLexerNextToken();
     title = (const char *)d_006C9068;
-    sub_00470410();
+    DatLexerNextToken();
 
     InterfaceItem2C item;
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     while (ORIG_VAR(006CA2BC, int) != 0x103) {
         item.name = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.x = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.y = ORIG_VAR(006C9060, float);
 
-        ORIG_VAR(006CA2BC, int) = sub_00470410();
+        ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
         if (ORIG_VAR(006CA2BC, int) == 0x105) {
             item.x2 = ORIG_VAR(006C9060, float);
-            sub_00470410();
+            DatLexerNextToken();
             item.y2 = ORIG_VAR(006C9060, float);
-            ORIG_VAR(006CA2BC, int) = sub_00470410();
+            ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
         } else {
             item.x2 = 0;
             item.y2 = 0;
@@ -237,27 +237,27 @@ void InterfaceCollection::ReadItems2C()
 DECOMP(004A6C00)
 void InterfaceVector::ReadItems64()
 {
-    sub_00470410();
+    DatLexerNextToken();
 
     InterfaceItem64 item;
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     while (ORIG_VAR(006CA2BC, int) != 0x103) {
         item.name = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.x = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.y = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.flag = d_006C9068[0];
-        sub_00470410();
+        DatLexerNextToken();
         item.text1 = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.z = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.text2 = (const char *)d_006C9068;
 
         sub_004A6B70(this, &item);
-        ORIG_VAR(006CA2BC, int) = sub_00470410();
+        ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     }
 }
 
@@ -266,123 +266,123 @@ void InterfaceVector::ReadItems64()
 DECOMP(004A61C0)
 void InterfaceVector::ReadItemsE4()
 {
-    sub_00470410();
+    DatLexerNextToken();
 
     InterfaceItemE4 item;
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     while (ORIG_VAR(006CA2BC, int) != 0x103) {
         item.name = (const char *)d_006C9068;
         d_006C9068[strlen(d_006C9068) - 1] = '\0';
         _strlwr(d_006C9068);
         item.text6 = (const char *)d_006C9068;
 
-        sub_00470410();
+        DatLexerNextToken();
         item.x = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.y = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.flag = d_006C9068[0];
-        sub_00470410();
+        DatLexerNextToken();
         item.text1 = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.z = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.text2 = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.u = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.v = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.flag2 = d_006C9068[0];
-        sub_00470410();
+        DatLexerNextToken();
         item.text3 = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.w = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.text4 = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.text5 = (const char *)d_006C9068;
 
         sub_004A5BB0(this, &item);
-        ORIG_VAR(006CA2BC, int) = sub_00470410();
+        ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     }
 }
 
 DECOMP(004A63B0)
 void InterfaceVector::ReadItems118()
 {
-    sub_00470410();
+    DatLexerNextToken();
 
     InterfaceItem118 item;
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     while (ORIG_VAR(006CA2BC, int) != 0x103) {
         item.name = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.x = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.y = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.flag = d_006C9068[0];
-        sub_00470410();
+        DatLexerNextToken();
         item.text1 = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.z = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.text2 = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.u = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.v = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.w = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.flag2 = d_006C9068[0];
-        sub_00470410();
+        DatLexerNextToken();
         item.text3 = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.a = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.text4 = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.b = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.text5 = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.c = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.d = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.flag3 = d_006C9068[0];
-        sub_00470410();
+        DatLexerNextToken();
         item.text6 = (const char *)d_006C9068;
-        sub_00470410();
+        DatLexerNextToken();
         item.e = ORIG_VAR(006C9060, float);
-        sub_00470410();
+        DatLexerNextToken();
         item.text7 = (const char *)d_006C9068;
 
         sub_004A5DF0(this, &item);
-        ORIG_VAR(006CA2BC, int) = sub_00470410();
+        ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     }
 }
 
 DECOMP(004A1CA0)
 void __fastcall ReadFloats149(float *floats)
 {
-    sub_00470410();
+    DatLexerNextToken();
     floats[0] = ORIG_VAR(006C9060, float);
-    sub_00470410();
+    DatLexerNextToken();
     floats[1] = ORIG_VAR(006C9060, float);
 
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     if (ORIG_VAR(006CA2BC, int) != 0x105) {
         floats[2] = 0;
         floats[3] = 0;
         return;
     }
     floats[2] = ORIG_VAR(006C9060, float);
-    sub_00470410();
+    DatLexerNextToken();
     floats[3] = ORIG_VAR(006C9060, float);
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
 }
 
 /* The record's keywords up to the closing token 0x103. A keyword parser consumes its whole line, so the token
@@ -390,9 +390,9 @@ void __fastcall ReadFloats149(float *floats)
 DECOMP(004A6D30)
 void InterfaceRecord::Read()
 {
-    sub_00470410();
+    DatLexerNextToken();
     name = (const char *)d_006C9068;
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
 
     for (;;) {
         if (ORIG_VAR(006CA2BC, int) == 0x103)
@@ -400,9 +400,9 @@ void InterfaceRecord::Read()
 
         switch (ORIG_VAR(006CA2BC, int)) {
         case 0x142:
-            sub_00470410();
+            DatLexerNextToken();
             text142[0] = (const char *)d_006C9068;
-            sub_00470410();
+            DatLexerNextToken();
             text142[1] = (const char *)d_006C9068;
             break;
         case 0x143:
@@ -418,7 +418,7 @@ void InterfaceRecord::Read()
             items146.ReadItems64();
             break;
         case 0x147:
-            sub_00470410();
+            DatLexerNextToken();
             text147 = (const char *)d_006C9068;
             break;
         case 0x149:
@@ -428,7 +428,7 @@ void InterfaceRecord::Read()
             items14A.ReadItemsE4();
             break;
         case 0x14B:
-            sub_00470410();
+            DatLexerNextToken();
             number14B = ORIG_VAR(006C9060, float);
             break;
         case 0x14C:
@@ -436,7 +436,7 @@ void InterfaceRecord::Read()
             break;
         }
 
-        ORIG_VAR(006CA2BC, int) = sub_00470410();
+        ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     }
 }
 
@@ -530,14 +530,14 @@ void CReadInterfaceDat::Load(const std::string &name)
     map.mask = 1;
     map.count = 1;
 
-    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     while (ORIG_VAR(006CA2BC, int) != 0) {
         if (ORIG_VAR(006CA2BC, int) == 0x141) {
             InterfaceRecord record;
             record.Read();
             *(InterfaceRecord *)sub_00424270(&map, &record) = record;
         }
-        ORIG_VAR(006CA2BC, int) = sub_00470410();
+        ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     }
     reader->Close();
 }
