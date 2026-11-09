@@ -4,6 +4,7 @@
 #include "game/interfacedat.h"
 #include "game/gamefile.h"
 #include "game/datlexer.h"
+#include "game/fsarchive.h"
 
 ORIG_DATA(00610088); /* CReadInterfaceDat::vftable */
 ORIG_DATA(00610080); /* CSingleton<CReadInterfaceDat>::vftable */
@@ -16,7 +17,7 @@ ORIG_DATA(006C9068); /* the text of the last token */
 inline void *operator new(unsigned int, void *p) { return p; }
 
 ORIG_THISCALL(004EF350, void, (void *vector, unsigned count, void *sentinel)); /* refill the bucket vector */
-ORIG_THISCALL(00424270, void *, (void *map, const void *key));         /* find the record's node, or insert one */
+ORIG_THISCALL(00423AE0, void *, (void *record, const void *other));           /* the record's copy constructor */
 
 /* the keyword parsers of the record fields (they read through the same lexer and leave the token global advanced) */
 ORIG_FASTCALL(004A1CA0, void, (float *floats));    /* 0x149: x, y and optionally x2, y2 */
@@ -882,6 +883,122 @@ void __fastcall ClearRecordNodeList(char *mapObject)
     }
 }
 
+/* The record map's size guard (the library's map view starts four bytes into FsHashMap): growing past the
+ * library's limit throws std::length_error, as in the file maps' guards. */
+DECOMP(00422410)
+void __thiscall AddRecordMapSize(void *mapObject, unsigned count)
+{
+    unsigned &size = *(unsigned *)((char *)mapObject + 8);
+    if (0xC0C0C0u - size < count)
+        ThrowFsLengthError();
+    size += count;
+}
+
+/* The pair's copy constructor: the key, then the record (the node places this pair at its key). */
+DECOMP(00423C10)
+InterfaceRecordPair *__thiscall CopyRecordPair(InterfaceRecordPair *pair, const InterfaceRecordPair *other)
+{
+    ::new (&pair->key) std::string(other->key);
+    sub_00423AE0(&pair->value, &other->value);
+    return pair;
+}
+
+/* The pair the map insert copies into a node: the key and a copy of the record. */
+DECOMP(00423C70)
+InterfaceRecordPair *__thiscall BuildRecordPair(InterfaceRecordPair *pair, const std::string *key,
+                                                const InterfaceRecord *record)
+{
+    ::new (&pair->key) std::string(*key);
+    sub_00423AE0(&pair->value, record);
+    return pair;
+}
+
+/* The pair's destructor: the record first, then the key, in the compiler's order. */
+DECOMP(00420AE0)
+void __fastcall DestroyRecordPair(InterfaceRecordPair *pair)
+{
+    pair->value.~InterfaceRecord();
+    pair->key.~basic_string();
+}
+
+/* A fresh node: its links, then the pair copied behind them. */
+DECOMP(00423D70)
+InterfaceRecordNode *__stdcall CreateRecordNode(InterfaceRecordNode *next, InterfaceRecordNode *prev,
+                                                const InterfaceRecordPair *entry)
+{
+    InterfaceRecordNode *node = (InterfaceRecordNode *)operator new(sizeof(InterfaceRecordNode));
+    node->next = next;
+    node->prev = prev;
+    CopyRecordPair((InterfaceRecordPair *)((char *)node + 0x08), entry);
+    return node;
+}
+
+/* Inserts a record pair into the map: the key is hashed and looked up in its bucket (the nodes are ordered by
+ * the case-sensitive std::string operator<), and a missing key is linked before its lower bound while the map
+ * size grows.  The bucket starts that pointed at the lower bound must point at the new node instead. */
+DECOMP(00423FB0)
+FsInsertResult *__thiscall InsertRecordNode(FsHashMap *map, FsInsertResult *result, const InterfaceRecordPair *entry)
+{
+    if (map->count <= map->size >> 2)
+        map->GrowBuckets(true);
+
+    unsigned bucket = FsHashMap::HashName(&entry->key) & map->mask;
+    if (map->count <= bucket)
+        bucket += -1 - (map->mask >> 1);
+    InterfaceRecordNode **buckets = (InterfaceRecordNode **)map->begin;
+    InterfaceRecordNode *position = buckets[bucket + 1];
+    if (position != buckets[bucket]) {
+        do {
+            position = position->prev;
+            if (!(entry->key < position->key)) {
+                if (!(position->key < entry->key)) {
+                    result->node = position;
+                    result->inserted = 0;
+                    return result;
+                }
+                position = position->next;
+                break;
+            }
+        } while (position != buckets[bucket]);
+    }
+
+    InterfaceRecordNode *node = CreateRecordNode(position, position->prev, entry);
+    AddRecordMapSize((char *)map + 4, 1);
+    position->prev = node;
+    node->prev->next = node;
+
+    InterfaceRecordNode *oldFirst = buckets[bucket];
+    while (position == oldFirst && (buckets[bucket] = node, bucket != 0)) {
+        bucket--;
+        oldFirst = buckets[bucket];
+    }
+    result->node = node;
+    result->inserted = 1;
+    return result;
+}
+
+/* The map's operator[]: the node of the key, or a new node holding an empty record.  The empty record is copied
+ * into a pair, the pair into the node, and then the temporaries are destroyed. */
+DECOMP(00424270)
+InterfaceRecord *__thiscall RecordMapAtIndex(FsHashMap *map, const std::string *key)
+{
+    InterfaceRecordNode *node;
+    map->FindName((FsStringNode **)&node, key);
+    if (node == (InterfaceRecordNode *)map->sentinel) {
+        alignas(InterfaceRecord) unsigned char recordStorage[sizeof(InterfaceRecord)];
+        InterfaceRecord *record = ::new (recordStorage) InterfaceRecord();
+        alignas(InterfaceRecordPair) unsigned char pairStorage[sizeof(InterfaceRecordPair)];
+        InterfaceRecordPair *pair = (InterfaceRecordPair *)pairStorage;
+        BuildRecordPair(pair, key, record);
+        FsInsertResult result;
+        InsertRecordNode(map, &result, pair);
+        node = (InterfaceRecordNode *)result.node;
+        DestroyRecordPair(pair);
+        record->~InterfaceRecord();
+    }
+    return &node->value;
+}
+
 /* the original hands the map ctor an uninitialised stack byte for the empty allocator; nothing reads it */
 DECOMP(004A7160)
 CReadInterfaceDat::CReadInterfaceDat()
@@ -931,7 +1048,7 @@ void CReadInterfaceDat::Load(const std::string &name)
         if (ORIG_VAR(006CA2BC, int) == 0x141) {
             InterfaceRecord record;
             record.Read();
-            *(InterfaceRecord *)sub_00424270(&map, &record) = record;
+            *RecordMapAtIndex(&map, &record.name) = record;
         }
         ORIG_VAR(006CA2BC, int) = DatLexerNextToken();
     }
