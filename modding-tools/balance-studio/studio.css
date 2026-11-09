@@ -71,9 +71,9 @@ h1 { font-size: clamp(24px, 3vw, 37px); line-height: 1.13; letter-spacing: -.04e
 .empty-start .header-actions { justify-content: flex-start; margin: 20px 0; }
 code { font-size: .9em; }
 .editor { display: flex; flex: 1; flex-direction: column; min-height: 0; }
-.controls { display: flex; align-items: center; padding: 10px 25px; gap: 12px; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; padding: 10px 25px; gap: 12px; }
 .controls nav { display: flex; gap: 3px; margin-right: auto; }
-.controls nav button { padding: 7px 13px; background: none; border: 1px solid transparent; border-radius: 6px; color: var(--quiet); font-weight: 650; }
+.controls nav button { padding: 7px 13px; background: none; border: 1px solid transparent; border-radius: 6px; color: var(--quiet); font-weight: 650; white-space: nowrap; }
 .controls nav button:hover { background: var(--paper); }
 .controls nav button[aria-pressed=true] { border-color: #adcac2; color: var(--accent-hover); background: var(--soft); }
 .scope-label { font-size: 12px; color: var(--quiet); font-weight: 650; }
@@ -223,7 +223,6 @@ dialog input:not([type=checkbox]), dialog select { width: 100%; }
   .sidebar { padding-inline: 12px; }
   .monogram { display: none; }
   .top, .controls { padding-inline: 14px; }
-  .controls { flex-wrap: wrap; }
   .compare-label { display: none; }
   .workbench { margin-inline: 12px; grid-template-columns: minmax(135px, 1fr) minmax(240px, 2fr); }
   .inspector { padding: 13px; }
@@ -234,6 +233,7 @@ dialog input:not([type=checkbox]), dialog select { width: 100%; }
 @media (max-width: 600px) {
   .studio { display: block; }
   .sidebar { gap: 12px; }
+  .controls nav button { padding-inline: 5px; font-size: 13px; }
   main { min-height: 690px; }
   .workbench { display: flex; flex-direction: column; }
   .catalog { max-height: 190px; border-right: 0; border-bottom: 1px solid var(--line); }

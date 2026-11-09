@@ -921,12 +921,13 @@ $("download-pak").addEventListener("click", async () => {
     status(error.message, true);
   }
 });
-for (const button of $("sections").querySelectorAll("[data-kind]")) {
+const recordTabs = $("sections").querySelectorAll("[data-kind]");
+for (const button of recordTabs) {
   button.addEventListener("click", () => {
     state.kind = button.dataset.kind;
     state.key = null;
     resetSearch();
-    for (const tab of $("sections").children) tab.setAttribute("aria-pressed", String(tab === button));
+    for (const tab of recordTabs) tab.setAttribute("aria-pressed", String(tab === button));
     renderRecords();
     renderInspector(true);
   });
