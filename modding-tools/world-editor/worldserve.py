@@ -11,9 +11,11 @@ JSON model when a patch request asks for ``save=1``.
 import argparse
 import html
 import json
+import os
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import parse_qs, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -36,15 +38,17 @@ def copy_world(world):
 
 
 class State:
-    def __init__(self, world_path, game=None, forests_path=None):
+    def __init__(self, world_path, game=None, forests_path=None, *, archives=None):
         self.world_path = Path(world_path)
         self.world = world_module.World.load_json(world_path)
-        self.archives = worldctl.open_game(game) if game else None
+        self.archives = archives if archives is not None else (worldctl.open_game(game) if game else None)
         self.units = worldctl.load_units(self.archives)
         self.forests = (forests_module.Forests.load_json(forests_path)
                         if forests_path else None)
         self.forests_path = Path(forests_path) if forests_path else None
         self._maps = {}
+        self.revision = 0
+        self._project_stat = self.world_path.stat()
 
     def close(self):
         if self.archives is not None:
@@ -98,9 +102,18 @@ class State:
         after = world_module.to_jsonable(candidate.document())
         changes = worldctl.diff_documents(before, after, 50)
         if not dry_run:
-            self.world = candidate
             if save:
-                self.world.save_json(self.world_path)
+                current = self.world_path.stat()
+                if (current.st_ino, current.st_size, current.st_mtime_ns) != (
+                        self._project_stat.st_ino, self._project_stat.st_size, self._project_stat.st_mtime_ns):
+                    raise world_module.WorldError('The world project changed on disk. Restart the workspace to load it.')
+                with TemporaryDirectory(dir=self.world_path.parent) as folder:
+                    staged = Path(folder) / self.world_path.name
+                    candidate.save_json(staged)
+                    os.replace(staged, self.world_path)
+                self._project_stat = self.world_path.stat()
+            self.world = candidate
+            self.revision += 1
         return {'dry_run': bool(dry_run), 'saved': bool(save and not dry_run),
                 'results': world_module.to_jsonable(results), 'changes': changes}
 
@@ -119,12 +132,12 @@ PAGE = """<!DOCTYPE html>
 </style>
 <h2>AttT world preview</h2>
 <p>{info}</p>
-<p><img id="map" alt="world map" src="/map/{continent}.svg?size=1100&water=0&show={layers}"></p>
+<p><img id="map" alt="world map" src="map/{continent}.svg?size=1100&water=0&show={layers}"></p>
 <p><label>Continent <select id="continent">{options}</select></label>
-   <a href="/world.json">world.json</a> |
-   <a href="/entities.json">entities.json</a> |
-   <a href="/info.json">info.json</a> |
-   <a href="/validate/{continent}.json">validate</a></p>
+   <a href="world.json">world.json</a> |
+   <a href="entities.json">entities.json</a> |
+   <a href="info.json">info.json</a> |
+   <a href="validate/{continent}.json">validate</a></p>
 <h3>Batch patch</h3>
 <textarea id="patch">{{"format": "attt-world-patch/1", "operations": []}}</textarea>
 <p><button onclick="run(1)">Dry run</button>
@@ -135,14 +148,17 @@ const continent = document.getElementById('continent');
 const map = document.getElementById('map');
 const patch = document.getElementById('patch');
 const out = document.getElementById('out');
-function show() {{ map.src = '/map/' + continent.value + '.svg?size=1100&water=0&show={layers}'; }}
+function show() {{ map.src = 'map/' + continent.value + '.svg?size=1100&water=0&show={layers}'; }}
 continent.addEventListener('change', show);
 async function run(dry) {{
-  const response = await fetch('/patch?dry_run=' + dry + '&save=' + (dry ? 0 : 1), {{
+  const response = await fetch('patch?dry_run=' + dry + '&save=' + (dry ? 0 : 1), {{
     method: 'POST', headers: {{'content-type': 'application/json'}}, body: patch.value}});
   const data = await response.json();
   out.textContent = JSON.stringify(data, null, 1);
-  if (response.ok && !dry) {{ setTimeout(() => location.reload(), 600); }}
+  if (response.ok && !dry) {{
+    if (window.parent !== window) window.parent.postMessage('attt-world-updated', location.origin);
+    setTimeout(() => location.reload(), 600);
+  }}
 }}
 </script>
 """
@@ -158,11 +174,14 @@ class Handler(BaseHTTPRequestHandler):
     def state(self):
         return self.server.state
 
-    def send_bytes(self, data, content_type, status=200):
+    def send_bytes(self, data, content_type, status=200, headers=()):
         self.send_response(status)
         self.send_header('content-type', content_type)
-        self.send_header('content-length', str(len(data)))
+        if status != 204:
+            self.send_header('content-length', str(len(data)))
         self.send_header('cache-control', 'no-store')
+        for name, value in headers:
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
 
@@ -236,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
         save = query.get('save', ['0'])[0] in ('1', 'true', 'yes')
         try:
             result = self.state.patch(document, dry_run=dry_run, save=save)
-        except world_module.WorldError as error:
+        except (OSError, world_module.WorldError) as error:
             return self.error(str(error))
         return self.send_json(result)
 

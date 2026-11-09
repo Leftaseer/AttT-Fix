@@ -11,6 +11,8 @@ let archiveEdition = null;
 let profileAction = "new";
 let pendingArmy;
 let project = newProject();
+let workspace;
+let archiveRequest = 0;
 
 function node(tag, className, content) {
   const element = document.createElement(tag);
@@ -112,14 +114,83 @@ async function openArchives(event) {
   const edition = archiveEdition;
   const preferLocalization = edition === "attt" && $("prefer-localization").checked;
   $("archives-dialog").close();
+  await readArchives(edition, selected, { preferLocalization });
+}
+
+async function readArchives(edition, selected, options, worldRevision) {
+  const request = ++archiveRequest;
   status(`Reading ${names[edition]} archives…`);
   try {
-    const loaded = await core.loadGame(edition, selected, { preferLocalization });
+    const loaded = await core.loadGame(edition, selected, options);
+    if (request !== archiveRequest) return;
+    loaded.worldRevision = worldRevision;
     games[edition] = loaded;
     state.edition = edition;
     resetSearch();
     render();
     status(`${names[edition]} loaded from ${loaded.archiveNames.join(", ")}.`);
+    return loaded;
+  } catch (error) {
+    if (request === archiveRequest) status(error.message, true);
+  }
+}
+
+function openWorkspacePane(world) {
+  $("balance-panel").hidden = world;
+  $("world-panel").hidden = !world;
+  $("balance-data").hidden = world;
+  document.querySelector(".profile-section").hidden = world;
+  document.querySelector(".side-footer").hidden = world;
+  $("workspace-balance").setAttribute("aria-pressed", String(!world));
+  $("workspace-world").setAttribute("aria-pressed", String(world));
+  if (world && !$("world-frame").hasAttribute("src")) $("world-frame").src = "/world/";
+}
+
+async function loadWorldDraft() {
+  const button = $("use-world-draft");
+  const feedback = $("world-status");
+  button.disabled = true;
+  feedback.textContent = "Reading the world draft…";
+  try {
+    const response = await fetch("/api/world-overlay");
+    if (!response.ok) throw new Error((await response.json()).error);
+    const worldOverlay = response.status === 204 ? undefined :
+      new File([await response.blob()], `Resource${workspace.archives.length}.pak`);
+    const archives = workspace.archives.map(({ slot, name, size }) => ({
+      name, size,
+      slice: (start, end) => ({
+        async arrayBuffer() {
+          const data = await fetch(`/api/archive/${slot}?start=${start}&end=${end}`);
+          if (!data.ok) throw new Error(`Could not read ${name} from the workspace.`);
+          return data.arrayBuffer();
+        },
+      }),
+    }));
+    const loaded = await readArchives(workspace.edition, archives, { worldOverlay }, response.headers.get("X-World-Revision"));
+    if (!loaded) {
+      feedback.textContent = $("status").textContent;
+      return;
+    }
+    feedback.textContent = worldOverlay ? "World draft loaded in Balance." : "No world edits yet.";
+    openWorkspacePane(false);
+    if (worldOverlay) status("World draft loaded. Review export combines it with this balance profile.");
+  } catch (error) {
+    feedback.textContent = error.message;
+    if ($("world-panel").hidden) status(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function connectWorkspace() {
+  if (location.protocol === "file:") return;
+  try {
+    const response = await fetch("/api/session");
+    if (!response.ok) return;
+    workspace = await response.json();
+    if (!core.editions.includes(workspace.edition) || !Array.isArray(workspace.archives)) return;
+    $("workspace-nav").hidden = false;
+    await loadWorldDraft();
   } catch (error) {
     status(error.message, true);
   }
@@ -155,7 +226,7 @@ function renderProfiles() {
     `${names[state.edition]} · ${count} saved ${count === 1 ? "edit" : "edits"} in this profile` :
     "Create and compare game balance profiles.";
   $("undo").disabled = !history.length;
-  $("export").disabled = !game() || !count;
+  $("export").disabled = !game() || (!count && !game().worldEntries?.size);
   const others = project.profiles.filter((p) => p.id !== project.selected);
   if (!others.some((p) => p.id === state.compare)) state.compare = "";
   $("compare-profile").replaceChildren(Object.assign(node("option", "", "No profile"), { value: "" }),
@@ -698,7 +769,9 @@ function exportPreview() {
   const plan = core.planExport(target, profile());
   $("export-summary").replaceChildren(
     node("p", "", `${plan.name} · ${plan.changes.length} changes · ${plan.skipped.length} skipped · ${plan.same.length} already match`),
-    node("p", "quiet", "Use this PAK with the same archive set. Add it alongside those archives and remove it to restore their balance."),
+    node("p", "quiet", target.worldEntries ?
+      `Includes ${target.worldEntries.size} world draft modules. Install this combined PAK after the workspace’s game archives.` :
+      "Use this PAK with the same archive set. Add it alongside those archives and remove it to restore their balance."),
   );
   const changes = plan.changes.map((e) => node("div", "export-item",
     core.isNewArmy(e) ? `${e.label} · ${rosterText(e.value.troops, target)} · Radius ${e.value.radius}` :
@@ -707,7 +780,7 @@ function exportPreview() {
   const skipped = plan.skipped.map((e) => node("div", "export-item skipped", `${e.label} · ${e.error}`));
   $("export-review").replaceChildren(...skipped, ...changes);
   $("export-review").hidden = !changes.length && !skipped.length;
-  $("download-pak").disabled = !changes.length;
+  $("download-pak").disabled = !changes.length && !target.worldEntries?.size;
   return { target, plan };
 }
 
@@ -724,6 +797,15 @@ for (const [buttonId, inputId] of [["choose-archives", "archives"], ["choose-arc
   input.addEventListener("change", openArchives);
 }
 $("reload").addEventListener("click", () => pickArchives(state.edition));
+$("workspace-balance").addEventListener("click", () => openWorkspacePane(false));
+$("workspace-world").addEventListener("click", () => openWorkspacePane(true));
+$("use-world-draft").addEventListener("click", loadWorldDraft);
+window.addEventListener("message", (event) => {
+  if (event.origin === location.origin && event.source === $("world-frame").contentWindow &&
+      event.data === "attt-world-updated") {
+    $("world-status").textContent = "Draft saved. Use world draft in Balance to include the changes in your export.";
+  }
+});
 $("open-hero-models").addEventListener("click", async (event) => {
   const button = event.currentTarget;
   const loaded = game();
@@ -804,9 +886,15 @@ $("export").addEventListener("click", () => {
   $("export-dialog").showModal();
 });
 $("export-game").addEventListener("change", exportPreview);
-$("download-pak").addEventListener("click", () => {
+$("download-pak").addEventListener("click", async () => {
   try {
     const { target, plan } = exportPreview();
+    if (target.worldRevision != null) {
+      const response = await fetch("/api/session");
+      if (!response.ok || String((await response.json()).worldRevision) !== target.worldRevision) {
+        throw new Error("The world draft changed. Open World & campaign and choose Use world draft in Balance.");
+      }
+    }
     const bytes = core.exportGame(target, plan);
     download(plan.name, new Blob([bytes], { type: "application/octet-stream" }));
     $("export-dialog").close();
@@ -902,3 +990,4 @@ try {
   status("The last workspace could not be restored. You can open a saved project.", true);
 }
 render();
+connectWorkspace();

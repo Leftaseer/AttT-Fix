@@ -128,6 +128,17 @@ async function main() {
     assert.equal(field(placed, "armies", hunterKey, ["radius"]).value, 400);
     assert.deepEqual(placed.records.armies.get(hunterKey).position, hunter.position);
     assert.match(core.planExport(placed, placement).skipped[0].error, /already in the selected archives/);
+    const draft = await core.loadGame(edition, files, { worldOverlay: encounterFile });
+    const combinedPlan = core.planExport(draft, { edits: [
+      edit("shared", "armies", hunterKey, ["radius"], 415),
+    ] });
+    assert.equal(combinedPlan.name, encounterFile.name);
+    const combinedFile = new File([core.exportGame(draft, combinedPlan)], combinedPlan.name);
+    const combined = await core.loadGame(edition, [...files, combinedFile]);
+    assert.deepEqual(combined.records.armies.get(custom.key), record);
+    assert.equal(field(combined, "armies", hunterKey, ["radius"]).value, 415);
+    const draftOnly = core.planExport(draft, { edits: [] });
+    assert.deepEqual(core.exportGame(draft, draftOnly), core.exportGame(base, encounterPlan));
     assert.equal(core.planExport({ ...base, edition: edition === "attt" ? "valkyrie" : "attt" }, placement).changes.length, 1);
     const oversized = { ...custom, value: { ...custom.value, radius: 501 } };
     const invalidRadius = edit("shared", "armies", hunterKey, ["radius"], 501);

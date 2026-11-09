@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file:; img-src data:; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file:; img-src data:; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'">
   <title>AttT Balance Studio</title>
   <link rel="stylesheet" href="studio.css">
   <script defer src="core.js"></script>
@@ -22,7 +22,13 @@
     <aside class="sidebar" aria-label="Workspace">
       <div class="brand"><div class="monogram" aria-hidden="true">A</div><div><strong>Balance Studio</strong><span>ASCENSION TO THE THRONE</span></div></div>
 
-      <section>
+      <nav id="workspace-nav" aria-label="Tool" hidden>
+        <h2>Workspace</h2>
+        <button class="game" id="workspace-balance" aria-pressed="true">Balance &amp; models</button>
+        <button class="game" id="workspace-world" aria-pressed="false">World &amp; campaign</button>
+      </nav>
+
+      <section id="balance-data">
         <h2>Game data</h2>
         <button class="game" id="game-attt" aria-pressed="false"><span class="game-dot"></span><span><strong>Original game</strong><small id="status-attt">Choose archives</small></span></button>
         <button class="game" id="game-valkyrie" aria-pressed="false"><span class="game-dot"></span><span><strong>Valkyrie</strong><small id="status-valkyrie">Choose archives</small></span></button>
@@ -44,7 +50,7 @@
       </div>
     </aside>
 
-    <main>
+    <main id="balance-panel">
       <header class="top">
         <div>
           <div class="eyebrow" id="workspace-label">LOCAL WORKSPACE</div>
@@ -96,6 +102,20 @@
         </div>
       </section>
       <div class="status" id="status" role="status" aria-live="polite">Ready</div>
+    </main>
+    <main id="world-panel" hidden>
+      <header class="top">
+        <div>
+          <div class="eyebrow">LOCAL WORKSPACE</div>
+          <h1>World &amp; campaign</h1>
+          <p>Edit the world draft and use it as the base for your balance export.</p>
+        </div>
+        <div class="header-actions">
+          <button class="button primary" id="use-world-draft">Use world draft in Balance</button>
+        </div>
+      </header>
+      <iframe id="world-frame" title="World map and batch editor"></iframe>
+      <div class="status" id="world-status" role="status" aria-live="polite"></div>
     </main>
   </div>
 

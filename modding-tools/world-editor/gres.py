@@ -129,10 +129,12 @@ class ArchiveSet:
         self.slots = slots
 
     @classmethod
-    def open_folder(cls, folder, allow_gaps=False):
+    def open_folder(cls, folder, allow_gaps=False, prefer_localization=False):
         folder = Path(folder)
         paths = sorted(folder.glob('Resource*.pak'), key=lambda p: (archive_slot(p.name) or 0))
         localization = folder / 'Localization.pak'
+        if localization.exists() and prefer_localization:
+            paths = [path for path in paths if archive_slot(path.name) != 1]
         if localization.exists() and (archive_slot(localization.name) not in
                                       {archive_slot(p.name) for p in paths}):
             paths.append(localization)

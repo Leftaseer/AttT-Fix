@@ -579,7 +579,7 @@ end
     });
   }
 
-  async function loadGame(edition, filesSelected, { preferLocalization = false } = {}) {
+  async function loadGame(edition, filesSelected, { preferLocalization = false, worldOverlay } = {}) {
     check(editions.includes(edition), "Choose a game edition.");
     const archives = new Map();
     let localization;
@@ -601,6 +601,20 @@ end
     const ordered = [...archives.keys()].sort((a, b) => a - b);
     check(ordered.length && ordered.every((slot, index) => slot === index),
       "Open the folder containing Resource0.pak or select all its Resource archives without gaps.");
+    let worldEntries;
+    if (worldOverlay) {
+      check(ordered.length <= 255 && worldOverlay.name === `Resource${ordered.length}.pak`,
+        `The world overlay must be Resource${ordered.length}.pak for this archive set.`);
+      const archive = await readArchive(worldOverlay);
+      check(archive.size && [...archive.keys()].every((name) => /^continent[1-3](towns|npcs|saos|armies|armypos)\.lua$/.test(name)),
+        "Choose a World Editor world overlay with continent data.");
+      worldEntries = new Map(await Promise.all([...archive].map(async ([name, { file, offset, size }]) => {
+        check(size <= maxScript, `${name} in the world overlay exceeds the script size limit.`);
+        return [name, new Uint8Array(await file.slice(offset, offset + size).arrayBuffer())];
+      })));
+      archives.set(ordered.length, worldOverlay);
+      ordered.push(ordered.length);
+    }
     const entries = new Map();
     for (const slot of ordered) {
       for (const [name, entry] of await readArchive(archives.get(slot))) entries.set(name, entry);
@@ -681,7 +695,7 @@ end
       const radius = position.get("radius");
       if (Number.isFinite(radius)) record.fields.push(radiusField(radius));
     }
-    return { edition, records, chunks, positions, assignedSpells, init, readAsset, hasAsset: (name) => entries.has(name.toLowerCase()), slot: ordered.length,
+    return { edition, records, chunks, positions, assignedSpells, init, readAsset, hasAsset: (name) => entries.has(name.toLowerCase()), slot: ordered.length, worldEntries,
       archiveNames: ordered.map((n) => archives.get(n).name) };
   }
 
@@ -990,7 +1004,8 @@ end
         pathKey(edit.value) === pathKey(field.value) : edit.value === field.value) same.push(entry);
       else changes.push(entry);
     }
-    return { changes, skipped, same, name: `Resource${game.slot}.pak` };
+    const slot = game.worldEntries ? game.slot - 1 : game.slot;
+    return { changes, skipped, same, name: `Resource${slot}.pak` };
   }
 
   function exportGame(game, plan) {
@@ -1027,13 +1042,15 @@ end
         });
       }
     }
-    check(byFile.size, "There are no changes to export for this edition.");
-    const files = [...byFile].map(([name, changes]) => {
+    check(byFile.size || game.worldEntries?.size, "There are no changes to export for this edition.");
+    const files = new Map(game.worldEntries);
+    for (const [name, changes] of byFile) {
       const chunk = game.chunks.get(name);
-      return [name, chunk.source ? patchSource(chunk.bytes, changes) : patchChunk(chunk, changes)];
-    });
+      files.set(name, chunk.source ? patchSource(chunk.bytes, changes) : patchChunk(chunk, changes));
+    }
     if (installEconomyInit) {
-      files.push(["maininit.lua", new TextEncoder().encode(economyInit)], [baseInitName, game.init.bytes]);
+      files.set("maininit.lua", new TextEncoder().encode(economyInit));
+      files.set(baseInitName, game.init.bytes);
     }
     return makeArchive(files);
   }
