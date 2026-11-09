@@ -46,8 +46,7 @@ CSkinMesh *__thiscall DeleteSkinMesh(CSkinMesh *self, unsigned char flags);
 
 /* ---------------------------------------------------------------------------------------------------------
  * SkinMeshObject: the render object that owns a list of meshes and plays one animation over them (vftable
- * 0x6112C4; its render interface table 0x611384 holds the four draw methods below).  The constructor 0x4C0FE0
- * is not translated yet. */
+ * 0x6112C4; its render interface table 0x611384 holds the four draw methods below). */
 
 /* the per-mesh draw table at +0x238: a vector of 8-byte entries, one per mesh plus a leading one (sub object i
  * draws with the entry after its own) */
@@ -74,9 +73,18 @@ struct SkinMeshVector {
 static_assert(sizeof(SkinMeshVector) == 0x10, "SkinMeshVector is 0x10 bytes");
 static_assert(__builtin_offsetof(SkinMeshVector, begin) == 0x04, "SkinMeshVector::begin");
 
+/* the effect object 0x448F10 hands out (0x6CAA28 holds one): 0x447A50 builds it with its file name at +04 */
+struct Effect {
+    void *vftable;        /* +00 */
+    std::string fileName; /* +04 */
+};
+static_assert(__builtin_offsetof(Effect, fileName) == 0x04, "Effect::fileName");
+
 struct SkinMeshObject {
     void *vftable;                  /* +000 0x6112C4 */
-    unsigned char unknown04[0x38];  /* +004 */
+    unsigned char unknown04[4];     /* +004 */
+    std::string name;               /* +008 the model name, copied by the constructors */
+    unsigned char unknown24[0x18];  /* +024 */
     void *fallback;                 /* +03C the fourth argument of the four-argument sub-object draws */
     unsigned char unknown40[0x188]; /* +040 */
     int frameCount;                 /* +1C8 frames of the current clip */
@@ -111,3 +119,13 @@ static_assert(__builtin_offsetof(SkinMeshObject, drawTable) == 0x238, "SkinMeshO
 /* 0x4C0B20 receives the this pointer in ECX and an unused EAX, so it is a cdecl function with the registers
  * first (the adapter of the build moves them) */
 void __cdecl TickSkinMeshObject(SkinMeshObject *self, void *unusedEax);
+
+/* The lifetime, spelled out as thiscall helpers returning the object in EAX as the original's callers expect.
+ * Both constructors copy the name, attach the object to the animation manager and reset the animation; the second
+ * takes the effect of an already loaded model instead of an effect name.  0x4C12B0 is the deleting destructor. */
+SkinMeshObject *__thiscall InitSkinMeshObject(SkinMeshObject *self, const std::string &name,
+                                              const std::string &effectName); /* 0x4C0FE0 */
+SkinMeshObject *__thiscall InitSkinMeshObjectFromEffect(SkinMeshObject *self, const std::string &name,
+                                                        const Effect *effect); /* 0x4C1100 */
+void __thiscall DestroySkinMeshObject(SkinMeshObject *self);               /* 0x4C11D0 */
+SkinMeshObject *__thiscall DeleteSkinMeshObject(SkinMeshObject *self, unsigned char flags); /* 0x4C12B0 */

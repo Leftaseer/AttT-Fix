@@ -1,6 +1,7 @@
 /* CSkinMesh: lifetime and loading (0x4C06D0 / 0x4C07A0 / 0x4C07C0 / 0x4C0A10) and the draw path that walks
- * the sub objects (0x4C0620 / 0x4C0680); SkinMeshObject: its animation state (0x4C0B20 / 0x4C0BF0) and the four
- * draw entry points (0x4C0DE0 / 0x4C0E30 / 0x4C0E60 / 0x4C0EA0).
+ * the sub objects (0x4C0620 / 0x4C0680); SkinMeshObject: its lifetime (0x4C0FE0 / 0x4C1100 / 0x4C11D0 /
+ * 0x4C12B0), animation state (0x4C0B20 / 0x4C0BF0) and the four draw entry points (0x4C0DE0 / 0x4C0E30 /
+ * 0x4C0E60 / 0x4C0EA0).
  *
  * The mesh file is a count of skeleton sub objects, a count of matrix sub objects and a 0x60-byte block.  Each
  * sub object is allocated here and its own constructor (0x4BD0F0 / 0x475720) reads it from the same CGameFile;
@@ -17,10 +18,22 @@
 ORIG_DATA(00611290); /* CSkinMesh::vftable */
 ORIG_DATA(00611294); /* ".\\SkinMesh.cpp" */
 ORIG_DATA(006112A4); /* the missing-file message, cp1251 */
+ORIG_DATA(006112C4); /* SkinMeshObject::vftable */
 ORIG_DATA(0069916C); /* _ThrowInfo of CGameException */
 
 ORIG_THISCALL(004AC890, void, (void *self));              /* CRenderObject::SetWorldTransform */
 ORIG_FN(004AC690, void, (void *self, void *unusedEax));   /* CRenderObject3D::Tick */
+
+ORIG_THISCALL(00430850, void, (void *self));              /* CBaseMeshObject3D constructor */
+ORIG_THISCALL(00430460, void, (void *self));              /* CBaseMeshObject3D destructor */
+ORIG_THISCALL(004AB810, void, (void *self, const std::string *name, int create)); /* attach the render effect */
+ORIG_THISCALL(004C0240, void, (void *manager, const std::string *name, SkinMeshVector *meshes,
+                               void **animation, MeshDrawTable *drawTable));      /* loads the model */
+ORIG_FN(004C0EE0, void *, ());                             /* the animation manager, created on first use */
+ORIG_FN(004BE1C0, void, (MeshDrawEntry *begin, MeshDrawEntry *end, MeshDrawTable *table, void *self));
+ORIG_DATA(006CA488); /* the animation manager */
+ORIG_DATA(006CA48C); /* how many skin mesh objects there are */
+ORIG_DATA(006CA490); /* the manager the objects created (deleted with the last one) */
 
 ORIG_THISCALL(00459290, CGameFile *, (CGameFile *self, const std::string *name, int noLoad));
 ORIG_THISCALL(004BD0F0, void *, (void *self, CGameFile *file));       /* skeleton sub object */
@@ -255,4 +268,92 @@ void SkinMeshObject::DrawNoWorld(unsigned int index)
     if (index >= meshCount)
         index = meshCount - 1;
     DrawSkinSubObjectsEx(meshes.begin[index], nullptr, animation, frame, &drawTable, fallback);
+}
+
+/* --- SkinMeshObject lifetime --------------------------------------------------------------------------- */
+
+/* The two constructors share everything up to the effect: the base constructor (which builds the name string at
+ * +8), the vtable, the empty mesh and draw-table vectors, the name copy (through operator=, since the string is
+ * already built), the manager refcount and the model load. */
+static void InitSkinMeshObjectCommon(SkinMeshObject *self, const std::string &name)
+{
+    sub_00430850(self);
+    self->vftable = d_006112C4;
+
+    self->meshes.begin = nullptr;
+    self->meshes.end = nullptr;
+    self->meshes.limit = nullptr;
+    self->drawTable.begin = nullptr;
+    self->drawTable.end = nullptr;
+    self->drawTable.limit = nullptr;
+
+    self->name = name;
+
+    if (*(int *)d_006CA48C == 0)
+        *(void **)d_006CA488 = sub_004C0EE0();
+    (*(int *)d_006CA48C)++;
+
+    sub_004C0240(*(void **)d_006CA488, &name, &self->meshes, &self->animation, &self->drawTable);
+}
+
+/* 0x4C0FE0: a skin mesh object from its model name and the name of a render effect. */
+DECOMP(004C0FE0)
+SkinMeshObject *__thiscall InitSkinMeshObject(SkinMeshObject *self, const std::string &name,
+                                              const std::string &effectName)
+{
+    InitSkinMeshObjectCommon(self, name);
+    sub_004AB810(self, &effectName, 0);
+    self->ResetAnimation();
+    return self;
+}
+
+/* 0x4C1100: the same, with the effect of an already loaded model (the name is the effect's file name at +4). */
+DECOMP(004C1100)
+SkinMeshObject *__thiscall InitSkinMeshObjectFromEffect(SkinMeshObject *self, const std::string &name,
+                                                        const Effect *effect)
+{
+    InitSkinMeshObjectCommon(self, name);
+    sub_004AB810(self, &effect->fileName, 0);
+    self->ResetAnimation();
+    return self;
+}
+
+/* 0x4C11D0: the object leaves the manager's list (the last one deletes the manager), then the draw table is
+ * released, the mesh vector freed and the base destroyed (which destroys the name string). */
+DECOMP(004C11D0)
+void __thiscall DestroySkinMeshObject(SkinMeshObject *self)
+{
+    self->vftable = d_006112C4;
+
+    if (--*(int *)d_006CA48C == 0 && *(void **)d_006CA490 != nullptr) {
+        void *manager = *(void **)d_006CA490;
+        ((void (__thiscall *)(void *, int))(*(void ***)manager)[0])(manager, 1);
+        *(void **)d_006CA490 = nullptr;
+    }
+
+    if (self->drawTable.begin) {
+        sub_004BE1C0(self->drawTable.begin, self->drawTable.end, &self->drawTable, self);
+        operator delete(self->drawTable.begin);
+    }
+    self->drawTable.begin = nullptr;
+    self->drawTable.end = nullptr;
+    self->drawTable.limit = nullptr;
+
+    if (self->meshes.begin)
+        operator delete(self->meshes.begin);
+    self->meshes.begin = nullptr;
+    self->meshes.end = nullptr;
+    self->meshes.limit = nullptr;
+
+    sub_00430460(self);
+}
+
+/* 0x4C12B0: the deleting destructor. */
+DECOMP(004C12B0)
+SkinMeshObject *__thiscall DeleteSkinMeshObject(SkinMeshObject *self, unsigned char flags)
+{
+    DestroySkinMeshObject(self);
+    if (flags & 1)
+        operator delete(self);
+    return self;
 }
