@@ -36,8 +36,9 @@ class Entry:
 
 
 class Archive:
-    def __init__(self, path):
+    def __init__(self, path, slot_override=None):
         self.path = Path(path)
+        self._slot_override = slot_override
         self._stream = self.path.open('rb')
         try:
             header = self._stream.read(12)
@@ -68,7 +69,7 @@ class Archive:
 
     @property
     def slot(self):
-        return archive_slot(self.path.name)
+        return self._slot_override if self._slot_override is not None else archive_slot(self.path.name)
 
     def read(self, entry):
         if isinstance(entry, str):
@@ -109,10 +110,11 @@ def archive_slot(name):
 class ArchiveSet:
     """Overlay of Resource0..N with higher slots winning, ordered by slot."""
 
-    def __init__(self, paths, allow_gaps=False):
+    def __init__(self, paths, allow_gaps=False, slot_overrides=None):
         archives = {}
+        slot_overrides = slot_overrides or {}
         for path in paths:
-            archive = Archive(path)
+            archive = Archive(path, slot_overrides.get(Path(path)))
             slot = archive.slot
             if slot is None:
                 archive.close()
@@ -123,13 +125,13 @@ class ArchiveSet:
         slots = sorted(archives)
         if not slots:
             raise ValueError('no Resource archives selected')
-        if not allow_gaps and slots != list(range(slots[0], slots[-1] + 1)):
+        if not allow_gaps and len(slots) != slots[-1] - slots[0] + 1:
             raise ValueError('resource slots have gaps: %s' % slots)
         self.archives = archives
         self.slots = slots
 
     @classmethod
-    def open_folder(cls, folder, allow_gaps=False, prefer_localization=False):
+    def open_folder(cls, folder, allow_gaps=False, prefer_localization=False, fill_attfix_gap=False):
         folder = Path(folder)
         paths = sorted(folder.glob('Resource*.pak'), key=lambda p: (archive_slot(p.name) or 0))
         localization = folder / 'Localization.pak'
@@ -138,7 +140,17 @@ class ArchiveSet:
         if localization.exists() and (archive_slot(localization.name) not in
                                       {archive_slot(p.name) for p in paths}):
             paths.append(localization)
-        return cls(paths, allow_gaps=allow_gaps)
+        overrides = {}
+        attfix = folder / 'AttTFix.pak'
+        if fill_attfix_gap and attfix.is_file():
+            slots = {archive_slot(path.name) for path in paths}
+            missing = 1
+            while missing in slots:
+                missing += 1
+            if 0 in slots and any(slot is not None and slot > missing for slot in slots):
+                paths.append(attfix)
+                overrides[attfix] = missing
+        return cls(paths, allow_gaps=allow_gaps, slot_overrides=overrides)
 
     def resolve(self, name, exclude=None):
         """Return the winning Entry for name, or None.

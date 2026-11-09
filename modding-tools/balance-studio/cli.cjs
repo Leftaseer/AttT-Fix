@@ -53,7 +53,7 @@ async function run(args) {
   });
   check(flags.game, "Provide --game with the folder containing the game archives.");
   const files = fs.readdirSync(flags.game, { withFileTypes: true })
-    .filter((entry) => (entry.isFile() || entry.isSymbolicLink()) && /^(resource\d+|localization)\.pak$/i.test(entry.name))
+    .filter((entry) => (entry.isFile() || entry.isSymbolicLink()) && /^(resource\d+|localization|atttfix)\.pak$/i.test(entry.name))
     .map((entry) => path.join(flags.game, entry.name));
   const game = await core.loadGame(flags.edition, await Promise.all([...files, ...flags.overlay].map(archive)), {
     preferLocalization: flags["prefer-localization"],

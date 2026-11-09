@@ -8,7 +8,8 @@ Game data and projects are processed in the browser on your computer.
 
 1. Select **Original game** or **Valkyrie**.
 2. Choose the folder containing `Resource0.pak`. If you pick files manually, select all numbered
-   `Resource*.pak` files together. The original game stores units and spells in `Resource1.pak` or
+   `Resource*.pak` files together. Include `AttTFix.pak` if it fills a gap before a later
+   numbered archive. The original game stores units and spells in `Resource1.pak` or
    `Localization.pak`. If you play the original game with AttTFix’s English option, select
    **Use Localization.pak if present** to load that archive in slot 1.
 3. Open the other edition the same way to see its base values beside the active edition’s values.

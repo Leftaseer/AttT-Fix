@@ -88,6 +88,7 @@ function resetSearch() {
 
 function pickArchives(edition) {
   archiveEdition = edition;
+  $("archive-feedback").hidden = true;
   $("archives-title").textContent = `Open ${names[edition]}`;
   $("attt-archive-hint").hidden = edition !== "attt";
   $("localization-option").hidden = edition !== "attt";
@@ -113,8 +114,24 @@ async function openArchives(event) {
     input.id !== "archive-folder" || file.webkitRelativePath.split("/").length === 2);
   const edition = archiveEdition;
   const preferLocalization = edition === "attt" && $("prefer-localization").checked;
-  $("archives-dialog").close();
-  await readArchives(edition, selected, { preferLocalization });
+  const dialog = $("archives-dialog");
+  const feedback = $("archive-feedback");
+  const buttons = [$("choose-archives"), $("choose-archive-folder")];
+  feedback.textContent = `Reading ${names[edition]} archives…`;
+  feedback.classList.remove("error");
+  feedback.hidden = false;
+  for (const button of buttons) button.disabled = true;
+  try {
+    const loaded = await readArchives(edition, selected, { preferLocalization });
+    if (!dialog.open || archiveEdition !== edition) return;
+    if (loaded) dialog.close();
+    else {
+      feedback.textContent = $("status").textContent;
+      feedback.classList.add("error");
+    }
+  } finally {
+    for (const button of buttons) button.disabled = false;
+  }
 }
 
 async function readArchives(edition, selected, options, worldRevision) {

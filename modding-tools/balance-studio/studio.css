@@ -128,6 +128,8 @@ dialog { width: min(620px, calc(100vw - 28px)); border: 1px solid var(--line); b
 dialog::backdrop { background: #14233893; }
 dialog h2 { font-size: 24px; margin: 4px 0 12px; }
 dialog label { display: block; margin: 10px 0 4px; font-size: 13px; font-weight: 650; }
+.archive-feedback { margin-top: 12px; padding: 9px 12px; border-radius: 6px; background: var(--bg); overflow-wrap: anywhere; }
+.archive-feedback.error { color: #8f271c; background: #fff1ed; }
 dialog input:not([type=checkbox]), dialog select { width: 100%; }
 .dialog-heading { display: flex; justify-content: space-between; align-items: start; }
 .dialog-close { background: none; border: 0; font-size: 25px; color: var(--quiet); line-height: 1; padding: 2px 5px; }

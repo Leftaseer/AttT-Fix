@@ -89,6 +89,19 @@ async function main() {
 
   for (const { edition, files } of inputs) {
     const base = await core.loadGame(edition, files);
+    if (edition === "attt") {
+      const attFix = new File([core.makeArchive([["slot_check.txt", Uint8Array.of(1)]])], "AttTFix.pak");
+      const later = new File([core.makeArchive([["slot_check.txt", Uint8Array.of(2)]])],
+        `Resource${base.slot + 1}.pak`);
+      const ordinary = await core.loadGame(edition, [...files, attFix]);
+      assert.equal(ordinary.slot, base.slot);
+      assert.equal(await ordinary.readAsset("slot_check.txt"), null);
+      await assert.rejects(core.loadGame(edition, [...files, later]), /is missing before/);
+      const filled = await core.loadGame(edition, [...files, attFix, later]);
+      assert.deepEqual(filled.archiveNames.slice(-2), [attFix.name, later.name]);
+      assert.deepEqual(await filled.readAsset("slot_check.txt"), Uint8Array.of(2));
+      assert.equal(filled.slot, base.slot + 2);
+    }
     for (const continent of [1, 2, 3]) {
       const { image, armies } = await core.loadArmyMap(base, continent);
       assert(image.length > 18);
@@ -431,6 +444,6 @@ async function main() {
     assert.deepEqual(repair.changes[0].value, repair.changes[0].field.value);
     console.log(`${edition} ${base.archiveNames.join(" + ")} → ${plan.name}: ${bytes.length} bytes, selected changes only`);
   }
-  await assert.rejects(core.loadGame("attt", [new File([new Uint8Array(12)], "Resource2.pak")]), /without gaps/);
+  await assert.rejects(core.loadGame("attt", [new File([new Uint8Array(12)], "Resource2.pak")]), /Resource0\.pak is missing/);
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

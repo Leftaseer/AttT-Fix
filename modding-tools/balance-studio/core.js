@@ -583,12 +583,17 @@ end
     check(editions.includes(edition), "Choose a game edition.");
     const archives = new Map();
     let localization;
+    let attFix;
     for (const file of filesSelected) {
       const match = /^resource(0|[1-9][0-9]*)\.pak$/i.exec(file.name);
       if (!match) {
         if (/^localization\.pak$/i.test(file.name)) {
           check(!localization, "Select one Localization.pak from the game folder.");
           localization = file;
+        }
+        if (/^atttfix\.pak$/i.test(file.name) && edition === "attt") {
+          check(!attFix, "Select one AttTFix.pak from the game folder.");
+          attFix = file;
         }
         continue;
       }
@@ -598,9 +603,15 @@ end
       archives.set(slot, file);
     }
     if (localization && (preferLocalization || !archives.has(1))) archives.set(1, localization);
+    check(archives.has(0), "Resource0.pak is missing. Select the game folder or its PAK files.");
+    // AttTFix supplies its generated PAK at the first missing slot. At the end
+    // of the stack that slot remains available for a new numbered export.
+    let missing = 1;
+    while (archives.has(missing)) missing++;
+    if (attFix && [...archives.keys()].some((slot) => slot > missing)) archives.set(missing, attFix);
     const ordered = [...archives.keys()].sort((a, b) => a - b);
-    check(ordered.length && ordered.every((slot, index) => slot === index),
-      "Open the folder containing Resource0.pak or select all its Resource archives without gaps.");
+    const gap = ordered.findIndex((slot, index) => slot !== index);
+    check(gap < 0, `Resource${gap}.pak is missing before Resource${ordered[gap]}.pak. Select the complete game folder${edition === "attt" && !attFix ? ", including AttTFix.pak if your game uses it to fill the slot" : ""}.`);
     let worldEntries;
     if (worldOverlay) {
       check(ordered.length <= 255 && worldOverlay.name === `Resource${ordered.length}.pak`,

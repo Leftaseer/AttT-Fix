@@ -32,7 +32,9 @@ opens the local workspace in your browser and prints its address. It creates the
 world JSON from the selected archives if the file does not exist. Pass
 `--edition valkyrie` for Valkyrie or `--prefer-localization` to use
 `Localization.pak` in slot 1. The workspace reads the same archive selection
-in both tabs. Use consecutive numbered PAK slots starting at zero.
+in both tabs. Use consecutive numbered PAK slots starting at zero. For the
+original game, the workspace recognizes `AttTFix.pak` in the first missing slot
+when later numbered PAKs follow it, matching the AttTFix loader.
 
 1. Open **World & campaign** to inspect the terrain map and apply World Editor
    [batch operations](world-editor/README.md#world-editing). **Apply and save**

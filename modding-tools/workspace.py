@@ -125,10 +125,13 @@ def serve_workspace(args):
         raise ValueError('Choose a .json path for the world project.')
     if not args.game.is_dir():
         raise ValueError('Game folder does not exist: %s' % args.game)
-    with gres.ArchiveSet.open_folder(args.game, prefer_localization=args.prefer_localization) as archives:
-        if archives.slots != list(range(len(archives.slots))) or len(archives.slots) > 255:
-            raise ValueError('The workspace needs consecutive Resource slots starting at Resource0.pak '
-                             'and an available export slot.')
+    with gres.ArchiveSet.open_folder(args.game, allow_gaps=True, prefer_localization=args.prefer_localization,
+                                     fill_attfix_gap=args.edition == 'attt') as archives:
+        for expected, actual in enumerate(archives.slots):
+            if actual != expected:
+                raise ValueError('Resource%d.pak is missing before Resource%d.pak.' % (expected, actual))
+        if len(archives.slots) > 255:
+            raise ValueError('The workspace needs an available Resource export slot.')
         if not args.world.exists():
             world = World._from_set(archives, (1, 2, 3))
             if not world.continents:

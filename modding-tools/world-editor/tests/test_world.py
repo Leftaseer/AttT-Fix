@@ -135,6 +135,20 @@ class HeightmapTest(unittest.TestCase):
 
 
 class ArchiveTest(unittest.TestCase):
+    def test_attfix_fills_an_interior_gap(self):
+        with tempfile.TemporaryDirectory() as folder:
+            for name in ('Resource0.pak', 'Resource1.pak'):
+                gres.write_pak(os.path.join(folder, name), {})
+            gres.write_pak(os.path.join(folder, 'AttTFix.pak'), {'asset': b'AttTFix'})
+            with gres.ArchiveSet.open_folder(folder, fill_attfix_gap=True) as archives:
+                self.assertEqual(archives.slots, [0, 1])
+                self.assertFalse(archives.has('asset'))
+            gres.write_pak(os.path.join(folder, 'Resource3.pak'), {'asset': b'later'})
+            with gres.ArchiveSet.open_folder(folder, fill_attfix_gap=True) as archives:
+                self.assertEqual(archives.slots, [0, 1, 2, 3])
+                self.assertEqual(archives.archives[2].path.name, 'AttTFix.pak')
+                self.assertEqual(archives.read('asset'), b'later')
+
     def test_write_read_and_overlay(self):
         with tempfile.TemporaryDirectory() as folder:
             base = {'a.lua': b'A', 'b.lua': b'B', 'sub/c.lua': b'C'}
