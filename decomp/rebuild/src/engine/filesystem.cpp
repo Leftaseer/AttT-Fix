@@ -21,7 +21,6 @@ ORIG_FASTCALL(00577C60, void *, (void *self));                                  
 ORIG_THISCALL(00451770, void, (void *map, void *result, const void *value));    /* insert a name in files */
 ORIG_THISCALL(00451A50, void, (void *map, void *result, const void *value));    /* insert a stream in streams */
 ORIG_THISCALL(00422D80, void, (void *map, void *node, const std::string *key)); /* find a name in files */
-ORIG_THISCALL(00450DA0, void, (void *map, void *node, const int *key));         /* find a stream in streams */
 ORIG_THISCALL(00451220, char, (void *self, const std::string *name, std::string *path)); /* path + name */
 ORIG_THISCALL(00450AE0, void *, (void *self, void *stream, unsigned size, unsigned offset, bool encrypted));
 ORIG_THISCALL(00450B20, void *, (void *self, const std::string *name));
@@ -35,6 +34,48 @@ ORIG_FN(005E3B10, void *, (unsigned int size)); /* operator new[] */
 inline void *operator new(unsigned int, void *p) { return p; }
 
 extern "C" __declspec(dllimport) char *__cdecl _strlwr(char *s);
+
+/* the CRT's long division, returned in EDX:EAX like MSVCR80's _ldiv */
+struct LDivResult {
+    long quot;
+    long rem;
+};
+DECOMP_C LDivResult(__cdecl *imp_006073C0)(long, long) __asm__("__imp__ldiv");
+
+/* The bucket of a key: the library's hash scrambles it by dividing through a prime and mixing the quotient and
+ * the remainder; the bucket count is a power of two, and the range of a bucket ends where the next one starts. */
+DECOMP(00450D20)
+unsigned FsHashMap::BucketIndex(const unsigned *key) const
+{
+    LDivResult part = imp_006073C0((long)(*key ^ 0xdeadbeef), 0x1f31d);
+    unsigned bucket = (unsigned)part.rem * 0x41a7u + (unsigned)part.quot * (unsigned)-0xb14;
+    if ((int)bucket < 0)
+        bucket += 0x7fffffff;
+    bucket &= mask;
+    if (count <= bucket)
+        bucket += -1 - (mask >> 1);
+    return bucket;
+}
+
+/* Finds a node of an int-keyed map; every bucket is a range of the map's one node list (the bucket holds its
+ * first node, the next bucket's entry ends it). A key sorts into the list, so a greater node ends the search. */
+DECOMP(00450DA0)
+void FsHashMap::FindInt(FsIntNode **node, const int *key) const
+{
+    FsIntNode **buckets = (FsIntNode **)begin;
+    unsigned bucket = BucketIndex((const unsigned *)key);
+    FsIntNode *endNode = buckets[bucket + 1];
+    for (FsIntNode *it = buckets[bucket]; it != endNode; it = it->next) {
+        if (*key <= it->key) {
+            if (it->key <= *key) {
+                *node = it;
+                return;
+            }
+            break;
+        }
+    }
+    *node = (FsIntNode *)sentinel;
+}
 
 static void ThrowFsError(const std::string &msg, int line)
 {
@@ -271,7 +312,7 @@ void *CFileSystem::OpenFile(const std::string &name)
         return nullptr;
     int pak = *(int *)((char *)node + 0x2C);
     FsIntNode *streamNode;
-    sub_00450DA0(&streams, &streamNode, &pak);
+    streams.FindInt(&streamNode, &pak);
     return sub_00450AE0(file, streamNode->value, *(unsigned *)((char *)node + 0x28),
                         *(unsigned *)((char *)node + 0x24), pakVersion == 200);
 }

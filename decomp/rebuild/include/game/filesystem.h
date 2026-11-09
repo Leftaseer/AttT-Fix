@@ -9,9 +9,26 @@
 #include "game/common.h"
 #include "msvc8/fstream.h"
 
+/* a node of the int-keyed map of the open pak streams (0x10 bytes) */
+struct FsIntNode {
+    FsIntNode *next; /* +00 */
+    FsIntNode *prev; /* +04 */
+    int key;         /* +08 the index in the ResourceN.pak chain */
+    void *value;     /* +0C std::ifstream* */
+};
+static_assert(sizeof(FsIntNode) == 0x10, "FsIntNode is 0x10 bytes");
+
+/* a node of a string-keyed map: the key at +08, the value after it at +24 */
+struct FsStringNode {
+    FsStringNode *next; /* +00 */
+    FsStringNode *prev; /* +04 */
+    std::string key;    /* +08 */
+};
+static_assert(__builtin_offsetof(FsStringNode, key) == 0x08, "FsStringNode::key");
+
 /* The file system library's own bucket hash map (0x28 bytes): all nodes are also in one doubly linked list
- * through the sentinel at +08; the vector at +10..+1F holds the per-bucket list ends, +20 is the bucket mask
- * and +24 the number of buckets. */
+ * through the sentinel at +08; the vector at +10..+1F holds one node pointer per bucket plus the list end,
+ * +20 is the bucket mask and +24 the number of buckets. */
 struct FsHashMap {
     unsigned char allocator[8]; /* +00 */
     void *sentinel;             /* +08 */
@@ -22,25 +39,11 @@ struct FsHashMap {
     void *limit;                /* +1C */
     unsigned mask;              /* +20 */
     unsigned count;             /* +24 */
+
+    unsigned BucketIndex(const unsigned *key) const;        /* 0x450D20 */
+    void FindInt(FsIntNode **node, const int *key) const;   /* 0x450DA0 */
 };
 static_assert(sizeof(FsHashMap) == 0x28, "FsHashMap is 0x28 bytes");
-
-/* a node of a string-keyed map: the key at +08, the value after it at +24 */
-struct FsStringNode {
-    FsStringNode *next; /* +00 */
-    FsStringNode *prev; /* +04 */
-    std::string key;    /* +08 */
-};
-static_assert(__builtin_offsetof(FsStringNode, key) == 0x08, "FsStringNode::key");
-
-/* a node of the int-keyed map of the open pak streams (0x10 bytes) */
-struct FsIntNode {
-    FsIntNode *next; /* +00 */
-    FsIntNode *prev; /* +04 */
-    int key;         /* +08 the index in the ResourceN.pak chain */
-    void *value;     /* +0C std::ifstream* */
-};
-static_assert(sizeof(FsIntNode) == 0x10, "FsIntNode is 0x10 bytes");
 
 /* the value of map<string, PakEntry> / the directory record as the map keeps it (0x28 bytes) */
 struct PakEntry {
