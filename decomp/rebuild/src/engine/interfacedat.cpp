@@ -11,8 +11,6 @@ ORIG_DATA(006CA2BC); /* the token the lexer returned last */
 
 ORIG_THISCALL(004A7040, void *, (void *map, const void *alloc, const void *comp)); /* ctor of map<string, entry> */
 ORIG_FASTCALL(00422AD0, void, (void *self));                           /* clear the record map */
-ORIG_THISCALL(00459050, unsigned char, (CGameFile *self, const std::string *name, int noLoad)); /* open a file */
-ORIG_THISCALL(00459010, void, (CGameFile *self));                      /* close */
 ORIG_THISCALL(004EF350, void, (void *vector, unsigned count, void *sentinel)); /* refill the bucket vector */
 ORIG_FN(00470410, int, ());                                            /* the next token of the file */
 ORIG_THISCALL(004A6610, void *, (void *record));                       /* record ctor */
@@ -63,7 +61,7 @@ DECOMP(004A71E0)
 void CReadInterfaceDat::Load(const std::string &name)
 {
     CGameFile *reader = (CGameFile *)d_006CA280;
-    sub_00459050(reader, &name, 1);
+    reader->Open(name, 1);
     ORIG_VAR(006CA278, unsigned) = reader->file->size;
 
     sub_00422AD0((char *)&map + 4);
@@ -84,5 +82,5 @@ void CReadInterfaceDat::Load(const std::string &name)
         }
         ORIG_VAR(006CA2BC, int) = sub_00470410();
     }
-    sub_00459010(reader);
+    reader->Close();
 }

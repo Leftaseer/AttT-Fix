@@ -7,8 +7,6 @@ ORIG_DATA(0060A560); /* CDatFile::vftable */
 ORIG_DATA(0060A4C4); /* CSingleton<CDatFile>::vftable */
 ORIG_DATA(0060A4B0); /* int[2]: the keyword count of each format set (3 and 8) */
 
-ORIG_THISCALL(00445630, void *, (void *self, void *result, const std::string *name)); /* reads the file into result */
-
 inline void *operator new(unsigned int, void *p) { return p; }
 
 /* a counted array of keyword pairs: the count sits in the word before the first element */
@@ -114,12 +112,7 @@ bool CDatFile::LoadSource(const std::string &file)
 
     CDelCom reader;
     sources[sourceCount].name = file;
-    /* the reader returns its text through the hidden result of a copy constructor into uninitialised storage */
-    alignas(std::string) unsigned char textStorage[sizeof(std::string)];
-    sub_00445630(&reader, textStorage, &file);
-    std::string &text = *reinterpret_cast<std::string *>(textStorage);
-    sources[sourceCount].text = text;
-    text.~basic_string();
+    sources[sourceCount].text = reader.ReadFile(file);
     currentSource = sourceCount;
     if (sourceCount < 9)
         sourceCount++;

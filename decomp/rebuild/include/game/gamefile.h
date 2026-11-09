@@ -24,6 +24,7 @@ struct CGameFile {
     bool opened;      /* +2C */
     CGameFile();      /* 0x459200 */
     ~CGameFile();     /* 0x459170 */
+    bool Open(const std::string &name, int noLoad); /* 0x459050 opens a file, unless noLoad into a new buffer */
     void Read(void *buf, unsigned n); /* 0x458F80 */
     void Close();                     /* 0x459010 */
 };
