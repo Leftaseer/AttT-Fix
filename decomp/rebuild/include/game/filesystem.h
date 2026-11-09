@@ -83,6 +83,10 @@ static_assert(sizeof(FsHashMap) == 0x28, "FsHashMap is 0x28 bytes");
  * copies of the pointer value; more than 0x3FFFFFFF elements throw std::length_error. */
 void __thiscall InitPointerVector(void *vector, unsigned count, const void *value); /* 0x4CCC80 */
 
+/* Assigns count copies of the value to a pointer vector, dropping its old elements; the maps refill their
+ * nine initial buckets with it. */
+void __thiscall AssignPointerVector(void *vector, unsigned count, const void *value); /* 0x4EF350 */
+
 /* The 0x30-byte sentinel of the string-keyed maps and the copy of their node list: [first, last) is appended
  * to the map object's list (the library's map view at FsHashMap+4) as fresh nodes with copied values. */
 FsStringNode *__stdcall CreateStringMapSentinel(); /* 0x5AD510 */

@@ -16,9 +16,6 @@ ORIG_DATA(006C9068); /* the text of the last token */
 
 inline void *operator new(unsigned int, void *p) { return p; }
 
-ORIG_THISCALL(004EF350, void, (void *vector, unsigned count, void *sentinel)); /* refill the bucket vector */
-ORIG_THISCALL(00423AE0, void *, (void *record, const void *other));           /* the record's copy constructor */
-
 /* the keyword parsers of the record fields (they read through the same lexer and leave the token global advanced) */
 ORIG_FASTCALL(004A1CA0, void, (float *floats));    /* 0x149: x, y and optionally x2, y2 */
 
@@ -260,6 +257,117 @@ void __fastcall ClearCollection48(InterfaceCollection *collection)
         DestroyItems48(first, last);
         collection->end = first;
     }
+}
+
+/* A vector copy: the elements are copied into a fresh buffer of the source's size and the three pointers
+ * replace this vector's; the allocator bytes stay as the caller had them, as in the original. */
+template <typename T>
+static InterfaceVector *CopyVectorItems(InterfaceVector *vector, const InterfaceVector *other)
+{
+    const char *srcBegin = (const char *)other->begin;
+    unsigned count = srcBegin ? (unsigned)(((const char *)other->end - srcBegin) / sizeof(T)) : 0;
+    vector->begin = vector->end = vector->limit = nullptr;
+    if (count != 0) {
+        if (count > 0xFFFFFFFFu / sizeof(T))
+            ThrowVectorLengthError();
+        T *data = (T *)operator new(count * sizeof(T));
+        vector->begin = data;
+        vector->end = data;
+        vector->limit = data + count;
+        T *p = data;
+        for (const T *src = (const T *)srcBegin; src != (const T *)other->end; src++, p++)
+            ::new (p) T(*src);
+        vector->end = p;
+    }
+    return vector;
+}
+
+DECOMP(004232B0)
+InterfaceVector *__thiscall CopyItems4C(InterfaceVector *vector, const InterfaceVector *other)
+{
+    return CopyVectorItems<InterfaceItem4C>(vector, other);
+}
+
+DECOMP(00423380)
+InterfaceVector *__thiscall CopyItems48(InterfaceVector *vector, const InterfaceVector *other)
+{
+    return CopyVectorItems<InterfaceItem48>(vector, other);
+}
+
+DECOMP(00423490)
+InterfaceVector *__thiscall CopyItems2C(InterfaceVector *vector, const InterfaceVector *other)
+{
+    return CopyVectorItems<InterfaceItem2C>(vector, other);
+}
+
+DECOMP(00423560)
+InterfaceVector *__thiscall CopyItems64(InterfaceVector *vector, const InterfaceVector *other)
+{
+    return CopyVectorItems<InterfaceItem64>(vector, other);
+}
+
+DECOMP(00423630)
+InterfaceVector *__thiscall CopyItemsE4(InterfaceVector *vector, const InterfaceVector *other)
+{
+    return CopyVectorItems<InterfaceItemE4>(vector, other);
+}
+
+DECOMP(00423720)
+InterfaceVector *__thiscall CopyItems118(InterfaceVector *vector, const InterfaceVector *other)
+{
+    return CopyVectorItems<InterfaceItem118>(vector, other);
+}
+
+/* A titled collection's copy: the title copies itself, then the vector part does. */
+DECOMP(00423810)
+InterfaceCollection *__thiscall CopyCollection4C(InterfaceCollection *collection, const InterfaceCollection *other)
+{
+    ::new (&collection->title) std::string(other->title);
+    CopyItems4C((InterfaceVector *)&collection->allocator, (const InterfaceVector *)&other->allocator);
+    return collection;
+}
+
+DECOMP(004238F0)
+InterfaceCollection *__thiscall CopyCollection48(InterfaceCollection *collection, const InterfaceCollection *other)
+{
+    ::new (&collection->title) std::string(other->title);
+    CopyItems48((InterfaceVector *)&collection->allocator, (const InterfaceVector *)&other->allocator);
+    return collection;
+}
+
+DECOMP(004239D0)
+InterfaceCollection *__thiscall CopyCollection2C(InterfaceCollection *collection, const InterfaceCollection *other)
+{
+    ::new (&collection->title) std::string(other->title);
+    CopyItems2C((InterfaceVector *)&collection->allocator, (const InterfaceVector *)&other->allocator);
+    return collection;
+}
+
+/* The record copy (the original's copy constructor, which the build cannot name apart from the default one):
+ * every string copy-constructs itself into the raw record storage and every vector copies its elements, in the
+ * declaration's order; the numbers follow one by one.  The vectors' allocator bytes stay as the destination had
+ * them. */
+DECOMP(00423AE0)
+void *__thiscall CopyRecord(void *storage, const InterfaceRecord *other)
+{
+    InterfaceRecord *record = (InterfaceRecord *)storage;
+    ::new (&record->name) std::string(other->name);
+    ::new (&record->text142[0]) std::string(other->text142[0]);
+    ::new (&record->text142[1]) std::string(other->text142[1]);
+
+    CopyCollection4C(&record->items143, &other->items143);
+    CopyCollection48(&record->items144, &other->items144);
+    CopyCollection2C(&record->items145, &other->items145);
+    CopyItems64(&record->items146, &other->items146);
+
+    ::new (&record->text147) std::string(other->text147);
+    record->number14B = other->number14B;
+    for (int i = 0; i < 4; i++)
+        record->floats149[i] = other->floats149[i];
+
+    CopyItemsE4(&record->items14A, &other->items14A);
+    CopyItems118(&record->items14C, &other->items14C);
+    return record;
 }
 
 /* The record starts empty: all vectors are null and the named strings are empty. The vectors' allocator bytes stay
@@ -899,7 +1007,7 @@ DECOMP(00423C10)
 InterfaceRecordPair *__thiscall CopyRecordPair(InterfaceRecordPair *pair, const InterfaceRecordPair *other)
 {
     ::new (&pair->key) std::string(other->key);
-    sub_00423AE0(&pair->value, &other->value);
+    CopyRecord(&pair->value, &other->value);
     return pair;
 }
 
@@ -909,7 +1017,7 @@ InterfaceRecordPair *__thiscall BuildRecordPair(InterfaceRecordPair *pair, const
                                                 const InterfaceRecord *record)
 {
     ::new (&pair->key) std::string(*key);
-    sub_00423AE0(&pair->value, record);
+    CopyRecord(&pair->value, record);
     return pair;
 }
 
@@ -1039,7 +1147,7 @@ void CReadInterfaceDat::Load(const std::string &name)
 
     ClearRecordNodeList((char *)&map + 4);
     void *sentinel = map.sentinel;
-    sub_004EF350(&map.vectorAlloc, 9, &sentinel);
+    AssignPointerVector(&map.vectorAlloc, 9, &sentinel);
     map.mask = 1;
     map.count = 1;
 
