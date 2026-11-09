@@ -9,18 +9,6 @@
 ORIG_DATA(006C88D4); /* the script machine (CLuaWrapper*) */
 ORIG_DATA(008CF0AC); /* the Lua global table object (CLuaObject*) */
 
-/* The engine's script object: every value, table and iterator starts with these members.  A table (and the
- * iterator over its entries) keeps the current key as a std::string at +0x10. */
-struct LuaObject {
-    void *vftable;    /* +00 */
-    int refCount;     /* +04 */
-    int type;         /* +08 the Lua type of the current value while a table iterator is valid */
-    int valueRef;     /* +0C the registry reference of the current value */
-    std::string key;  /* +10 the current key */
-};
-
-static const int kLuaTable = 5;
-
 /* 0x561C10: an iterator over the object's table entries (the caller takes the reference, like the original) */
 ORIG_THISCALL(00561C10, void *, (void *self));
 /* 0x561270: a table object for the iterator's current value */
@@ -33,18 +21,6 @@ ORIG_THISCALL(005626D0, void *, (void *self, const std::string *name));
 ORIG_THISCALL(00560100, void, (void *self));
 /* 0x5542E0: the bucket map's value slot for the key (the caller stores the value there) */
 ORIG_THISCALL(005542E0, void **, (FsHashMap *map, const std::string *key));
-
-static void RetainLuaObject(LuaObject *object)
-{
-    if (object)
-        ++object->refCount;
-}
-
-static void ReleaseLuaObject(LuaObject *object)
-{
-    if (object && --object->refCount == 0)
-        (*(void (__thiscall **)(LuaObject *, int))object->vftable)(object, 1);
-}
 
 /* The entry remembers the key of the table object and its "CheckFinish" field.  The references are taken
  * before the old ones are dropped, so a repeated Read of the same table stays valid. */
