@@ -77,6 +77,10 @@ struct FsHashMap {
 };
 static_assert(sizeof(FsHashMap) == 0x28, "FsHashMap is 0x28 bytes");
 
+/* breaks the node list of a string-keyed map (the map's tree part, i.e. the map address + 4), destroying the
+ * keys and freeing the nodes; the sentinel/first node pointer is left at map+8 */
+void __fastcall ClearStringNodeList(char *mapObject); /* 0x5224A0 */
+
 /* the node factories of the two inserts (the generated code allocates and fills them by address) */
 FsPakNode *__stdcall CreatePakNode(FsStringNode *next, FsStringNode *prev, const PakEntry *entry); /* 0x451000 */
 FsIntNode *__stdcall CreateStreamNode(FsIntNode *next, FsIntNode *prev, const int *entry);        /* 0x489070 */

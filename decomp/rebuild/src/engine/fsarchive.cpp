@@ -6,8 +6,13 @@
  *
  * The archive's file index uses the same machinery for std::list<FsFileInfo>: the value copier (0x577660), its
  * stdcall thunk (0x5778F0), the sentinel (0x5778D0), the node factory (0x577910), the size guard (0x577830)
- * and the insertions (0x577AD0 / 0x577B80).  The node is {next; prev; FsFileInfo}. */
+ * and the insertions (0x577AD0 / 0x577B80).  The node is {next; prev; FsFileInfo}.
+ *
+ * Finally the archive itself (0x576DD0 and its lifetime): IntToString, the pak chain reader of the ctor, the
+ * destructor and the singleton creator. */
 #include "game/common.h"
+#include "game/globals.h"
+#include "game/config.h"
 #include "game/fsarchive.h"
 
 ORIG_DATA(00607CCC); /* "list<T> too long" */
@@ -265,4 +270,225 @@ FsFolder *__thiscall AddFolderChild(FsFolder *folder, const std::string *name)
     node->prev->next = node;
     DestroyFolder(temporary);
     return &folder->children.head->prev->value;
+}
+
+/* ---------------------------------------------------------------------------------------------------------------
+ * fs::FileSystemArchive: the archive singleton (0x11C bytes) the file system resolves paths and pak entries
+ * through.  IntToString (0x576720), the ctor (0x576DD0), the destructor (0x576C90), its deleting twin
+ * (0x576DB0) and the singleton creator (0x44AB70). */
+
+ORIG_DATA(0061D828); /* fs::FileSystemArchive::vftable (the deleting dtor is its first entry) */
+ORIG_DATA(0061D7E4); /* Singleton<fs::FileSystemArchive>::vftable, written by the dtor */
+ORIG_DATA(0061D82C); /* ".\\new\\FileSystemArchive.cpp" */
+ORIG_DATA(0060B0F4); /* "Resource.pak" */
+ORIG_DATA(0060B218); /* "Resource" */
+ORIG_DATA(0060B224); /* ".pak" */
+ORIG_DATA(0060B1AC); /* "Сигнатура архивного файла не совпадает с требуемой " */
+ORIG_DATA(0060B1F4); /* "Не удается открыть файл - " */
+ORIG_DATA(006C7BD8); /* the 16-byte key of the version 200 paks */
+ORIG_DATA(006C88D0); /* the archive singleton */
+ORIG_DATA(008D10A8); /* the sprintf buffer of IntToString */
+ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
+
+ORIG_THISCALL(004CCC80, void, (void *vector, unsigned count, const void *value)); /* fill a vector with copies */
+ORIG_THISCALL(00452760, void *, (void *self, void *out));                        /* CFileSystem::GetFiles */
+ORIG_THISCALL(00451CF0, void *, (void *self, const void *other));                /* map<string,PakEntry>::operator= */
+ORIG_FN(005E3B10, void *, (unsigned int size));                                  /* operator new[] */
+
+/* The original passes the entry to InsertName by value: the caller builds the entry, then the argument copy of
+ * it, so three strings exist before the node's own copy.  The allocation pattern is part of the behaviour. */
+static void InsertPakEntry(FsHashMap *files, const char *name, unsigned offset, unsigned size, int pak)
+{
+    std::string fileName(name);
+    alignas(4) unsigned char entryStorage[sizeof(PakEntry)];
+    PakEntry *entry = (PakEntry *)entryStorage;
+    new (&entry->name) std::string(fileName);
+    entry->offset = offset;
+    entry->size = size;
+    entry->pak = pak;
+    alignas(4) unsigned char argumentStorage[sizeof(PakEntry)];
+    PakEntry *argument = (PakEntry *)argumentStorage;
+    new (&argument->name) std::string(entry->name);
+    argument->offset = offset;
+    argument->size = size;
+    argument->pak = pak;
+    FsInsertResult result;
+    files->InsertName(&result, argument);
+    argument->name.~basic_string();
+    entry->name.~basic_string();
+}
+
+static void ThrowArchiveError(const std::string &msg, int line)
+{
+    CGameException error(msg, ORIG_STR(0061D82C), line);
+    _CxxThrowException(&error, d_0069916C);
+    __builtin_unreachable();
+}
+
+/* "%d" through one shared buffer.  The string is returned through the caller's hidden pointer, as MSVC does. */
+DECOMP(00576720)
+std::string IntToString(int value)
+{
+    sprintf(d_008D10A8, "%d", value);
+    return std::string(d_008D10A8);
+}
+
+/* The ctor: the two maps, the embedded stream and the folder tree, then the ResourceN.pak chain.  Resource.pak
+ * next to the exe is opened only for its size (its handle is kept), and the chain replaces the archive's copy of
+ * CFileSystem's pak directory with the records of every pak that opens.  The original hands InitStringMap the
+ * address of an uninitialised stack byte for the empty allocator; nothing ever reads the value. */
+DECOMP(00576DD0)
+FileSystemArchive *__thiscall InitFileSystemArchive(FileSystemArchive *archive)
+{
+    unsigned char allocator = 0;
+
+    archive->vftable = d_0061D828;
+
+    /* the name -> folder index map; the original's map init (0x576C20) is inlined here because its recorded
+     * convention disagrees with the machine code, so build.py cannot pair a hand-written copy with it */
+    archive->nameIndex.sentinel = CreateFileNodeSentinel();
+    archive->nameIndex.size = 0;
+    {
+        void *sentinel = archive->nameIndex.sentinel;
+        sub_004CCC80(&archive->nameIndex.vectorAlloc, 9, &sentinel);
+    }
+    archive->nameIndex.mask = 1;
+    archive->nameIndex.count = 1;
+
+    archive->files.InitStringMap(allocator, &allocator);
+    new (&archive->stream) std::ifstream();
+    InitFolder(&archive->root);
+
+    nCfg::GamePath *gamePath = (nCfg::GamePath *)g_gamePath;
+    std::string path = gamePath->exePath + "Resource.pak";
+    archive->pakHandle = CreateFileA(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    GetFileSize(archive->pakHandle, nullptr);
+
+    /* the archive starts from the file system's own directory of all opened paks */
+    FsHashMap filesCopy;
+    sub_00452760(CFileSystem::Instance(), &filesCopy);
+    if (&archive->files != &filesCopy)
+        sub_00451CF0(&archive->files, &filesCopy);
+    if (filesCopy.begin)
+        operator delete(filesCopy.begin);
+    filesCopy.begin = nullptr;
+    filesCopy.end = nullptr;
+    filesCopy.limit = nullptr;
+    ClearStringNodeList((char *)&filesCopy + 4);
+    operator delete(filesCopy.sentinel);
+
+    if (archive->files.size == 0) {
+        unsigned i = 0;
+        for (;; i++) {
+            std::string digits = IntToString((int)i);
+            path = gamePath->exePath + "Resource" + digits + ".pak";
+            archive->stream.open(path.c_str(), std::ios_base::_In | std::ios_base::_Binary,
+                                 std::ios_base::_Openprot);
+            if (archive->stream.fail())
+                break;
+
+            char header[12];
+            archive->stream.read(header, sizeof header);
+            if (header[0] != 'G' || header[1] != 'R' || header[2] != 'E' || header[3] != 'S') {
+                archive->stream.close();
+                ThrowArchiveError(std::string(ORIG_STR(0060B1AC)), 0x46);
+            }
+            archive->pakVersion = *(int *)(header + 4);
+            archive->pakCount = *(unsigned *)(header + 8);
+            unsigned char *key = (unsigned char *)d_006C7BD8;
+            if (archive->pakVersion == 200) {
+                /* the four bytes at +0C are part of the encrypted header; nothing ever reads them */
+                for (int j = 0; j < 4; j++)
+                    archive->unused0C[j] ^= key[j];
+                for (int j = 0; j < 4; j++)
+                    ((unsigned char *)&archive->pakCount)[j] ^= key[4 + j];
+            }
+
+            /* new[] gets the size saturated on 32-bit overflow; the read and the decrypt loop use the wrapped one */
+            unsigned size = archive->pakCount * 0x88;
+            unsigned long long bytes = (unsigned long long)archive->pakCount * 0x88;
+            PakRecord *records = (PakRecord *)sub_005E3B10((unsigned)(bytes >> 32) ? 0xFFFFFFFFu : size);
+            archive->stream.read((char *)records, size);
+            if (archive->pakVersion == 200)
+                for (unsigned j = 0; j < size; j++)
+                    ((unsigned char *)records)[j] ^= key[j % 16];
+
+            for (unsigned k = 0; k < archive->pakCount; k++) {
+                const PakRecord *record = &records[k];
+                if (i == 0) {
+                    InsertPakEntry(&archive->files, record->name, record->offset, record->size, (int)i);
+                } else {
+                    std::string keyName(record->name);
+                    FsStringNode *node;
+                    archive->files.FindName(&node, &keyName);
+                    keyName.~basic_string();
+                    if (node == (FsStringNode *)archive->files.sentinel) {
+                        InsertPakEntry(&archive->files, record->name, record->offset, record->size, (int)i);
+                    } else {
+                        /* a later pak overrides the record of an earlier one */
+                        unsigned *value = (unsigned *)((char *)node + 0x24);
+                        value[0] = record->offset;
+                        value[1] = record->size;
+                        value[2] = i;
+                    }
+                }
+            }
+            operator delete[](records);
+            archive->stream.close();
+        }
+
+        if (i == 0)
+            ThrowArchiveError(ORIG_STR(0060B1F4) + path, 0x38);
+    }
+    return archive;
+}
+
+DECOMP(00576C90)
+void __thiscall DestroyFileSystemArchive(FileSystemArchive *archive)
+{
+    archive->vftable = d_0061D828;
+    CloseHandle(archive->pakHandle);
+    archive->pakHandle = (void *)-1;
+    DestroyFolder(&archive->root);
+    archive->stream.~basic_ifstream();
+
+    if (archive->files.begin)
+        operator delete(archive->files.begin);
+    archive->files.begin = nullptr;
+    archive->files.end = nullptr;
+    archive->files.limit = nullptr;
+    ClearStringNodeList((char *)&archive->files + 4);
+    operator delete(archive->files.sentinel);
+    archive->files.sentinel = nullptr;
+
+    if (archive->nameIndex.begin)
+        operator delete(archive->nameIndex.begin);
+    archive->nameIndex.begin = nullptr;
+    archive->nameIndex.end = nullptr;
+    archive->nameIndex.limit = nullptr;
+    ClearStringNodeList((char *)&archive->nameIndex + 4);
+    operator delete(archive->nameIndex.sentinel);
+    archive->nameIndex.sentinel = nullptr;
+
+    archive->vftable = d_0061D7E4;
+}
+
+DECOMP(00576DB0)
+void *__thiscall DeleteFileSystemArchive(FileSystemArchive *archive, unsigned flags)
+{
+    DestroyFileSystemArchive(archive);
+    if (flags & 1)
+        operator delete(archive);
+    return archive;
+}
+
+DECOMP(0044AB70)
+FileSystemArchive *__cdecl CreateFileSystemArchive()
+{
+    void *memory = operator new(sizeof(FileSystemArchive));
+    if (memory)
+        memory = InitFileSystemArchive((FileSystemArchive *)memory);
+    ORIG_VAR(006C88D0, void *) = memory;
+    return (FileSystemArchive *)memory;
 }

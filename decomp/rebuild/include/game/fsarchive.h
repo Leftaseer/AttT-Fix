@@ -1,11 +1,12 @@
-/* The folder tree of the file system archive (NSFileSystem).  FileSystemArchive (0x576DD0) is the root folder:
- * every directory of the archive file is an FsFolder, its subdirectories (and files as leaves) hang off it in
- * a std::list<FsFolder>.  CFileSystem owns one archive object (embedded at +0x88) and uses the archive's
- * name -> folder map (the prefixes at +0xB4) to turn a virtual path into a directory outside the paks.
+/* The file system archive (fs::FileSystemArchive, 0x11C bytes, singleton 0x6C88D0): the file index of the
+ * ResourceN.pak chain and the root of the folder tree.  CFileSystem uses the archive's name -> folder map (the
+ * prefixes at +0xB4) to turn a virtual path into a directory outside the paks.
  *
- * Next to the tree the archive keeps a file index: a hash map from a bare file name to the folder the file was
- * found in and its size.  The map's nodes are std::list<FsFileInfo> nodes; the list's primitives are here as
- * well (0x5778D0 / 0x577660 / 0x5778F0 / 0x577910 / 0x577830 / 0x577AB0 / 0x577AD0 / 0x577B80).
+ * The folder tree: every directory of the archive file is an FsFolder, its subdirectories (and files as leaves)
+ * hang off it in a std::list<FsFolder>.  Next to the tree the archive keeps a file index: a hash map from a bare
+ * file name to the folder the file was found in and its size.  The map's nodes are std::list<FsFileInfo> nodes;
+ * the list's primitives are here as well (0x5778D0 / 0x577660 / 0x5778F0 / 0x577910 / 0x577830 / 0x577AB0 /
+ * 0x577AD0 / 0x577B80).
  *
  * The list is laid out as MSVC 8 lays out std::list: a 4-byte empty allocator, the sentinel and the size.  The
  * sentinel is a node whose links form the ring; it has no value.  The list operations take the position/sentinel
@@ -18,6 +19,7 @@
  */
 #pragma once
 #include "game/common.h"
+#include "game/filesystem.h"
 
 struct FsFolder;
 struct FsFolderNode;
@@ -118,3 +120,36 @@ void __thiscall InsertFileRange(FsFileList *list, FsFileNode *position, FsFileNo
 
 /* std::length_error("list<T> too long"), thrown by the list size guards of both the folders and the maps */
 [[noreturn]] void ThrowFsLengthError(); /* the object is laid out as MSVC 8's std::length_error */
+
+/* The archive singleton.  Its ctor opens Resource.pak next to the exe for its size, copies CFileSystem's whole
+ * pak directory into +38, then walks the ResourceN.pak chain for as long as it opens: every pak's signature,
+ * version and directory are read, version 200 paks are decrypted and every record goes into +38.  +10 keeps the
+ * name -> folder index the file system's path resolution uses. */
+struct FileSystemArchive {
+    void *vftable;             /* +00 fs::FileSystemArchive::vftable, 0x6C88D0 owns the object */
+    int pakVersion;            /* +04 200 = the encrypted header and directory */
+    unsigned pakCount;         /* +08 records in the last pak read */
+    unsigned char unused0C[4]; /* +0C XORed with the key on version 200, never read */
+    FsHashMap nameIndex;       /* +10 map<string, FsFileInfo> (0x2C-byte nodes) */
+    FsHashMap files;           /* +38 map<string, PakEntry> (0x30-byte nodes) */
+    void *pakHandle;           /* +60 the Resource.pak handle, -1 once closed */
+    std::ifstream stream;      /* +64 the stream of the ResourceN.pak being read */
+    FsFolder root;             /* +F0 the folder tree */
+};
+static_assert(sizeof(FileSystemArchive) == 0x11C, "FileSystemArchive is 0x11C bytes");
+static_assert(__builtin_offsetof(FileSystemArchive, pakVersion) == 0x04, "FileSystemArchive::pakVersion");
+static_assert(__builtin_offsetof(FileSystemArchive, pakCount) == 0x08, "FileSystemArchive::pakCount");
+static_assert(__builtin_offsetof(FileSystemArchive, nameIndex) == 0x10, "FileSystemArchive::nameIndex");
+static_assert(__builtin_offsetof(FileSystemArchive, files) == 0x38, "FileSystemArchive::files");
+static_assert(__builtin_offsetof(FileSystemArchive, pakHandle) == 0x60, "FileSystemArchive::pakHandle");
+static_assert(__builtin_offsetof(FileSystemArchive, stream) == 0x64, "FileSystemArchive::stream");
+static_assert(__builtin_offsetof(FileSystemArchive, root) == 0xF0, "FileSystemArchive::root");
+
+/* "%d" through the shared sprintf buffer, as a string */
+std::string IntToString(int value); /* 0x576720 */
+
+/* the singleton's lifetime and the object it builds; the ctor and the creator return the object in EAX */
+FileSystemArchive *__thiscall InitFileSystemArchive(FileSystemArchive *archive);      /* 0x576DD0 */
+void __thiscall DestroyFileSystemArchive(FileSystemArchive *archive);                 /* 0x576C90 */
+void *__thiscall DeleteFileSystemArchive(FileSystemArchive *archive, unsigned flags); /* 0x576DB0 */
+FileSystemArchive *__cdecl CreateFileSystemArchive();                                 /* 0x44AB70 */
