@@ -15,6 +15,9 @@ branch never conflict with them.
   compilation, placement/town/army/forest/quest/trigger/dialogue editing,
   validation, build-identity checks, a preview server, and the `worldctl.py`
   command-line front end. See its [README](world-editor/README.md).
+- `balance-studio/` — offline browser editor for units, spells, encounters and
+  models in Ascension to the Throne and Valkyrie. Open `Balance Studio.html`
+  in Edge or Chrome. See the [Balance Studio guide](balance-studio/README.md).
 
 Each future tool gets its own sibling directory here. World, forest and story
 editing share one directory because they reuse the same archive and bytecode

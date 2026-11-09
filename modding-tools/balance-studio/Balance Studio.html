@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file:; img-src data:; base-uri 'none'; form-action 'none'">
+  <title>AttT Balance Studio</title>
+  <link rel="stylesheet" href="studio.css">
+  <script defer src="core.js"></script>
+  <script defer src="models.js"></script>
+  <script defer src="glb.js"></script>
+  <script defer src="model-skin-transfer.js"></script>
+  <script defer src="model-rig.js"></script>
+  <script defer src="model-animation.js"></script>
+  <script defer src="model-editor.js"></script>
+  <script defer src="model-viewer.js"></script>
+  <script defer src="army-map.js"></script>
+  <script defer src="studio.js"></script>
+</head>
+<body>
+  <div class="studio">
+    <aside class="sidebar" aria-label="Workspace">
+      <div class="brand"><div class="monogram" aria-hidden="true">A</div><div><strong>Balance Studio</strong><span>ASCENSION TO THE THRONE</span></div></div>
+
+      <section>
+        <h2>Game data</h2>
+        <button class="game" id="game-attt" aria-pressed="false"><span class="game-dot"></span><span><strong>Original game</strong><small id="status-attt">Choose archives</small></span></button>
+        <button class="game" id="game-valkyrie" aria-pressed="false"><span class="game-dot"></span><span><strong>Valkyrie</strong><small id="status-valkyrie">Choose archives</small></span></button>
+        <button id="reload" class="link-button" hidden>Change selected archives</button>
+        <input type="file" id="archives" accept=".pak" multiple hidden>
+        <input type="file" id="archive-folder" webkitdirectory hidden>
+      </section>
+
+      <section class="profile-section">
+        <div class="section-title"><h2>Balance profiles</h2><button class="icon-button" id="new-profile" aria-label="New profile" title="New profile">+</button></div>
+        <div id="profiles" class="profiles"></div>
+        <div class="profile-tools"><button id="profile-edit" class="link-button">Rename</button><button id="profile-copy" class="link-button">Duplicate</button><button id="profile-delete" class="link-button">Delete</button></div>
+      </section>
+
+      <div class="side-footer">
+        <button id="open-project" class="link-button">Open project</button>
+        <input type="file" id="project-file" accept=".json,application/json" hidden>
+        <button id="save-project" class="link-button">Save project</button>
+      </div>
+    </aside>
+
+    <main>
+      <header class="top">
+        <div>
+          <div class="eyebrow" id="workspace-label">LOCAL WORKSPACE</div>
+          <h1 id="profile-title">Untitled balance</h1>
+          <p id="workspace-summary">Create and compare game balance profiles.</p>
+        </div>
+        <div class="header-actions">
+          <button id="undo" class="button secondary" title="Undo last edit (Ctrl+Z)" disabled>Undo</button>
+          <button id="export" class="button primary" disabled>Review export <span aria-hidden="true">↗</span></button>
+        </div>
+      </header>
+
+      <div class="empty-start" id="start">
+        <p class="eyebrow">GET STARTED</p>
+        <h2>Open your game archives</h2>
+        <p>Choose an edition and open the folder containing its <code>Resource0.pak</code>. Open both games to compare their original values.</p>
+        <div class="header-actions">
+          <button class="button primary" id="start-attt">Open original game</button>
+          <button class="button secondary" id="start-valkyrie">Open Valkyrie</button>
+        </div>
+        <p class="quiet">Your archives stay on your computer. The editor exports a separate PAK for you to install.</p>
+      </div>
+
+      <section id="editor" class="editor" hidden>
+        <div class="controls">
+          <nav aria-label="Record types" id="sections">
+            <button data-kind="units" aria-pressed="true">Units</button>
+            <button data-kind="spells" aria-pressed="false">Spells</button>
+            <button data-kind="armies" aria-pressed="false">Armies</button>
+          </nav>
+          <button id="bulk-edit" class="button secondary">Bulk edit</button>
+          <button id="open-army-map" class="button secondary" hidden>Army map</button>
+          <button id="open-hero-models" class="button secondary">Hero outfits</button>
+          <label class="scope-label compare-label" for="compare-profile">Compare</label>
+          <select id="compare-profile" aria-label="Compare with another profile"><option value="">No profile</option></select>
+          <label class="scope-label" for="scope">Apply edits to</label>
+          <select id="scope"><option value="shared">Both editions</option><option value="edition">This edition only</option></select>
+        </div>
+        <div class="workbench">
+          <section class="catalog" aria-label="Records">
+            <div class="filters">
+              <input id="search" type="search" placeholder="Search names or IDs" aria-label="Search records" autocomplete="off">
+              <select id="filter" aria-label="Filter records"><option value="all">All records</option><option value="edited">Edited records</option><option value="common">In both editions</option></select>
+            </div>
+            <div id="record-count" class="record-count"></div>
+            <div class="records" id="records"></div>
+          </section>
+          <section class="inspector" id="inspector" aria-label="Record details"></section>
+        </div>
+      </section>
+      <div class="status" id="status" role="status" aria-live="polite">Ready</div>
+    </main>
+  </div>
+
+  <dialog id="profile-dialog">
+    <form method="dialog" id="profile-form">
+      <div class="dialog-heading"><div><p class="eyebrow">WORKSPACE</p><h2 id="profile-dialog-title">New profile</h2></div><button type="button" class="dialog-close" data-close="profile-dialog" aria-label="Close">×</button></div>
+      <label for="profile-name">Profile name</label>
+      <input id="profile-name" required maxlength="80" autocomplete="off">
+      <label for="profile-group">Group</label>
+      <input id="profile-group" maxlength="80" list="groups" placeholder="e.g. Campaign experiments">
+      <datalist id="groups"></datalist>
+      <div class="dialog-actions"><button type="button" class="button secondary" data-close="profile-dialog">Cancel</button><button class="button primary" type="submit">Save profile</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="archives-dialog">
+    <div class="dialog-heading"><div><p class="eyebrow">GAME DATA</p><h2 id="archives-title">Open game data</h2></div><button type="button" class="dialog-close" data-close="archives-dialog" aria-label="Close">×</button></div>
+    <p class="quiet">Choose the folder containing <code>Resource0.pak</code> or select its PAK files together.</p>
+    <p class="quiet" id="attt-archive-hint">The original game needs <code>Resource1.pak</code> or <code>Localization.pak</code> for unit and spell data.</p>
+    <label id="localization-option"><input type="checkbox" id="prefer-localization"> Use Localization.pak if present (AttTFix English)</label>
+    <div class="dialog-actions">
+      <button type="button" class="button secondary" id="choose-archives">Choose PAK files</button>
+      <button type="button" class="button primary" id="choose-archive-folder">Choose game folder</button>
+    </div>
+  </dialog>
+
+  <dialog id="bulk-dialog">
+    <form method="dialog" id="bulk-form">
+      <div class="dialog-heading"><div><p class="eyebrow">FILTERED UNITS</p><h2>Bulk edit</h2></div><button type="button" class="dialog-close" data-close="bulk-dialog" aria-label="Close">×</button></div>
+      <p id="bulk-scope" class="quiet"></p>
+      <div class="bulk-fields">
+        <div><label for="bulk-field">Stat</label><select id="bulk-field"></select></div>
+        <div><label for="bulk-operation">Operation</label><select id="bulk-operation"><option value="set">Set value</option><option value="add">Add amount</option><option value="scale">Multiply by</option></select></div>
+        <div><label for="bulk-value">Value</label><input type="number" id="bulk-value" required step="any" inputmode="decimal"></div>
+      </div>
+      <div id="bulk-summary" role="status"></div>
+      <div id="bulk-review" class="export-review" hidden></div>
+      <div class="dialog-actions"><button type="button" class="button secondary" data-close="bulk-dialog">Cancel</button><button class="button primary" id="apply-bulk" type="submit" disabled>Apply changes</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="export-dialog">
+    <div class="dialog-heading"><div><p class="eyebrow">GAME PATCH</p><h2>Review export</h2></div><button class="dialog-close" data-close="export-dialog" aria-label="Close">×</button></div>
+    <label for="export-game">Target edition</label>
+    <select id="export-game"></select>
+    <div id="export-summary"></div>
+    <div id="export-review" class="export-review"></div>
+    <div class="dialog-actions"><button class="button secondary" data-close="export-dialog">Cancel</button><button class="button primary" id="download-pak">Download PAK</button></div>
+  </dialog>
+
+  <dialog id="model-dialog" aria-labelledby="model-title">
+    <div class="dialog-heading">
+      <div><p id="model-edition" class="eyebrow"></p><h2 id="model-title"></h2></div>
+      <button class="dialog-close" data-close="model-dialog" aria-label="Close 3D preview">×</button>
+    </div>
+    <label id="model-outfit-picker" hidden>Hero outfit <select id="model-outfit"></select></label>
+    <div class="model-workbench">
+      <canvas id="model-canvas" tabindex="0" aria-label="3D model. Arrow keys orbit, Shift plus arrow keys pan, and plus or minus zooms."></canvas>
+      <section class="model-inspection" aria-labelledby="model-inspection-heading">
+        <h3 id="model-inspection-heading">Mesh inspection</h3>
+        <div class="model-mode" role="group" aria-label="Model tools">
+          <button id="model-inspect-mode" class="button secondary" aria-pressed="true">Inspect</button>
+          <button id="model-edit-mode" class="button secondary" aria-pressed="false">Edit model</button>
+        </div>
+        <div id="model-inspect-controls">
+          <div class="model-inspection-fields">
+            <label>Surface <select id="model-surface">
+              <option value="0">Textured</option>
+              <option value="1">Solid</option>
+              <option value="2">Wireframe</option>
+              <option value="3">Skin weights</option>
+            </select></label>
+            <label>Detail level <select id="model-lod"></select></label>
+            <label>Mesh part <select id="model-part"></select></label>
+            <label>Weighted bone <select id="model-bone"></select></label>
+          </div>
+          <label class="model-marker-toggle"><input id="model-markers" type="checkbox"> Show bone markers and links</label>
+          <p id="model-inspection-note" class="quiet"></p>
+          <p id="model-part-info" class="quiet"></p>
+        </div>
+        <div id="model-edit-controls" hidden>
+          <label>Part to edit <select id="model-edit-part"></select></label>
+          <fieldset id="model-edit-transform">
+            <legend>Attachment transform</legend>
+            <div class="model-edit-row model-edit-axes" aria-hidden="true"><span></span><span>X</span><span>Y</span><span>Z</span></div>
+            <div class="model-edit-row" role="group" aria-label="Move in attachment axes">
+              <span>Move</span>
+              <input aria-label="Move X" title="Move X" type="number" min="-1000" max="1000" step="any" value="0" required>
+              <input aria-label="Move Y" title="Move Y" type="number" min="-1000" max="1000" step="any" value="0" required>
+              <input aria-label="Move Z" title="Move Z" type="number" min="-1000" max="1000" step="any" value="0" required>
+            </div>
+            <div class="model-edit-row" role="group" aria-label="Rotation in degrees">
+              <span>Rotate °</span>
+              <input aria-label="Rotate X" title="Rotate X" type="number" min="-360" max="360" step="any" value="0" required>
+              <input aria-label="Rotate Y" title="Rotate Y" type="number" min="-360" max="360" step="any" value="0" required>
+              <input aria-label="Rotate Z" title="Rotate Z" type="number" min="-360" max="360" step="any" value="0" required>
+            </div>
+            <div class="model-edit-scale">
+              <label>Scale % <input aria-label="Scale percent" type="number" min="1" max="1000" step="any" value="100" required></label>
+              <button id="model-edit-reset-part" class="button secondary">Reset</button>
+            </div>
+          </fieldset>
+          <div id="model-edit-textures">
+            <label>Texture asset <select id="model-edit-texture"></select></label>
+            <div class="model-edit-actions">
+              <button id="model-edit-download-dds" class="button secondary" title="Download the DDS from the loaded archives">Download DDS</button>
+              <button id="model-edit-upload" class="button secondary">Replace DDS…</button>
+              <button id="model-edit-restore" class="button secondary">Restore</button>
+              <button id="model-paint-mode" class="button secondary" aria-pressed="false">Paint texture</button>
+              <button id="model-paint-download" class="button secondary" hidden>Download painted DDS</button>
+            </div>
+            <div id="model-paint-controls" hidden>
+              <div class="model-paint-brush">
+                <label>Color <input id="model-paint-color" type="color" value="#d64735"></label>
+                <label>Size (px) <input id="model-paint-size" type="number" min="2" max="128" value="16"></label>
+                <button id="model-paint-undo" class="button secondary">Undo stroke</button>
+              </div>
+              <p class="quiet">Left-drag to paint · Alt + left-drag to orbit · Right-drag to pan · Scroll to zoom</p>
+            </div>
+            <input id="model-edit-dds" type="file" accept=".dds" hidden>
+            <p class="quiet">A DDS swap applies wherever this texture is used.</p>
+          </div>
+          <details id="model-rig-tools" class="model-rig-tools">
+            <summary>Replace from GLB</summary>
+            <p class="quiet">Edit the rig template in Blender. Keep its part names, material slots and bone names.</p>
+            <p class="quiet">Use the <a href="attt_blender_import.py" download>Blender import add-on</a> to join matching edges and display the rig.</p>
+            <label class="model-marker-toggle"><input id="model-rig-fill-weights" type="checkbox"> Fill missing weights from template</label>
+            <div class="model-edit-actions">
+              <button id="model-rig-template" class="button secondary">Export rig template</button>
+              <button id="model-rig-import" class="button secondary">Import edited GLB…</button>
+              <button id="model-rig-reset" class="button secondary">Restore mesh</button>
+            </div>
+            <input id="model-rig-file" type="file" accept=".glb" hidden>
+            <p id="model-rig-status" class="quiet" role="status"></p>
+          </details>
+          <details id="model-motion-tools" class="model-rig-tools">
+            <summary>Edit animation</summary>
+            <p class="quiet">Round-trip the selected clip in Blender at 30 FPS. Keep its original frame range and equipment objects.</p>
+            <div class="model-edit-actions">
+              <button id="model-motion-template" class="button secondary">Export animated GLB</button>
+              <button id="model-motion-import" class="button secondary">Import animation GLB…</button>
+              <button id="model-motion-reset" class="button secondary">Restore clip</button>
+            </div>
+            <input id="model-motion-file" type="file" accept=".glb" hidden>
+            <p id="model-motion-status" class="quiet" role="status"></p>
+          </details>
+          <p id="model-edit-status" class="quiet" role="status"></p>
+          <div class="model-edit-actions">
+            <button id="model-edit-download" class="button primary">Export model PAK</button>
+            <button id="model-edit-discard" class="button secondary">Discard all</button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="model-controls">
+      <div class="model-animation">
+        <label for="model-clip">Animation</label>
+        <select id="model-clip"></select>
+      </div>
+      <div class="model-view-controls" aria-label="Camera controls">
+        <button id="model-zoom-out" class="button secondary" aria-label="Zoom out">−</button>
+        <button id="model-zoom-in" class="button secondary" aria-label="Zoom in">+</button>
+        <button id="model-reset" class="button secondary">Reset view</button>
+      </div>
+      <button id="model-play" class="button secondary" aria-pressed="false">Play</button>
+      <div class="model-timeline">
+        <input id="model-frame" type="range" min="0" max="0" value="0" aria-label="Animation frame">
+        <output id="model-frame-label" for="model-frame">Frame</output>
+      </div>
+    </div>
+    <p id="model-status" class="quiet" role="status"></p>
+    <p id="model-camera-hint" class="quiet model-hint">Left-drag to orbit · Right-drag to pan · Scroll to zoom</p>
+    <div class="model-export">
+      <button id="model-export" class="button secondary" disabled>Export pose (.glb)</button>
+      <p id="model-export-status" class="quiet" role="status">Exports the current frame as a textured mesh.</p>
+    </div>
+  </dialog>
+  <dialog id="army-map-dialog" aria-labelledby="army-map-title">
+    <div class="dialog-heading">
+      <div><p id="army-map-edition" class="eyebrow"></p><h2 id="army-map-title">Army map</h2></div>
+      <button class="dialog-close" data-close="army-map-dialog" aria-label="Close army map">×</button>
+    </div>
+    <div class="army-map-tools">
+      <select id="army-map-continent" aria-label="Continent">
+        <option value="1">Oganthar</option><option value="2">Annaroth</option><option value="3">Airath</option>
+      </select>
+      <div id="army-map-groups" class="army-map-groups" role="group" aria-label="Encounter group">
+        <button type="button" data-group="hostile" aria-pressed="true">Hostile at start</button>
+        <button type="button" data-group="other" aria-pressed="false">Scripted &amp; other</button>
+        <button type="button" data-group="dead" aria-pressed="false">Dead armies</button>
+      </div>
+      <button id="army-map-zoom-out" class="button secondary" aria-label="Zoom map out">−</button>
+      <button id="army-map-zoom-in" class="button secondary" aria-label="Zoom map in">+</button>
+      <button id="army-map-reset" class="button secondary">Fit map</button>
+      <button id="army-map-add" class="button secondary" aria-pressed="false" disabled>Add army</button>
+    </div>
+    <div class="army-map-layout">
+      <div id="army-map-view" class="army-map-view" tabindex="0" aria-label="Scrollable continent map">
+        <div id="army-map-layer" class="army-map-layer" hidden>
+          <canvas id="army-map-image" aria-hidden="true"></canvas>
+          <div id="army-map-pins"></div>
+        </div>
+      </div>
+      <div class="army-map-sidebar">
+        <input id="army-map-search" type="search" placeholder="Find an army" aria-label="Find an army on the map" autocomplete="off">
+        <div id="army-map-list" class="army-map-list" aria-label="Armies in this continent"></div>
+        <div class="army-map-selection">
+          <p id="army-map-selection" aria-live="polite">Select an army to inspect its roster.</p>
+          <p id="army-map-summary" class="quiet" hidden></p>
+          <button id="army-map-roster" class="button primary" disabled>Open roster</button>
+        </div>
+      </div>
+    </div>
+    <p id="army-map-status" class="quiet" role="status"></p>
+    <p id="army-map-hint" class="quiet">Scroll over the map to zoom. Drag to pan.</p>
+  </dialog>
+  <dialog id="new-army-dialog" aria-labelledby="new-army-title">
+    <form id="new-army-form">
+      <div class="dialog-heading">
+        <h2 id="new-army-title">New hostile army</h2>
+        <button type="button" class="dialog-close" data-close="new-army-dialog" aria-label="Close">×</button>
+      </div>
+      <p id="new-army-location" class="quiet"></p>
+      <label for="new-army-name">Army name</label>
+      <input id="new-army-name" required maxlength="64" autocomplete="off">
+      <label for="new-army-unit">First unit</label>
+      <select id="new-army-unit" required></select>
+      <p id="new-army-error" class="status error" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" class="button secondary" data-close="new-army-dialog">Cancel</button>
+        <button type="submit" class="button primary">Create army</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>
