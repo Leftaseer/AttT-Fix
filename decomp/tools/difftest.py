@@ -81,10 +81,15 @@ class Harness:
         self.orig = PE(orig_exe, imports_only=True)
         self.rb = PE(rebuilt_exe, imports_only=True)
         self.starts = {}
+        self.symbols = {}
         for l in Path(rebuilt_map).read_text().splitlines():
             m = re.search(r'__orig_(\w+)_start\s+([0-9a-fA-F]+)', l)
             if m:
                 self.starts['.' + m.group(1)] = int(m.group(2), 16)
+                continue
+            m = re.match(r'\s+[0-9a-fA-F]{4}:[0-9a-fA-F]{8}\s+(\S+)\s+([0-9a-fA-F]{8,16})\s', l)
+            if m:
+                self.symbols.setdefault(m.group(1), int(m.group(2), 16))
         self.uc = Uc(UC_ARCH_X86, UC_MODE_32)
         img = self.rb.pe.get_memory_mapped_image()
         size = (len(img) + 0xFFFF) & ~0xFFFF

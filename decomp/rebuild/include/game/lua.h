@@ -18,6 +18,16 @@ struct LuaObject {
 };
 
 static const int kLuaTable = 5;
+static const int kLuaRegistryIndex = -10000;
+static const int kLuaGlobalsIndex = -10002;
+
+/* The raw Lua 5.1 API the nScript wrappers and the loaders drive directly (the original's fastcall builds of
+ * these read EBX, so lua_objlen names that register first). */
+ORIG_DATA(008D122C); /* lua_State* */
+#define g_luaState ORIG_VAR(008D122C, void *)
+ORIG_FN(00402A70, void, (void *lua, int index));              /* lua_settop */
+ORIG_FN(00402F40, int, (unsigned ebx, void *lua, int index)); /* lua_objlen */
+ORIG_FN(00403390, void, (void *lua, int index, int n));       /* lua_rawgeti */
 
 inline void RetainLuaObject(LuaObject *object)
 {
