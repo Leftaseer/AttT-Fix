@@ -20,9 +20,10 @@ ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
 ORIG_THISCALL(00451430, void, (void *map, const void *alloc, const void *comp)); /* ctor of map<string, PakEntry> */
 ORIG_THISCALL(00489710, void, (void *map, const void *alloc, const void *comp)); /* ctor of map<int, ifstream*> */
 ORIG_FASTCALL(00577C60, void *, (void *self));                                  /* ctor of the embedded fs object */
-ORIG_THISCALL(00451770, void, (void *map, void *result, const void *value));    /* insert a name in files */
-ORIG_THISCALL(00451A50, void, (void *map, void *result, const void *value));    /* insert a stream in streams */
 ORIG_THISCALL(004CCC80, void, (void *vector, unsigned count, const void *value)); /* fill a vector with copies */
+ORIG_THISCALL(00553E40, void, (void *vector, unsigned count, const void *value)); /* resize the bucket vector */
+ORIG_THISCALL(004E66E0, void, (void *mapObject, unsigned count)); /* add to the string map's size, throwing past its max */
+ORIG_THISCALL(004EB9C0, void, (void *mapObject, unsigned count)); /* add to the int map's size, throwing past its max */
 ORIG_THISCALL(00450AE0, void *, (void *self, void *stream, unsigned size, unsigned offset, bool encrypted));
 ORIG_THISCALL(00450B20, void *, (void *self, const std::string *name));
 ORIG_FASTCALL(005224A0, void, (void *self));                                  /* break the string map's node list */
@@ -213,6 +214,176 @@ void __fastcall ClearStringNodeList(char *mapObject)
     }
 }
 
+/* the two node factories of the inserts: the node's links and then the value copied from the caller's entry */
+DECOMP(00451000)
+FsPakNode *__stdcall CreatePakNode(FsStringNode *next, FsStringNode *prev, const PakEntry *entry)
+{
+    FsPakNode *node = (FsPakNode *)operator new(sizeof(FsPakNode));
+    node->next = next;
+    node->prev = prev;
+    new (&node->value) PakEntry(*entry);
+    return node;
+}
+
+DECOMP(00489070)
+FsIntNode *__stdcall CreateStreamNode(FsIntNode *next, FsIntNode *prev, const int *entry)
+{
+    FsIntNode *node = (FsIntNode *)operator new(sizeof(FsIntNode));
+    node->next = next;
+    node->prev = prev;
+    node->key = entry[0];
+    node->value = (void *)((const unsigned *)entry)[1];
+    return node;
+}
+
+/* The library's table growth, the same in both inserts: once a bucket holds more than four nodes the mask
+ * grows and the bucket vector doubles; then the nodes of the last bucket that no longer hash into it are
+ * spliced to the end of the node list, where they form the new bucket.  The trailing buckets that ended at
+ * the sentinel must start at the first moved node instead. */
+void FsHashMap::GrowBuckets(bool stringKeys)
+{
+    unsigned slots = begin ? (unsigned)(((char *)end - (char *)begin) / 4) : 0;
+    if (count < slots - 1) {
+        if (mask < count)
+            mask = mask * 2 + 1;
+    } else {
+        mask = slots * 2 - 3;
+        sub_00553E40(&vectorAlloc, slots * 2 - 1, sentinel);
+    }
+
+    unsigned split = count - (mask >> 1) - 1;
+    FsStringNode **buckets = (FsStringNode **)begin;
+    FsStringNode *node = buckets[split];
+    unsigned here = split;
+    if (node != buckets[split + 1]) {
+        do {
+            FsStringNode *next = node->next;
+            const void *key = (char *)node + 8;
+            unsigned hash;
+            if (stringKeys) {
+                hash = HashName((const std::string *)key);
+            } else {
+                /* the int hash before the bucket fold: the masked value alone decides the split */
+                LDivResult part = imp_006073C0((long)(*(const unsigned *)key ^ 0xdeadbeef), 0x1f31d);
+                hash = (unsigned)part.rem * 0x41a7u + (unsigned)part.quot * (unsigned)-0xb14;
+                if ((int)hash < 0)
+                    hash += 0x7fffffff;
+            }
+            if ((hash & mask) != split) {
+                if (next != (FsStringNode *)sentinel) {
+                    /* the moved node no longer belongs to the split bucket's range */
+                    FsStringNode *first = buckets[here];
+                    while (node == first && (buckets[here] = next, here != 0)) {
+                        here--;
+                        first = buckets[here];
+                    }
+                    FsStringNode *head = (FsStringNode *)sentinel;
+                    node->prev->next = next;
+                    node->next = head;
+                    head->prev->next = node;
+                    FsStringNode *last = head->prev;
+                    head->prev = node;
+                    next->prev = node->prev;
+                    node->prev = last;
+                    node = head->prev;
+                    buckets[count + 1] = head;
+                    here = split;
+                }
+                for (unsigned b = count; here < b && buckets[b] == (FsStringNode *)sentinel; b--)
+                    buckets[b] = node;
+                if (next == (FsStringNode *)sentinel)
+                    break;
+            }
+            node = next;
+        } while (node != buckets[here + 1]);
+    }
+    count++;
+}
+
+/* Inserts a file directory entry: the key is hashed and looked up in its bucket (the nodes are ordered by the
+ * case-sensitive std::string operator<), and a missing key is linked before its lower bound and the size
+ * grows.  The bucket starts that pointed at the lower bound must point at the new node instead. */
+DECOMP(00451770)
+void FsHashMap::InsertName(FsInsertResult *result, const PakEntry *entry)
+{
+    if (count <= size >> 2)
+        GrowBuckets(true);
+
+    unsigned bucket = HashName(&entry->name) & mask;
+    if (count <= bucket)
+        bucket += -1 - (mask >> 1);
+    FsStringNode **buckets = (FsStringNode **)begin;
+    FsStringNode *position = buckets[bucket + 1];
+    if (position != buckets[bucket]) {
+        do {
+            position = position->prev;
+            if (!(entry->name < position->key)) {
+                if (!(position->key < entry->name)) {
+                    result->node = position;
+                    result->inserted = 0;
+                    return;
+                }
+                position = position->next;
+                break;
+            }
+        } while (position != buckets[bucket]);
+    }
+
+    FsPakNode *allocated = CreatePakNode(position, position->prev, entry);
+    FsStringNode *node = (FsStringNode *)allocated;
+    sub_004E66E0((char *)this + 4, 1);
+    position->prev = node;
+    node->prev->next = node;
+
+    FsStringNode *oldFirst = buckets[bucket];
+    while (position == oldFirst && (buckets[bucket] = node, bucket != 0)) {
+        bucket--;
+        oldFirst = buckets[bucket];
+    }
+    result->node = node;
+    result->inserted = 1;
+}
+
+/* The int-keyed twin of InsertName: the nodes are ordered by their int keys and both the bucket of a node
+ * and of the new key come from BucketIndex. */
+DECOMP(00451A50)
+void FsHashMap::InsertInt(FsInsertResult *result, const int *entry)
+{
+    if (count <= size >> 2)
+        GrowBuckets(false);
+
+    unsigned bucket = BucketIndex((const unsigned *)entry);
+    FsIntNode **buckets = (FsIntNode **)begin;
+    FsIntNode *position = buckets[bucket + 1];
+    if (position != buckets[bucket]) {
+        do {
+            position = position->prev;
+            if (position->key <= entry[0]) {
+                if (entry[0] <= position->key) {
+                    result->node = position;
+                    result->inserted = 0;
+                    return;
+                }
+                position = position->next;
+                break;
+            }
+        } while (position != buckets[bucket]);
+    }
+
+    FsIntNode *node = CreateStreamNode(position, position->prev, entry);
+    sub_004EB9C0((char *)this + 4, 1);
+    position->prev = node;
+    node->prev->next = node;
+
+    FsIntNode *oldFirst = buckets[bucket];
+    while (position == oldFirst && (buckets[bucket] = node, bucket != 0)) {
+        bucket--;
+        oldFirst = buckets[bucket];
+    }
+    result->node = node;
+    result->inserted = 1;
+}
+
 static void ThrowFsError(const std::string &msg, int line)
 {
     CGameException e(msg, ORIG_STR(0060B1E0), line);
@@ -349,8 +520,8 @@ void CFileSystem::OpenPaks(const std::string &name)
             int index;
             std::ifstream *stream;
         } streamEntry = {(int)i, stream};
-        void *inserted[2];
-        sub_00451A50(&streams, inserted, &streamEntry);
+        FsInsertResult inserted;
+        streams.InsertInt(&inserted, &streamEntry.index);
 
         char header[12];
         stream->read(header, sizeof header);
@@ -386,8 +557,8 @@ void CFileSystem::OpenPaks(const std::string &name)
                 entry.offset = record.offset;
                 entry.size = record.size;
                 entry.pak = 0;
-                void *inserted2[2];
-                sub_00451770(&files, inserted2, &entry);
+                FsInsertResult inserted;
+                files.InsertName(&inserted, &entry);
             } else {
                 std::string keyName(record.name);
                 FsStringNode *node;
@@ -398,8 +569,8 @@ void CFileSystem::OpenPaks(const std::string &name)
                     entry.offset = record.offset;
                     entry.size = record.size;
                     entry.pak = (int)i;
-                    void *inserted2[2];
-                    sub_00451770(&files, &inserted2, &entry);
+                    FsInsertResult inserted;
+                    files.InsertName(&inserted, &entry);
                 } else {
                     unsigned *value = (unsigned *)((char *)node + 0x24);
                     value[0] = record.offset;

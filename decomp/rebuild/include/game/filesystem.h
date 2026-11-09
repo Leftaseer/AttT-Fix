@@ -26,6 +26,29 @@ struct FsStringNode {
 };
 static_assert(__builtin_offsetof(FsStringNode, key) == 0x08, "FsStringNode::key");
 
+/* the value of map<string, PakEntry> / the directory record as the map keeps it (0x28 bytes) */
+struct PakEntry {
+    std::string name; /* +00 the map key */
+    unsigned offset;  /* +1C */
+    unsigned size;    /* +20 */
+    int pak;          /* +24 index of the pak the file is in */
+};
+
+/* a node of the file directory map: a string node followed by the entry (0x30 bytes) */
+struct FsPakNode {
+    FsStringNode *next; /* +00 */
+    FsStringNode *prev; /* +04 */
+    PakEntry value;     /* +08 the key is value.name */
+};
+static_assert(sizeof(FsPakNode) == 0x30, "FsPakNode is 0x30 bytes");
+static_assert(__builtin_offsetof(FsPakNode, value) == 0x08, "FsPakNode::value");
+
+/* what an insert reports: the node it found or linked and whether it linked a new one */
+struct FsInsertResult {
+    void *node;
+    unsigned char inserted;
+};
+
 /* The file system library's own bucket hash map (0x28 bytes): all nodes are also in one doubly linked list
  * through the sentinel at +08; the vector at +10..+1F holds one node pointer per bucket plus the list end,
  * +20 is the bucket mask and +24 the number of buckets. */
@@ -48,16 +71,15 @@ struct FsHashMap {
     FsHashMap *InitStringMap(const unsigned char &allocator, const void *compare); /* 0x451430 */
     FsHashMap *InitIntMap(const unsigned char &allocator, const void *compare);    /* 0x489710 */
     void ClearInt();                                                               /* 0x4EF7F0 */
+    void InsertName(FsInsertResult *result, const PakEntry *entry);                /* 0x451770 */
+    void InsertInt(FsInsertResult *result, const int *entry);                      /* 0x451A50 */
+    void GrowBuckets(bool stringKeys);                                             /* inlined in both inserts */
 };
 static_assert(sizeof(FsHashMap) == 0x28, "FsHashMap is 0x28 bytes");
 
-/* the value of map<string, PakEntry> / the directory record as the map keeps it (0x28 bytes) */
-struct PakEntry {
-    std::string name; /* +00 the map key */
-    unsigned offset;  /* +1C */
-    unsigned size;    /* +20 */
-    int pak;          /* +24 index of the pak the file is in */
-};
+/* the node factories of the two inserts (the generated code allocates and fills them by address) */
+FsPakNode *__stdcall CreatePakNode(FsStringNode *next, FsStringNode *prev, const PakEntry *entry); /* 0x451000 */
+FsIntNode *__stdcall CreateStreamNode(FsIntNode *next, FsIntNode *prev, const int *entry);        /* 0x489070 */
 
 /* one 0x88-byte record of a pak directory */
 struct PakRecord {

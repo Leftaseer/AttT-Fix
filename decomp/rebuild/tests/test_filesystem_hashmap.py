@@ -11,6 +11,12 @@ from unicorn.x86_const import UC_X86_REG_ECX
 
 STRING_HASH = 0x00579BB0
 NAME_HASH = 0x00422A20
+CREATE_PAK_NODE = 0x00451000
+CREATE_STREAM_NODE = 0x00489070
+INSERT_NAME = 0x00451770
+INSERT_INT = 0x00451A50
+INIT_STRING_MAP = 0x00451430
+INIT_INT_MAP = 0x00489710
 
 
 def _put_string(h, addr, text=b''):
@@ -404,3 +410,207 @@ def test_clear_int(h):
         if _u32(h, begin + 4 * i) != sentinel:
             return ['bucket slot %d is %08X' % (i, _u32(h, begin + 4 * i))]
     return None
+
+
+def _read_string(h, addr):
+    size, cap = struct.unpack('<II', h.uc.mem_read(addr + 20, 8))
+    ptr = addr + 4 if cap < 16 else _u32(h, addr + 4)
+    return bytes(h.uc.mem_read(ptr, size))
+
+
+def _walk_string_list(h, mapobj):
+    sentinel = _u32(h, mapobj + 8)
+    keys, node = [], _u32(h, sentinel)
+    while node != sentinel:
+        keys.append(_read_string(h, node + 8))
+        node = _u32(h, node)
+    return keys
+
+
+def _walk_int_list(h, mapobj):
+    sentinel = _u32(h, mapobj + 8)
+    keys, node = [], _u32(h, sentinel)
+    while node != sentinel:
+        keys.append(_u32(h, node + 8))
+        node = _u32(h, node)
+    return keys
+
+
+def _check_ring(h, mapobj):
+    """the node list is doubly linked and ends where it starts"""
+    sentinel = _u32(h, mapobj + 8)
+    node, forward = _u32(h, sentinel), []
+    while node != sentinel:
+        forward.append(node)
+        node = _u32(h, node)
+        if len(forward) > 10000:
+            return ['node list does not end']
+    back, node = [], _u32(h, sentinel + 4)
+    while node != sentinel:
+        back.append(node)
+        node = _u32(h, node + 4)
+    if forward != back[::-1]:
+        return ['prev links disagree with next links']
+    return None
+
+
+def _check_string_buckets(h, mapobj):
+    """every node of bucket i hashes to i, and the buckets cover the list in order"""
+    mask, count = struct.unpack('<II', h.uc.mem_read(mapobj + 0x20, 8))
+    begin = _u32(h, mapobj + 0x14)
+    sentinel = _u32(h, mapobj + 8)
+    for bucket in range(count):
+        node, end = _u32(h, begin + 4 * bucket), _u32(h, begin + 4 * bucket + 4)
+        while node != end:
+            if _name_bucket(_read_string(h, node + 8), mask, count) != bucket:
+                return ['bucket %d holds %r' % (bucket, _read_string(h, node + 8))]
+            if _u32(h, node) == sentinel and node != end and end != sentinel:
+                return ['bucket %d runs past the sentinel' % bucket]
+            node = _u32(h, node)
+    return None
+
+
+def _check_int_buckets(h, mapobj):
+    mask, count = struct.unpack('<II', h.uc.mem_read(mapobj + 0x20, 8))
+    begin = _u32(h, mapobj + 0x14)
+    for bucket in range(count):
+        node, end = _u32(h, begin + 4 * bucket), _u32(h, begin + 4 * bucket + 4)
+        while node != end:
+            if _bucket_of(_u32(h, node + 8), mask, count) != bucket:
+                return ['bucket %d holds %d' % (bucket, _u32(h, node + 8))]
+            node = _u32(h, node)
+    return None
+
+
+def _fresh_map(h, init_addr, allocator):
+    mapobj = h.alloc(0x28, bytes(0x28))
+    alloc = h.alloc(4, struct.pack('<I', allocator))
+    res = h.call(init_addr, args=[alloc, alloc], regs={UC_X86_REG_ECX: mapobj})
+    if res['fault'] or res['eax'] != mapobj:
+        raise AssertionError('map init %08X failed: %r' % (init_addr, res))
+    return mapobj
+
+
+def test_create_pak_node(h):
+    """0x451000 allocates the 0x30-byte node, links it and copies the entry (key string and three fields)."""
+    next_node = h.alloc(0x10, bytes(0x10))
+    prev_node = h.alloc(0x10, bytes(0x10))
+    entry = h.alloc(0x28, bytes(0x28))
+    _put_string(h, entry, b'data\\wall.tex')
+    h.uc.mem_write(entry + 0x1C, struct.pack('<III', 0x1234, 0x5678, 2))
+    args = [next_node, prev_node, entry]
+    diffs = h.compare(CREATE_PAK_NODE, args=args, ret='eax')
+    if diffs:
+        return diffs
+    res = h.call(CREATE_PAK_NODE, args=args)
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    node = res['eax']
+    if _u32(h, node) != next_node or _u32(h, node + 4) != prev_node:
+        return ['links %08X/%08X' % (_u32(h, node), _u32(h, node + 4))]
+    if _read_string(h, node + 8) != b'data\\wall.tex':
+        return ['key %r' % _read_string(h, node + 8)]
+    if struct.unpack('<III', h.uc.mem_read(node + 0x24, 12)) != (0x1234, 0x5678, 2):
+        return ['entry %r' % (h.uc.mem_read(node + 0x24, 12),)]
+    return None
+
+
+def test_create_stream_node(h):
+    """0x489070 allocates the 0x10-byte node and copies the {index; stream} pair."""
+    next_node = h.alloc(0x10, bytes(0x10))
+    prev_node = h.alloc(0x10, bytes(0x10))
+    entry = h.alloc(8, struct.pack('<II', 7, 0xDEADBEEF))
+    args = [next_node, prev_node, entry]
+    diffs = h.compare(CREATE_STREAM_NODE, args=args, ret='eax')
+    if diffs:
+        return diffs
+    res = h.call(CREATE_STREAM_NODE, args=args)
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    node = res['eax']
+    if struct.unpack('<IIII', h.uc.mem_read(node, 16)) != (next_node, prev_node, 7, 0xDEADBEEF):
+        return ['node %r' % (h.uc.mem_read(node, 16),)]
+    return None
+
+
+def test_insert_name(h):
+    """0x451770 keeps the files by key: ascending case-sensitive keys, growth when a bucket fills up, the
+    node a duplicate insert reports and the original value left alone."""
+    mapobj = _fresh_map(h, INIT_STRING_MAP, 0x5A)
+    keys = [b'zeta', b'Alpha', b'beta', b'gamma', b'Delta', b'epsilon', b'ALPHA',
+            b'wall', b'floor', b'ceil', b'door', b'window', b'roof', b'stair',
+            b'light', b'camera', b'model', b'actor', b'level', b'zone',
+            b'trigger', b'sound', b'music', b'font', b'gui', b'shader']
+    for i, key in enumerate(keys):
+        entry = h.alloc(0x28, bytes(0x28))
+        _put_string(h, entry, key)
+        h.uc.mem_write(entry + 0x1C, struct.pack('<III', 0x100 + i, 0x200 + i, i & 3))
+        result = h.alloc(8, bytes(8))
+        diffs = h.compare(INSERT_NAME, args=[result, entry], regs={UC_X86_REG_ECX: mapobj}, ret=None)
+        if diffs:
+            return ['%r: %s' % (key, d) for d in diffs]
+        res = h.call(INSERT_NAME, args=[result, entry], regs={UC_X86_REG_ECX: mapobj})
+        if res['fault']:
+            return ['%r: replacement faulted: %s' % (key, res['fault'])]
+        node, inserted = struct.unpack('<IB', h.uc.mem_read(result, 5))
+        if inserted != (0 if key in keys[:i] else 1):
+            return ['%r: inserted %d' % (key, inserted)]
+        if inserted:
+            if _u32(h, node + 0x24) != 0x100 + i or _u32(h, node + 0x28) != 0x200 + i:
+                return ['%r: value %08X/%08X' % (key, _u32(h, node + 0x24), _u32(h, node + 0x28))]
+        elif node != _find_name(h, mapobj, key):
+            return ['%r: duplicate reported another node' % (key,)]
+        if _u32(h, mapobj + 0xC) != len(set(keys[:i + 1])):
+            return ['%r: size %d' % (key, _u32(h, mapobj + 0xC))]
+        problem = _check_ring(h, mapobj) or _check_string_buckets(h, mapobj)
+        if problem:
+            return ['%r: %s' % (key, problem)]
+    expected = _expected_list(h, mapobj, set(keys), _name_bucket)
+    if _walk_string_list(h, mapobj) != expected:
+        return ['list %r, want %r' % (_walk_string_list(h, mapobj), expected)]
+    return None
+
+
+def _find_name(h, mapobj, key):
+    keyobj = h.alloc(28, bytes(28))
+    _put_string(h, keyobj, key)
+    out = h.alloc(4, b'\0' * 4)
+    h.call(0x00422D80, args=[out, keyobj], regs={UC_X86_REG_ECX: mapobj})
+    return _u32(h, out)
+
+
+def test_insert_int(h):
+    """0x451A50 orders the streams by their index and grows the same way."""
+    mapobj = _fresh_map(h, INIT_INT_MAP, 0xC3)
+    keys = [5, 0, 17, 3, 9, 2, 31, 8, 1, 12, 4, 27, 6, 19, 11, 0,
+            23, 14, 7, 30, 13, 21, 10, 25, 16, 29, 18, 15, 22, 20]
+    for i, key in enumerate(keys):
+        entry = h.alloc(8, struct.pack('<II', key & 0xFFFFFFFF, 0xA000 + i))
+        result = h.alloc(8, bytes(8))
+        diffs = h.compare(INSERT_INT, args=[result, entry], regs={UC_X86_REG_ECX: mapobj}, ret=None)
+        if diffs:
+            return ['key %d: %s' % (key, d) for d in diffs]
+        res = h.call(INSERT_INT, args=[result, entry], regs={UC_X86_REG_ECX: mapobj})
+        if res['fault']:
+            return ['key %d: replacement faulted: %s' % (key, res['fault'])]
+        node, inserted = struct.unpack('<IB', h.uc.mem_read(result, 5))
+        if inserted != (0 if key in keys[:i] else 1):
+            return ['key %d: inserted %d' % (key, inserted)]
+        if _u32(h, mapobj + 0xC) != len(set(keys[:i + 1])):
+            return ['key %d: size %d' % (key, _u32(h, mapobj + 0xC))]
+        problem = _check_ring(h, mapobj) or _check_int_buckets(h, mapobj)
+        if problem:
+            return ['key %d: %s' % (key, problem)]
+    expected = _expected_list(h, mapobj, set(keys), _bucket_of)
+    if _walk_int_list(h, mapobj) != expected:
+        return ['list %r, want %r' % (_walk_int_list(h, mapobj), expected)]
+    return None
+
+
+def _expected_list(h, mapobj, keys, bucket_of):
+    """the list is the buckets in order, each holding its keys ascending"""
+    mask, count = struct.unpack('<II', h.uc.mem_read(mapobj + 0x20, 8))
+    out = []
+    for bucket in range(count):
+        out += sorted(k for k in keys if bucket_of(k, mask, count) == bucket)
+    return out
