@@ -42,7 +42,9 @@ struct FsHashMap {
 
     unsigned BucketIndex(const unsigned *key) const;        /* 0x450D20 */
     void FindInt(FsIntNode **node, const int *key) const;   /* 0x450DA0 */
-    void FindString(FsStringNode **node, const std::string *key) const; /* 0x450E60 */
+    void FindString(FsStringNode **node, const std::string *key) const; /* 0x450E60 case-insensitive */
+    void FindName(FsStringNode **node, const std::string *key) const;   /* 0x422D80 case-sensitive */
+    static unsigned __stdcall HashName(const std::string *key);         /* 0x422A20 */
 };
 static_assert(sizeof(FsHashMap) == 0x28, "FsHashMap is 0x28 bytes");
 
@@ -80,6 +82,7 @@ struct CFileSystem {
 
     CFileSystem();                           /* 0x451E00 */
     ~CFileSystem();                          /* 0x452580 */
+    static CFileSystem *Instance();          /* 0x44ABE0 */
     void OpenPaks(const std::string &name);  /* 0x451E90 */
     void *OpenFile(const std::string &name); /* 0x4514B0 */
     bool ResolvePath(const std::string &name, std::string *path); /* 0x451220 */

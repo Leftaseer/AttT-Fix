@@ -11,6 +11,8 @@ ORIG_DATA(0060B214); /* vtable of the file stream class (deleting dtor 0x4524E0)
 ORIG_DATA(0060B1AC); /* "the archive signature does not match the required one..." */
 ORIG_DATA(0060B1E0); /* ".\\FileSystem.cpp" */
 ORIG_DATA(0060B1F4); /* "cannot open the file - " */
+ORIG_DATA(00607BC8); /* "Ошибка при создании m_instance в CSingleton" */
+ORIG_DATA(00607E98); /* "e:\\prog\\att1\\singleton.h" */
 ORIG_DATA(006C04B4); /* the 16-byte key of the version 200 paks */
 ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
 
@@ -20,7 +22,6 @@ ORIG_THISCALL(00489710, void, (void *map, const void *alloc, const void *comp));
 ORIG_FASTCALL(00577C60, void *, (void *self));                                  /* ctor of the embedded fs object */
 ORIG_THISCALL(00451770, void, (void *map, void *result, const void *value));    /* insert a name in files */
 ORIG_THISCALL(00451A50, void, (void *map, void *result, const void *value));    /* insert a stream in streams */
-ORIG_THISCALL(00422D80, void, (void *map, void *node, const std::string *key)); /* find a name in files */
 ORIG_THISCALL(00450AE0, void *, (void *self, void *stream, unsigned size, unsigned offset, bool encrypted));
 ORIG_THISCALL(00450B20, void *, (void *self, const std::string *name));
 ORIG_FASTCALL(005224A0, void, (void *self));                                  /* break the string map's node list */
@@ -102,11 +103,60 @@ void FsHashMap::FindString(FsStringNode **node, const std::string *key) const
     *node = (FsStringNode *)sentinel;
 }
 
+/* FNV-1a over the whole string, then the library's prime to spread it: the hash of the case-sensitive maps */
+DECOMP(00422A20)
+unsigned FsHashMap::HashName(const std::string *key)
+{
+    unsigned hash = 0x811c9dc5;
+    const char *data = key->c_str();
+    for (unsigned i = 0; i < key->size(); i++)
+        hash = hash * 0x1000193u ^ (int)data[i];
+    LDivResult part = imp_006073C0((long)hash, 0x1f31d);
+    unsigned value = (unsigned)part.rem * 0x41a7u + (unsigned)part.quot * (unsigned)-0xb14;
+    if ((int)value < 0)
+        value += 0x7fffffff;
+    return value;
+}
+
+/* the case-sensitive find of the file directory map: the same bucket ranges, ordered by std::string's operator< */
+DECOMP(00422D80)
+void FsHashMap::FindName(FsStringNode **node, const std::string *key) const
+{
+    FsStringNode **buckets = (FsStringNode **)begin;
+    unsigned bucket = HashName(key) & mask;
+    if (count <= bucket)
+        bucket += -1 - (mask >> 1);
+    FsStringNode *endNode = buckets[bucket + 1];
+    for (FsStringNode *it = buckets[bucket]; it != endNode; it = it->next) {
+        if (!(it->key < *key)) {
+            if (!(*key < it->key)) {
+                *node = it;
+                return;
+            }
+            break;
+        }
+    }
+    *node = (FsStringNode *)sentinel;
+}
+
 static void ThrowFsError(const std::string &msg, int line)
 {
     CGameException e(msg, ORIG_STR(0060B1E0), line);
     _CxxThrowException(&e, d_0069916C);
     __builtin_unreachable();
+}
+
+/* The singleton accessor: the file system is built on the first request and a failed allocation throws */
+DECOMP(0044ABE0)
+CFileSystem *CFileSystem::Instance()
+{
+    if (!g_fileSystemInstance) {
+        void *memory = operator new(sizeof(CFileSystem));
+        g_fileSystemInstance = memory ? new (memory) CFileSystem() : nullptr;
+        if (!g_fileSystemInstance)
+            ThrowGameException(ORIG_STR(00607BC8), ORIG_STR(00607E98), 16);
+    }
+    return g_fileSystemInstance;
 }
 
 DECOMP(00451E00)
@@ -267,7 +317,7 @@ void CFileSystem::OpenPaks(const std::string &name)
             } else {
                 std::string keyName(record.name);
                 FsStringNode *node;
-                sub_00422D80(&files, &node, &keyName);
+                files.FindName(&node, &keyName);
                 if (node == (FsStringNode *)files.sentinel) {
                     PakEntry entry;
                     entry.name = keyName;
@@ -340,7 +390,7 @@ void *CFileSystem::OpenFile(const std::string &name)
     _strlwr(lower);
     std::string key(lower);
     FsStringNode *node;
-    sub_00422D80(&files, &node, &key);
+    files.FindName(&node, &key);
     lastEntry = node;
     if ((void *)node == files.sentinel)
         return nullptr;

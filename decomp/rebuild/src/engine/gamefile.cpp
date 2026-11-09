@@ -7,7 +7,6 @@ ORIG_DATA(0060B71C); /* CGameFile::vftable */
 ORIG_DATA(006C8DE0); /* number of live CGameFile readers */
 ORIG_DATA(006C8DE4); /* the file system the readers open through */
 
-ORIG_FN(0044ABE0, void *, ());                        /* creates the file system on first use */
 ORIG_FN(005E3B10, void *, (unsigned int size));       /* operator new[] */
 ORIG_THISCALL(00424C70, void, (void *self));          /* CGameObject::~CGameObject */
 
@@ -30,7 +29,7 @@ CGameFile::CGameFile() : name()
     data = nullptr;
     opened = false;
     if (ORIG_VAR(006C8DE0, int) == 0)
-        ORIG_VAR(006C8DE4, void *) = sub_0044ABE0();
+        ORIG_VAR(006C8DE4, void *) = CFileSystem::Instance();
     ORIG_VAR(006C8DE0, int)++;
 }
 

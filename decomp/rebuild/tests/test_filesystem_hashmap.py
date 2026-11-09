@@ -1,5 +1,6 @@
-"""FsHashMap's bucket hash (0x450D20), its int-keyed lookup (0x450DA0), its string-keyed lookup (0x450E60)
-and CFileSystem's name-prefix resolver (0x451220).
+"""FsHashMap's bucket hashes (0x450D20, 0x422A20), its int-keyed lookup (0x450DA0), its string-keyed lookups
+(0x450E60 case-insensitive, 0x422D80 case-sensitive), CFileSystem's name-prefix resolver (0x451220) and the
+file system's singleton accessor (0x44ABE0).
 
 The map's bucket vector at +14 holds one node pointer per bucket plus the list end: the nodes of bucket i run
 from buckets[i] to buckets[i+1] through next.  The int map's nodes are {next; prev; key; value}, the string
@@ -9,6 +10,7 @@ import struct
 from unicorn.x86_const import UC_X86_REG_ECX
 
 STRING_HASH = 0x00579BB0
+NAME_HASH = 0x00422A20
 
 
 def _put_string(h, addr, text=b''):
@@ -32,9 +34,14 @@ def _bucket_of_string(h, key, mask, count):
     return bucket
 
 
-def _make_string_map(h, entries, mask, count):
-    """entries: (key bytes, value payload); keys ascending (case-insensitively) inside a bucket."""
-    entries = sorted(entries, key=lambda e: (_bucket_of_string(h, e[0], mask, count), e[0].lower()))
+def _make_string_map(h, entries, mask, count, bucket=None, order=None):
+    """entries: (key bytes, value payload); keys ascending inside a bucket, as the map keeps them.  bucket and
+    order select the map's hash and comparison (by default the case-insensitive ones)."""
+    if bucket is None:
+        bucket = lambda key: _bucket_of_string(h, key, mask, count)
+    if order is None:
+        order = lambda key: key.lower()
+    entries = sorted(entries, key=lambda e: (bucket(e[0]), order(e[0])))
     mapobj = h.alloc(0x28, bytes(0x28))
     sentinel = h.alloc(0x10, bytes(0x10))
     nodes = {}
@@ -51,7 +58,7 @@ def _make_string_map(h, entries, mask, count):
     for i in range(count + 1):
         first = sentinel
         for node, (key, _) in zip(ordered, entries):
-            if _bucket_of_string(h, key, mask, count) >= i:
+            if bucket(key) >= i:
                 first = node
                 break
         h.uc.mem_write(buckets + 4 * i, struct.pack('<I', first))
@@ -78,6 +85,27 @@ def _bucket_of(key, mask, count):
     if bucket >= 0x80000000:
         bucket = (bucket + 0x7fffffff) & 0xFFFFFFFF
     bucket &= mask
+    if count <= bucket:
+        bucket = (bucket - 1 - (mask >> 1)) & 0xFFFFFFFF
+    return bucket
+
+
+def _name_hash(key):
+    """FNV-1a over the bytes (char is signed, as in the original), then the same prime mixing as the int hash"""
+    v = 0x811c9dc5
+    for b in key:
+        v = (v * 0x1000193 ^ (b - 256 if b >= 128 else b)) & 0xFFFFFFFF
+    if v >= 0x80000000:
+        v -= 0x100000000
+    quot, rem = _ldiv(v, 0x1f31d)
+    h = (rem * 0x41a7 + quot * -0xb14) & 0xFFFFFFFF
+    if h >= 0x80000000:
+        h = (h + 0x7fffffff) & 0xFFFFFFFF
+    return h
+
+
+def _name_bucket(key, mask, count):
+    bucket = _name_hash(key) & mask
     if count <= bucket:
         bucket = (bucket - 1 - (mask >> 1)) & 0xFFFFFFFF
     return bucket
@@ -226,4 +254,61 @@ def test_find_int_one_bucket(h):
         got = _u32(h, out)
         if got != want:
             return ['key %d: node %08X, want %08X' % (key, got, want)]
+    return None
+
+
+def test_hash_name(h):
+    for key in (b'', b'a', b'ab', b'alpha', b'texture.tex', b'\xff\x80z'):
+        keyobj = h.alloc(28, bytes(28))
+        _put_string(h, keyobj, key)
+        diffs = h.compare(NAME_HASH, args=[keyobj], ret='eax')
+        if diffs:
+            return diffs
+        res = h.call(NAME_HASH, args=[keyobj])
+        if res['fault']:
+            return ['key %r: replacement faulted: %s' % (key, res['fault'])]
+        if res['eax'] != _name_hash(key):
+            return ['key %r: hash %08X, want %08X' % (key, res['eax'], _name_hash(key))]
+    return None
+
+
+def test_find_name(h):
+    """The case-sensitive file map: case must match, the comparison is std::string's operator<."""
+    mask, count = 7, 8
+    keys = [b'alpha', b'Beta', b'gamma', b'Delta', b'omega']
+    bucket = lambda key: _name_bucket(key, mask, count)
+    mapobj, sentinel, nodes = _make_string_map(h, [(k, 0xC0 + i) for i, k in enumerate(keys)],
+                                               mask, count, bucket=bucket, order=lambda k: k)
+    cases = [(k, nodes[k]) for k in keys]
+    cases += [(b'ALPHA', sentinel), (b'beta', sentinel), (b'BETA', sentinel), (b'', sentinel),
+              (b'zeta', sentinel), (b'alph', sentinel)]
+    for key, want in cases:
+        out = h.alloc(4, b'\0' * 4)
+        keyptr = h.alloc(28, bytes(28))
+        _put_string(h, keyptr, key)
+        diffs = h.compare(0x00422D80, args=[out, keyptr], regs={UC_X86_REG_ECX: mapobj}, ret=None)
+        if diffs:
+            return diffs
+        res = h.call(0x00422D80, args=[out, keyptr], regs={UC_X86_REG_ECX: mapobj})
+        if res['fault']:
+            return ['key %r: replacement faulted: %s' % (key, res['fault'])]
+        got = _u32(h, out)
+        if got != want:
+            return ['key %r: node %08X, want %08X' % (key, got, want)]
+    return None
+
+
+def test_file_system_instance(h):
+    """The getter builds the singleton on the first call and returns it thereafter."""
+    diffs = h.compare(0x0044ABE0, ret='eax')
+    if diffs:
+        return diffs
+    res = h.call(0x0044ABE0)
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    obj = res['eax']
+    if not obj:
+        return ['returned null']
+    if _u32(h, 0x006C8C28) != obj:
+        return ['singleton %08X, returned %08X' % (_u32(h, 0x006C8C28), obj)]
     return None
