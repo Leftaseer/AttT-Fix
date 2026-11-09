@@ -607,6 +607,24 @@ def test_insert_int(h):
     return None
 
 
+def test_map_size_guards(h):
+    """0x4E66E0 / 0x4EB9C0 add to the map size as long as it stays within the node allocation limit."""
+    for addr, limit, cases in ((0x004E66E0, 0x6666666, ((0, 1), (0x6666660, 6), (5, 0))),
+                               (0x004EB9C0, 0x1FFFFFFF, ((0, 1), (0x1FFFFFF0, 15), (7, 0)))):
+        for size, count in cases:
+            buf = h.alloc(0x10, bytes(0x10))
+            h.uc.mem_write(buf + 0xC, struct.pack('<I', size))
+            diffs = h.compare(addr, args=[count], regs={UC_X86_REG_ECX: buf + 4}, ret=None)
+            if diffs:
+                return ['%08X size %X + %d: %s' % (addr, size, count, d) for d in diffs]
+            res = h.call(addr, args=[count], regs={UC_X86_REG_ECX: buf + 4})
+            if res['fault']:
+                return ['%08X size %X + %d: fault %s' % (addr, size, count, res['fault'])]
+            if _u32(h, buf + 0xC) != size + count:
+                return ['%08X size %X + %d: got %X' % (addr, size, count, _u32(h, buf + 0xC))]
+    return None
+
+
 def _expected_list(h, mapobj, keys, bucket_of):
     """the list is the buckets in order, each holding its keys ascending"""
     mask, count = struct.unpack('<II', h.uc.mem_read(mapobj + 0x20, 8))

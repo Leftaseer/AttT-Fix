@@ -15,6 +15,10 @@ ORIG_DATA(00607BC8); /* "Ошибка при создании m_instance в CSin
 ORIG_DATA(00607E98); /* "e:\\prog\\att1\\singleton.h" */
 ORIG_DATA(006C04B4); /* the 16-byte key of the version 200 paks */
 ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
+ORIG_DATA(00607CCC); /* "list<T> too long" */
+ORIG_DATA(00607B18); /* std::length_error vftable */
+ORIG_DATA(00607B24); /* the vftable the thrown object ends up with */
+ORIG_DATA(00699050); /* std::length_error _ThrowInfo */
 
 /* the file system library's maps and files (their bodies stay generated; see the comments at the call sites) */
 ORIG_THISCALL(00451430, void, (void *map, const void *alloc, const void *comp)); /* ctor of map<string, PakEntry> */
@@ -22,8 +26,6 @@ ORIG_THISCALL(00489710, void, (void *map, const void *alloc, const void *comp));
 ORIG_FASTCALL(00577C60, void *, (void *self));                                  /* ctor of the embedded fs object */
 ORIG_THISCALL(004CCC80, void, (void *vector, unsigned count, const void *value)); /* fill a vector with copies */
 ORIG_THISCALL(00553E40, void, (void *vector, unsigned count, const void *value)); /* resize the bucket vector */
-ORIG_THISCALL(004E66E0, void, (void *mapObject, unsigned count)); /* add to the string map's size, throwing past its max */
-ORIG_THISCALL(004EB9C0, void, (void *mapObject, unsigned count)); /* add to the int map's size, throwing past its max */
 ORIG_THISCALL(00450AE0, void *, (void *self, void *stream, unsigned size, unsigned offset, bool encrypted));
 ORIG_THISCALL(00450B20, void *, (void *self, const std::string *name));
 ORIG_FASTCALL(005224A0, void, (void *self));                                  /* break the string map's node list */
@@ -47,6 +49,9 @@ struct LDivResult {
     long rem;
 };
 DECOMP_C LDivResult(__cdecl *imp_006073C0)(long, long) __asm__("__imp__ldiv");
+
+/* std::exception's constructor, used to set up the length_error objects of the map size guards */
+DECOMP_C void (__thiscall *imp_006073A4)(void *) __asm__("__imp_??0exception@std@@QAE@XZ");
 
 /* The bucket of a key: the library's hash scrambles it by dividing through a prime and mixing the quotient and
  * the remainder; the bucket count is a power of two, and the range of a bucket ends where the next one starts. */
@@ -236,6 +241,46 @@ FsIntNode *__stdcall CreateStreamNode(FsIntNode *next, FsIntNode *prev, const in
     return node;
 }
 
+/* the length_error the map size guards throw: vftable, std::exception's what/dofree and the message string */
+struct FsLengthError {
+    void *vftable;       /* +00 */
+    const char *what;    /* +04 */
+    int doFree;          /* +08 */
+    std::string message; /* +0C */
+};
+
+static void ThrowMapSizeError()
+{
+    FsLengthError error;
+    imp_006073A4(&error);
+    error.vftable = d_00607B18;
+    new (&error.message) std::string(ORIG_STR(00607CCC));
+    error.vftable = d_00607B24;
+    _CxxThrowException(&error, d_00699050);
+    __builtin_unreachable();
+}
+
+/* The map size guards: the library's nodes are limited by their allocation size (0x28 bytes for the file
+ * entries, 0x10 for the streams); growing past the limit throws std::length_error.  The guards see the
+ * library's map view, which starts four bytes into FsHashMap. */
+DECOMP(004E66E0)
+void __thiscall AddStringMapSize(void *mapObject, unsigned count)
+{
+    unsigned &size = *(unsigned *)((char *)mapObject + 8);
+    if (0x6666666u - size < count)
+        ThrowMapSizeError();
+    size += count;
+}
+
+DECOMP(004EB9C0)
+void __thiscall AddIntMapSize(void *mapObject, unsigned count)
+{
+    unsigned &size = *(unsigned *)((char *)mapObject + 8);
+    if (0x1fffffffu - size < count)
+        ThrowMapSizeError();
+    size += count;
+}
+
 /* The library's table growth, the same in both inserts: once a bucket holds more than four nodes the mask
  * grows and the bucket vector doubles; then the nodes of the last bucket that no longer hash into it are
  * spliced to the end of the node list, where they form the new bucket.  The trailing buckets that ended at
@@ -331,7 +376,7 @@ void FsHashMap::InsertName(FsInsertResult *result, const PakEntry *entry)
 
     FsPakNode *allocated = CreatePakNode(position, position->prev, entry);
     FsStringNode *node = (FsStringNode *)allocated;
-    sub_004E66E0((char *)this + 4, 1);
+    AddStringMapSize((char *)this + 4, 1);
     position->prev = node;
     node->prev->next = node;
 
@@ -371,7 +416,7 @@ void FsHashMap::InsertInt(FsInsertResult *result, const int *entry)
     }
 
     FsIntNode *node = CreateStreamNode(position, position->prev, entry);
-    sub_004EB9C0((char *)this + 4, 1);
+    AddIntMapSize((char *)this + 4, 1);
     position->prev = node;
     node->prev->next = node;
 
