@@ -333,6 +333,39 @@ std::string IntToString(int value)
     return std::string(d_008D10A8);
 }
 
+/* Locates a name: a drive letter makes it a file on disk (its size is measured by seeking to the end), any
+ * other name is looked up in the pak directory map under its lowercased spelling. */
+DECOMP(00576A90)
+FsFileLocation *__thiscall LocateArchiveFile(FileSystemArchive *archive, FsFileLocation *out,
+                                             const std::string *name)
+{
+    if (name->find(':', 0) == std::string::npos) {
+        std::string key(CharLowerA(const_cast<char *>(name->c_str())));
+        FsStringNode *node;
+        archive->files.FindName(&node, &key);
+        if (node == (FsStringNode *)archive->files.sentinel) {
+            out->offset = 0;
+            out->size = 0;
+            out->pak = 0;
+        } else {
+            const unsigned *value = (const unsigned *)((char *)node + 0x24);
+            out->offset = value[0];
+            out->size = value[1];
+            out->pak = (int)value[2];
+        }
+    } else {
+        std::string path(*name);
+        std::ifstream stream(path.c_str(), std::ios_base::_In | std::ios_base::_Binary, std::ios_base::_Openprot);
+        stream.seekg(0, 2);
+        std::fpos_int pos = stream.tellg();
+        stream.seekg(0, 0);
+        out->offset = 0;
+        out->size = (unsigned)pos.pos + (unsigned)pos.state;
+        out->pak = 0;
+    }
+    return out;
+}
+
 /* The ctor: the two maps, the embedded stream and the folder tree, then the ResourceN.pak chain.  Resource.pak
  * next to the exe is opened only for its size (its handle is kept), and the chain replaces the archive's copy of
  * CFileSystem's pak directory with the records of every pak that opens.  The original hands InitStringMap the

@@ -24,6 +24,9 @@ from unicorn.x86_const import *
 
 STOP = 0x0FFF0000        # return address of the call under test
 IMPBASE = 0x0FE00000     # fake addresses of imported functions
+# Imported data are read through their IAT slot, which points at a fake address: that address must hold the value
+# itself, not a stub.  std::string::npos is the only one the executables import as data.
+IMPORT_DATA = {'?npos@?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@2IB': 0xFFFFFFFF}
 HEAP = 0x20000000
 HEAP_SIZE = 0x01000000
 STACK = 0x30000000
@@ -102,8 +105,12 @@ class Harness:
                 fake = IMPBASE + 16 * k
                 k += 1
                 self.uc.mem_write(i.address, struct.pack('<I', fake))
-                self.uc.mem_write(fake, b'\xc3')
-                self.imp_by_addr[fake] = (e.dll.decode().lower(), (i.name or b'ord').decode())
+                name = (i.name or b'ord').decode()
+                if name in IMPORT_DATA:
+                    self.uc.mem_write(fake, struct.pack('<I', IMPORT_DATA[name]))
+                else:
+                    self.uc.mem_write(fake, b'\xc3')
+                self.imp_by_addr[fake] = (e.dll.decode().lower(), name)
         # the original bodies run from the original file's bytes, calling through the original import table (its
         # copy in the rebuilt image holds the unbound name RVAs): the same fake addresses there
         by_name = {v: a for a, v in self.imp_by_addr.items()}

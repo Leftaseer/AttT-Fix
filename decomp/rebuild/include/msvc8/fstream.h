@@ -23,6 +23,13 @@ public:
     enum { _Openprot = 0x40 };
 };
 
+/* std::fpos<int>: a streamoff position and the conversion state.  Only the position is read here; it sits at
+ * +00 and the state at +08, as the original software-pipeline code reads them. */
+struct fpos_int {
+    long long pos;
+    int state;
+};
+
 /* the ios_base subobject sits at vftable[1] bytes into the stream */
 template <class S>
 inline const void *stream_ios_base(const S *s)
@@ -49,6 +56,8 @@ public:
         __asm__("?read@?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV12@PADH@Z");
     MSVCP80_IMPORT basic_ifstream &seekg(long off, int dir)
         __asm__("?seekg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV12@JH@Z");
+    MSVCP80_IMPORT fpos_int tellg()
+        __asm__("?tellg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAE?AV?$fpos@H@2@XZ");
 
     bool fail() const { return ios_base_operator_not(stream_ios_base(this)); }
     bool operator!() const { return fail(); }

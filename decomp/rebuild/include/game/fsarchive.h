@@ -148,6 +148,18 @@ static_assert(__builtin_offsetof(FileSystemArchive, root) == 0xF0, "FileSystemAr
 /* "%d" through the shared sprintf buffer, as a string */
 std::string IntToString(int value); /* 0x576720 */
 
+/* where a name lives: the pak section of a pak entry, or offset 0 and the size of a file on disk */
+struct FsFileLocation {
+    unsigned offset; /* +00 */
+    unsigned size;   /* +04 */
+    int pak;         /* +08 */
+};
+
+/* A name with a drive is a disk path and only its size is reported; any other name is looked up (lowercased)
+ * in the archive's file map.  An unknown name yields a zero location. */
+FsFileLocation *__thiscall LocateArchiveFile(FileSystemArchive *archive, FsFileLocation *out,
+                                             const std::string *name); /* 0x576A90 */
+
 /* the singleton's lifetime and the object it builds; the ctor and the creator return the object in EAX */
 FileSystemArchive *__thiscall InitFileSystemArchive(FileSystemArchive *archive);      /* 0x576DD0 */
 void __thiscall DestroyFileSystemArchive(FileSystemArchive *archive);                 /* 0x576C90 */
