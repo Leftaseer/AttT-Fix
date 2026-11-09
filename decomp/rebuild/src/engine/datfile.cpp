@@ -1,14 +1,12 @@
 /* CDatFile: the keyword database and its lifetime (0x444D50 / 0x445130). */
 #include "game/common.h"
 #include "game/datfile.h"
+#include "game/delcom.h"
 
 ORIG_DATA(0060A560); /* CDatFile::vftable */
 ORIG_DATA(0060A4C4); /* CSingleton<CDatFile>::vftable */
 ORIG_DATA(0060A4B0); /* int[2]: the keyword count of each format set (3 and 8) */
 
-/* the dat reader of LoadSource (CDelCom, 0xB0 bytes: vftable, the current character, an ifstream, the text) */
-ORIG_THISCALL(00444AD0, void *, (void *self));                                     /* constructor */
-ORIG_THISCALL(00444B40, void, (void *self));                                       /* destructor */
 ORIG_THISCALL(00445630, void *, (void *self, void *result, const std::string *name)); /* reads the file into result */
 
 inline void *operator new(unsigned int, void *p) { return p; }
@@ -98,11 +96,6 @@ CDatFile::~CDatFile()
     vftable = d_0060A4C4;
 }
 
-/* the stack reader LoadSource constructs: only its address crosses the calls to 0x444AD0 / 0x445630 / 0x444B40 */
-struct DatReader {
-    alignas(4) unsigned char storage[0xB0];
-};
-
 /* the ten sources are a cache keyed by the file name: a hit just makes it current, a miss reads the file through
  * the reader (0x444AD0-0x444B40) and appends it (the table stops at 9). The original also catches the reader's
  * CGameException and rethrows it with " in file '<name>')" and DatFile.cpp:443; without exceptions the reader's
@@ -119,8 +112,7 @@ bool CDatFile::LoadSource(const std::string &file)
             return true;
         }
 
-    DatReader reader;
-    sub_00444AD0(&reader);
+    CDelCom reader;
     sources[sourceCount].name = file;
     /* the reader returns its text through the hidden result of a copy constructor into uninitialised storage */
     alignas(std::string) unsigned char textStorage[sizeof(std::string)];
@@ -131,7 +123,6 @@ bool CDatFile::LoadSource(const std::string &file)
     currentSource = sourceCount;
     if (sourceCount < 9)
         sourceCount++;
-    sub_00444B40(&reader);
     return true;
 }
 

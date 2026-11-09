@@ -4,7 +4,8 @@
  * (every original caller pushes a bool `1`, and MSVCP80's `ret 4`/`ret 0x10` confirms it), hence the explicit
  * asm labels and the extra parameter.
  *
- *   0x441DF0 (CConfig::LoadGraphicCfg) reserves 0xA0 bytes for each stream object on the stack.
+ *   The object is 0x8C bytes: the game's CDelCom (0xB0 bytes) holds one at +8 with its string at +0x94, and
+ *   CFileSystem allocates its pak streams with operator new(0x8C).
  */
 #pragma once
 #include "string.h"
@@ -50,7 +51,7 @@ public:
     explicit operator bool() const { return !fail(); }
 
 private:
-    alignas(4) unsigned char opaque[0xa0];
+    alignas(4) unsigned char opaque[0x8c];
 };
 
 template <class E, class Tr = char_traits<E>>

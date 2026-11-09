@@ -10,8 +10,9 @@ struct CReadInterfaceDat {
     void *vftable; /* +00 CSingleton<CReadInterfaceDat> */
     FsHashMap map; /* +04 the loaded records */
 
-    CReadInterfaceDat();  /* 0x4A7160 */
-    ~CReadInterfaceDat(); /* 0x4A70C0 */
+    CReadInterfaceDat();                    /* 0x4A7160 */
+    ~CReadInterfaceDat();                   /* 0x4A70C0 */
+    void Load(const std::string &name);     /* 0x4A71E0 */
 };
 static_assert(sizeof(CReadInterfaceDat) == 0x2C, "CReadInterfaceDat is 0x2C bytes");
 static_assert(__builtin_offsetof(CReadInterfaceDat, map) == 0x04, "CReadInterfaceDat::map");
