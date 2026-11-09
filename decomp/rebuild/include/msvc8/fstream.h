@@ -23,12 +23,18 @@ public:
     enum { _Openprot = 0x40 };
 };
 
-/* std::fpos<int>: a streamoff position and the conversion state.  Only the position is read here; it sits at
- * +00 and the state at +08, as the original software-pipeline code reads them. */
+/* std::fpos<int> as MSVCP80 passes it by value: 0x18 bytes.  The position sits at +00 (+04 stays padding, as the
+ * original leaves it); the conversion state follows at +08 and its first dword is zero, so the game's size
+ * readers add it to the position. */
 struct fpos_int {
-    long long pos;
-    int state;
+    unsigned pos;     /* +00 */
+    unsigned pad04;   /* +04 untouched by the original */
+    unsigned state0;  /* +08 */
+    unsigned stateC;  /* +0C */
+    unsigned state10; /* +10 */
+    unsigned pad14;   /* +14 */
 };
+static_assert(sizeof(fpos_int) == 0x18, "std::fpos<int> is 0x18 bytes");
 
 /* the ios_base subobject sits at vftable[1] bytes into the stream */
 template <class S>
@@ -56,6 +62,8 @@ public:
         __asm__("?read@?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV12@PADH@Z");
     MSVCP80_IMPORT basic_ifstream &seekg(long off, int dir)
         __asm__("?seekg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV12@JH@Z");
+    MSVCP80_IMPORT basic_ifstream &seekg(fpos_int pos)
+        __asm__("?seekg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAEAAV12@V?$fpos@H@2@@Z");
     MSVCP80_IMPORT fpos_int tellg()
         __asm__("?tellg@?$basic_istream@DU?$char_traits@D@std@@@std@@QAE?AV?$fpos@H@2@XZ");
 

@@ -9,7 +9,8 @@
  * and the insertions (0x577AD0 / 0x577B80).  The node is {next; prev; FsFileInfo}.
  *
  * Finally the archive itself (0x576DD0 and its lifetime): IntToString, the pak chain reader of the ctor, the
- * destructor and the singleton creator. */
+ * destructor and the singleton creator, plus the archive's file entry (0x432200 / 0x432010 / 0x576820): the
+ * ctor, the locator fill and the whole-file reader. */
 #include "game/common.h"
 #include "game/globals.h"
 #include "game/config.h"
@@ -360,10 +361,70 @@ FsFileLocation *__thiscall LocateArchiveFile(FileSystemArchive *archive, FsFileL
         std::fpos_int pos = stream.tellg();
         stream.seekg(0, 0);
         out->offset = 0;
-        out->size = (unsigned)pos.pos + (unsigned)pos.state;
+        out->size = pos.state0 + pos.pos;
         out->pak = 0;
     }
     return out;
+}
+
+/* ---------------------------------------------------------------------------------------------------------------
+ * FsFileEntry: one file of the archive.  The ctor (0x432200) caches the archive singleton in 0x8D10A4 and fills
+ * the entry through it (0x432010); Read (0x576820) loads the whole contents. */
+
+ORIG_DATA(008D10A4); /* the archive singleton the entry consults */
+ORIG_DATA(0060FA8B); /* "" - the name an entry the archive doesn't know ends up with */
+ORIG_DATA(0061D7FC); /* "Попытка прочитать несуществующий файл" */
+
+DECOMP(00432200)
+FsFileEntry::FsFileEntry(const std::string &fileName) : name()
+{
+    ORIG_VAR(008D10A4, void *) = ORIG_VAR(006C88D0, void *);
+    Locate(fileName);
+}
+
+/* Fills the entry from the archive's file map; a name it doesn't know has size 0 and loses its name. */
+DECOMP(00432010)
+void __thiscall FsFileEntry::Locate(const std::string &fileName)
+{
+    FsFileLocation location;
+    LocateArchiveFile((FileSystemArchive *)ORIG_VAR(008D10A4, void *), &location, &fileName);
+    size = location.size;
+    offset = location.offset;
+    name = fileName;
+    pak = location.pak;
+    if (size == 0)
+        name = ORIG_STR(0060FA8B);
+}
+
+/* Reads the whole file into a new buffer.  A name with a drive is opened as is, any other name through the
+ * ResourceN.pak it was found in; the buffer gets one terminating zero past the size.  The path is then replaced
+ * with the opened-files log (a debug leftover of the original; the assignment never takes effect). */
+DECOMP(00576820)
+char *__thiscall FsFileEntry::Read()
+{
+    if (name.empty()) {
+        std::string msg(ORIG_STR(0061D7FC));
+        std::string error(msg);
+        _CxxThrowException(&error, d_0069916C);
+    }
+
+    char *data = (char *)sub_005E3B10(size + 1);
+    std::string path;
+    if (name.find(':', 0) == std::string::npos) {
+        std::string digits = IntToString(pak);
+        path = ((nCfg::GamePath *)g_gamePath)->exePath + "Resource" + digits + ".pak";
+    } else {
+        path = name;
+    }
+
+    std::ifstream stream(path.c_str(), std::ios_base::_In | std::ios_base::_Binary, std::ios_base::_Openprot);
+    std::fpos_int pos = {offset, 0, 0, 0, 0, 0};
+    stream.seekg(pos);
+    stream.read(data, (int)size);
+    stream.close();
+    path = ((nCfg::GamePath *)g_gamePath)->exePath + "opened_files.log";
+    data[size] = 0;
+    return data;
 }
 
 /* The ctor: the two maps, the embedded stream and the folder tree, then the ResourceN.pak chain.  Resource.pak

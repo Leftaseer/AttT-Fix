@@ -160,6 +160,24 @@ struct FsFileLocation {
 FsFileLocation *__thiscall LocateArchiveFile(FileSystemArchive *archive, FsFileLocation *out,
                                              const std::string *name); /* 0x576A90 */
 
+/* An archive file entry (0x28 bytes): where a name lives plus the name itself.  A name the archive does not know
+ * is recorded with an empty name, and Read refuses it.  Read loads the whole file: from the ResourceN.pak named
+ * in the entry, or - when the name carries a drive - straight from disk. */
+struct FsFileEntry {
+    unsigned size;    /* +00 */
+    unsigned offset;  /* +04 */
+    std::string name; /* +08 */
+    int pak;          /* +24 */
+
+    FsFileEntry(const std::string &fileName); /* 0x432200 */
+    void Locate(const std::string &fileName); /* 0x432010 */
+    char *Read();                             /* 0x576820 */
+};
+static_assert(sizeof(FsFileEntry) == 0x28, "FsFileEntry is 0x28 bytes");
+static_assert(__builtin_offsetof(FsFileEntry, offset) == 0x04, "FsFileEntry::offset");
+static_assert(__builtin_offsetof(FsFileEntry, name) == 0x08, "FsFileEntry::name");
+static_assert(__builtin_offsetof(FsFileEntry, pak) == 0x24, "FsFileEntry::pak");
+
 /* the singleton's lifetime and the object it builds; the ctor and the creator return the object in EAX */
 FileSystemArchive *__thiscall InitFileSystemArchive(FileSystemArchive *archive);      /* 0x576DD0 */
 void __thiscall DestroyFileSystemArchive(FileSystemArchive *archive);                 /* 0x576C90 */
