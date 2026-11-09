@@ -3,13 +3,18 @@
  * a std::list<FsFolder>.  CFileSystem owns one archive object (embedded at +0x88) and uses the archive's
  * name -> folder map (the prefixes at +0xB4) to turn a virtual path into a directory outside the paks.
  *
+ * Next to the tree the archive keeps a file index: a hash map from a bare file name to the folder the file was
+ * found in and its size.  The map's nodes are std::list<FsFileInfo> nodes; the list's primitives are here as
+ * well (0x5778D0 / 0x577660 / 0x5778F0 / 0x577910 / 0x577830 / 0x577AB0 / 0x577AD0 / 0x577B80).
+ *
  * The list is laid out as MSVC 8 lays out std::list: a 4-byte empty allocator, the sentinel and the size.  The
- * sentinel is a FsFolderNode whose links form the ring; it has no value.  The list operations take the
- * position/sentinel node explicitly, as the original's library does.
+ * sentinel is a node whose links form the ring; it has no value.  The list operations take the position/sentinel
+ * node explicitly, as the original's library does.
  *
  * The constructors and destructor are spelled out as thiscall helpers (the original's ctor symbols are not
  * distinguishable by name in the build's symbol matching): InitFolder* create a folder in raw storage,
- * CopyFolder copies one into raw storage, DestroyFolder mirrors ~FsFolder.
+ * CopyFolder copies one into raw storage, DestroyFolder mirrors ~FsFolder; the constructors return the object in
+ * EAX, as the original's callers expect.
  */
 #pragma once
 #include "game/common.h"
@@ -68,6 +73,48 @@ FsFolder *__thiscall InitFolderNamed(FsFolder *folder, const std::string *name, 
 FsFolder *__thiscall CopyFolder(FsFolder *folder, const FsFolder *other);              /* 0x577B10 */
 void __thiscall DestroyFolder(FsFolder *folder);                                       /* 0x577A20 */
 FsFolder *__thiscall AddFolderChild(FsFolder *folder, const std::string *name);        /* 0x578A20 */
+
+/* the archive's file index value (0x24 bytes): a file found on disk, its bare name, the folder it lives in and
+ * its size; the folder's name is the directory prefix the index resolves the file to */
+struct FsFileInfo {
+    std::string name;  /* +00 */
+    FsFolder *folder;  /* +1C */
+    unsigned size;     /* +20 */
+};
+
+/* one node of the index's list (0x2C bytes) */
+struct FsFileNode {
+    FsFileNode *next; /* +00 */
+    FsFileNode *prev; /* +04 */
+    FsFileInfo value; /* +08 */
+};
+
+/* std::list<FsFileInfo> (0x0C bytes), the same layout as FsFolderList */
+struct FsFileList {
+    unsigned char allocator[4]; /* +00 */
+    FsFileNode *head;           /* +04 sentinel */
+    unsigned size;              /* +08 */
+};
+
+static_assert(sizeof(FsFileInfo) == 0x24, "FsFileInfo is 0x24 bytes");
+static_assert(__builtin_offsetof(FsFileInfo, folder) == 0x1C, "FsFileInfo::folder");
+static_assert(__builtin_offsetof(FsFileInfo, size) == 0x20, "FsFileInfo::size");
+static_assert(sizeof(FsFileNode) == 0x2C, "FsFileNode is 0x2C bytes");
+static_assert(__builtin_offsetof(FsFileNode, value) == 0x08, "FsFileNode::value");
+static_assert(sizeof(FsFileList) == 0x0C, "FsFileList is 0x0C bytes");
+static_assert(__builtin_offsetof(FsFileList, head) == 0x04, "FsFileList::head");
+static_assert(__builtin_offsetof(FsFileList, size) == 0x08, "FsFileList::size");
+
+/* the index's nodes and list: the value copier, the node factory, the size guard and the list's insertions.
+ * The list constructor 0x577AB0 stays the original (see fsarchive.cpp: its prototype data is inconsistent). */
+void __cdecl CopyFileInfo(FsFileInfo *info, const FsFileInfo *other);                      /* 0x577660 */
+void __stdcall ConstructFileInfo(FsFileInfo *info, const FsFileInfo *other);               /* 0x5778F0 */
+void __thiscall AddFileListSize(FsFileList *list, unsigned count);                         /* 0x577830 */
+FsFileNode *__stdcall CreateFileNode(FsFileNode *next, FsFileNode *prev, const FsFileInfo *info); /* 0x577910 */
+FsFileNode *__stdcall CreateFileNodeSentinel();                                            /* 0x5778D0 */
+void __thiscall InsertFile(FsFileList *list, FsFileNode *position, const FsFileInfo *info); /* 0x577AD0 */
+void __thiscall InsertFileRange(FsFileList *list, FsFileNode *position, FsFileNode *first,
+                                FsFileNode *last, const void *allocator);                  /* 0x577B80 */
 
 /* std::length_error("list<T> too long"), thrown by the list size guards of both the folders and the maps */
 [[noreturn]] void ThrowFsLengthError(); /* the object is laid out as MSVC 8's std::length_error */

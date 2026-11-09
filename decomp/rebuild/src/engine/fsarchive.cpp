@@ -2,7 +2,11 @@
  * (0x5777F0 / 0x577A90 / 0x5779A0 / 0x577620 / 0x577810 / 0x5787D0) and the folder itself with its children
  * (0x577C60 / 0x577CC0 / 0x577B10 / 0x577A20 / 0x578180 / 0x5788A0 / 0x578A20) and the list size guard
  * (0x470ED0).  These are the game's own instantiations of the file system library's list<FsFolder>; the list
- * node is {next; prev; FsFolder}. */
+ * node is {next; prev; FsFolder}.
+ *
+ * The archive's file index uses the same machinery for std::list<FsFileInfo>: the value copier (0x577660), its
+ * stdcall thunk (0x5778F0), the sentinel (0x5778D0), the node factory (0x577910), the size guard (0x577830)
+ * and the insertions (0x577AD0 / 0x577B80).  The node is {next; prev; FsFileInfo}. */
 #include "game/common.h"
 #include "game/fsarchive.h"
 
@@ -167,6 +171,85 @@ void __thiscall DestroyFolder(FsFolder *folder)
 {
     DestroyFolderList(&folder->children);
     folder->name.~basic_string();
+}
+
+/* The file index's value: a bare file name, the folder it was found in and its size.  The helper constructs
+ * the value in raw storage; it is the copy constructor of the node factory and of the range insertion. */
+DECOMP(00577660)
+void __cdecl CopyFileInfo(FsFileInfo *info, const FsFileInfo *other)
+{
+    if (!info)
+        return;
+    new (&info->name) std::string(other->name);
+    info->folder = other->folder;
+    info->size = other->size;
+}
+
+/* The stdcall thunk of the value copier (the node factory calls it in the original). */
+DECOMP(005778F0)
+void __stdcall ConstructFileInfo(FsFileInfo *info, const FsFileInfo *other)
+{
+    CopyFileInfo(info, other);
+}
+
+/* The sentinel of a file list: a bare 0x2C-byte node whose links point at itself. */
+DECOMP(005778D0)
+FsFileNode *__stdcall CreateFileNodeSentinel()
+{
+    FsFileNode *node = (FsFileNode *)operator new(sizeof(FsFileNode));
+    node->next = node;
+    node->prev = node;
+    return node;
+}
+
+/* The node factory: allocate, link, copy the value. */
+DECOMP(00577910)
+FsFileNode *__stdcall CreateFileNode(FsFileNode *next, FsFileNode *prev, const FsFileInfo *info)
+{
+    FsFileNode *node = (FsFileNode *)operator new(sizeof(FsFileNode));
+    node->next = next;
+    node->prev = prev;
+    CopyFileInfo(&node->value, info);
+    return node;
+}
+
+/* The list size guard: std::list<FsFileInfo>'s max_size is 0xFFFFFFFF / sizeof(FsFileInfo); growing past it
+ * throws. */
+DECOMP(00577830)
+void __thiscall AddFileListSize(FsFileList *list, unsigned count)
+{
+    if (0x71C71C7u - list->size < count)
+        ThrowFsLengthError();
+    list->size += count;
+}
+
+/* 0x577AB0 (the list constructor: a fresh sentinel, size 0, this in EAX) stays the original: the generated
+ * prototype records a second register parameter that the machine code does not read (convs.tsv), so build.py
+ * cannot pair the hand-written declaration with it.  The function has no references in the image. */
+
+/* Links a new node before position. */
+DECOMP(00577AD0)
+void __thiscall InsertFile(FsFileList *list, FsFileNode *position, const FsFileInfo *info)
+{
+    FsFileNode *created = CreateFileNode(position, position->prev, info);
+    AddFileListSize(list, 1);
+    position->prev = created;
+    created->prev->next = created;
+}
+
+/* Copies the [first, last) range of another list before position (the sentinel in every caller); the allocator
+ * of the library's insert is never read. */
+DECOMP(00577B80)
+void __thiscall InsertFileRange(FsFileList *list, FsFileNode *position, FsFileNode *first,
+                                FsFileNode *last, const void *allocator)
+{
+    (void)allocator;
+    for (FsFileNode *node = first; node != last; node = node->next) {
+        FsFileNode *created = CreateFileNode(position, position->prev, &node->value);
+        AddFileListSize(list, 1);
+        position->prev = created;
+        created->prev->next = created;
+    }
 }
 
 /* Creates the subfolder from a temporary {name; empty children; this} and returns it in the list. */
