@@ -39,6 +39,10 @@ public:
     MSVCP80_IMPORT void clear();
     MSVCP80_IMPORT void swap(basic_string &s);
 
+    /* VC8's operator[] takes its internal size tag (the import is named for that overload) */
+    MSVCP80_IMPORT E &operator[](size_type i)
+        __asm__("??A?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAEAADU_Size_type_nosscl@01@@Z");
+
     MSVCP80_IMPORT const E *c_str() const;
     MSVCP80_IMPORT const E *data() const;
     MSVCP80_IMPORT size_type size() const;

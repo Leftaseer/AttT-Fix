@@ -53,6 +53,11 @@ struct CDatFile {
     void ReadChar();                                /* 0x445240 takes the next character of the current source */
     void ReadToken();                               /* 0x445C60 takes the next token into tokenText */
     bool SelectKeyword(const std::string &keyword); /* 0x445CD0 finds the keyword line ("#keyword") in the source */
+
+    /* 0x445DB0 reads the records of the keyword: the file is a reference, the keyword came by value, so its 28-byte
+     * object is the seven dwords kw0..kw6 after it (the shim destroys it); *table gets records, *count recordCount */
+    bool ReadKeywords(const std::string *file, unsigned kw0, unsigned kw1, unsigned kw2, unsigned kw3,
+                      unsigned kw4, unsigned kw5, unsigned kw6, DatRecord **table, unsigned *count, int set);
 };
 static_assert(sizeof(CDatFile) == 0xBFC, "CDatFile is 0xBFC bytes");
 static_assert(__builtin_offsetof(CDatFile, tokenText) == 0x008, "CDatFile::tokenText");

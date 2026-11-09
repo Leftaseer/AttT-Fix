@@ -1,4 +1,4 @@
-/* CDatFile: the keyword database and its lifetime (0x444D50 / 0x445130). */
+/* CDatFile: the keyword database and its lifetime (0x444D50 / 0x445130 / 0x445DB0). */
 #include "game/common.h"
 #include "game/datfile.h"
 #include "game/delcom.h"
@@ -6,8 +6,31 @@
 ORIG_DATA(0060A560); /* CDatFile::vftable */
 ORIG_DATA(0060A4C4); /* CSingleton<CDatFile>::vftable */
 ORIG_DATA(0060A4B0); /* int[2]: the keyword count of each format set (3 and 8) */
+ORIG_DATA(0060A5A8); /* ".\\DatFile.cpp" */
+ORIG_DATA(0060A600); /* "Error in file '" */
+ORIG_DATA(0060A5EC); /* "' after keyword '" */
+ORIG_DATA(0060A5E4); /* "' - '" */
+ORIG_DATA(0060A5D4); /* " is not number" */
+ORIG_DATA(0060A610); /* "Invalid paramenter after keyword '" */
+ORIG_DATA(0060A634); /* "Don't find a '}' after keyword '" */
+ORIG_DATA(0060A660); /* "' in file '" */
+ORIG_DATA(0060A66C); /* "Can't find keyword '" */
+ORIG_DATA(0060A684); /* "Can't load file '" */
+ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
+
+ORIG_FN(005E3B10, void *, (unsigned int size)); /* operator new[] */
+ORIG_STDCALL(004452A0, unsigned char, (std::string text, float *out)); /* parses a token (the string by value) */
+
+extern "C" __declspec(dllimport) int __cdecl msvc_tolower(int c) __asm__("_tolower");
 
 inline void *operator new(unsigned int, void *p) { return p; }
+
+static void ThrowDatError(const std::string &msg, int line)
+{
+    CGameException e(msg, ORIG_STR(0060A5A8), line);
+    _CxxThrowException(&e, d_0069916C);
+    __builtin_unreachable();
+}
 
 /* a counted array of keyword pairs: the count sits in the word before the first element */
 static DatPair *AllocatePairs(int count)
@@ -171,4 +194,159 @@ bool CDatFile::SelectKeyword(const std::string &keyword)
         ReadToken();
     }
     return false;
+}
+
+static void ThrowKeywordError(const char *what, const std::string &keyword, const std::string &file, int line)
+{
+    ThrowDatError(std::string(what) + keyword + ORIG_STR(0060A660) + file + '\'', line);
+}
+
+static void ThrowNumberError(const std::string &file, const std::string &keyword, const std::string &token, int line)
+{
+    ThrowDatError(std::string(ORIG_STR(0060A600)) + file + ORIG_STR(0060A5EC) + keyword +
+                      ORIG_STR(0060A5E4) + token + ORIG_STR(0060A5D4), line);
+}
+
+/* releases the counted word arrays and the number arrays of the first count records */
+static void FreeRecords(CDatFile &dat, unsigned count)
+{
+    for (unsigned i = 0; i < count; i++) {
+        DatRecord &record = dat.records[i];
+        if (record.words) {
+            unsigned n = ((unsigned *)record.words)[-1];
+            for (unsigned j = 0; j < n; j++)
+                record.words[j].~basic_string();
+            operator delete[]((unsigned *)record.words - 1);
+            record.words = nullptr;
+        }
+        if (record.numbers) {
+            operator delete[](record.numbers);
+            record.numbers = nullptr;
+        }
+    }
+}
+
+/* the arrays of one record: the words are a counted array of strings (the count before the first one), the
+ * numbers a plain float array; a zero size leaves that array as it was, as the original does */
+static void AllocateRecord(CDatFile &dat, unsigned words, unsigned numbers)
+{
+    DatRecord &record = dat.records[dat.recordCount];
+    if (words) {
+        unsigned char *block = (unsigned char *)sub_005E3B10(4 + words * sizeof(std::string));
+        *(unsigned *)block = words;
+        std::string *strings = (std::string *)(block + 4);
+        for (unsigned i = 0; i < words; i++)
+            new (strings + i) std::string;
+        record.words = strings;
+    }
+    if (numbers)
+        record.numbers = (float *)sub_005E3B10(numbers * sizeof(float));
+}
+
+/* one format character of the current record: a word is the token, a number is the token parsed (a token that is
+ * not a number returns false) */
+static bool ReadField(CDatFile &dat, char format, unsigned &wordIndex, unsigned &numberIndex)
+{
+    DatRecord &record = dat.records[dat.recordCount];
+    if (format == 'w') {
+        record.words[wordIndex] = dat.tokenText;
+        wordIndex++;
+    } else if (format == 'n') {
+        float value;
+        if (!sub_004452A0(dat.tokenText, &value))
+            return false;
+        record.numbers[numberIndex] = value;
+        numberIndex++;
+    }
+    return true;
+}
+
+/* The records of a keyword.  The format of the entry ("w" a word, "n" a number) is either followed by
+ * "{ record record ... }" or by records that end at the line break; a token that is not a number, a missing
+ * keyword and a missing terminator throw (from DatFile.cpp). */
+static bool ReadKeywordRecords(CDatFile &dat, const std::string &file, std::string &keyword,
+                               DatRecord **table, unsigned *count, int set)
+{
+    dat.formatSet = set;
+
+    FreeRecords(dat, dat.recordCount);
+    dat.recordCount = 0;
+
+    if (!dat.LoadSource(file))
+        ThrowDatError(std::string(ORIG_STR(0060A684)) + file + '\'', 0x124);
+
+    for (unsigned i = 0; i < keyword.size(); i++)
+        keyword[i] = (char)msvc_tolower(keyword[i]);
+
+    if (!dat.SelectKeyword(keyword) && (set == 0 || set == 1))
+        ThrowKeywordError(ORIG_STR(0060A66C), keyword, file, 0x12E);
+
+    std::string &format = dat.formatSets[dat.formatSet][dat.keywordIndex].format;
+    unsigned wordsPerRecord = 0, numbersPerRecord = 0;
+    for (unsigned i = 0; i < format.size(); i++) {
+        if (format[i] == 'w')
+            wordsPerRecord++;
+        else if (format[i] == 'n')
+            numbersPerRecord++;
+    }
+
+    bool multiline = false;
+    dat.ReadToken();
+    if (dat.token == '\n')
+        multiline = true;
+
+    if (dat.tokenText == "{") {
+        dat.ReadToken();
+        while (dat.tokenText != "}") {
+            if (dat.tokenText.empty())
+                ThrowKeywordError(ORIG_STR(0060A634), keyword, file, 0x147);
+            AllocateRecord(dat, wordsPerRecord, numbersPerRecord);
+            unsigned wordIndex = 0, numberIndex = 0;
+            for (unsigned i = 0; i < format.size(); i++) {
+                if (dat.tokenText.empty())
+                    ThrowKeywordError(ORIG_STR(0060A610), keyword, file, 0x154);
+                if (!ReadField(dat, format[i], wordIndex, numberIndex))
+                    ThrowNumberError(file, keyword, dat.tokenText, 0x15E);
+                dat.ReadToken();
+            }
+            dat.recordCount++;
+        }
+    } else {
+        bool done = false;
+        while (!done) {
+            AllocateRecord(dat, wordsPerRecord, numbersPerRecord);
+            unsigned wordIndex = 0, numberIndex = 0;
+            for (unsigned i = 0; i < format.size(); i++) {
+                if (dat.tokenText.empty())
+                    ThrowKeywordError(ORIG_STR(0060A610), keyword, file, 0x180);
+                if (!ReadField(dat, format[i], wordIndex, numberIndex))
+                    ThrowNumberError(file, keyword, dat.tokenText, 0x18A);
+                if (multiline) {
+                    done = true;
+                    break;
+                }
+                dat.ReadToken();
+                if (dat.token == '\n')
+                    multiline = true;
+            }
+            dat.recordCount++;
+        }
+    }
+
+    *table = dat.records;
+    *count = dat.recordCount;
+    return true;
+}
+
+/* The keyword object came by value in the seven dwords kw0..kw6, which the original callee destroys; the shim
+ * forwards to the readable reader.  A throw leaves the string for the caller's unhandled exception, as the rest
+ * of the rebuilt reader does. */
+DECOMP(00445DB0)
+bool CDatFile::ReadKeywords(const std::string *file, unsigned kw0, unsigned kw1, unsigned kw2, unsigned kw3,
+                            unsigned kw4, unsigned kw5, unsigned kw6, DatRecord **table, unsigned *count, int set)
+{
+    std::string &keyword = *(std::string *)(void *)&kw0;
+    bool ok = ReadKeywordRecords(*this, *file, keyword, table, count, set);
+    keyword.~basic_string();
+    return ok;
 }
