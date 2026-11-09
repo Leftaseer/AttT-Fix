@@ -9,13 +9,137 @@
 #include "game/common.h"
 #include "game/filesystem.h"
 
-/* an engine vector: an empty allocator and the three pointers. Its elements are game structures the record keeps
- * opaque (their destructors are the originals at 0x422B90 / 0x422BF0 / 0x422C50 / 0x420F10 / 0x420F90). */
+/* The elements of the keyword lines: a name and a few strings and numbers in the order of the tokens. The
+ * numbers after the 0x105 token (x2/y2 here) are an optional pair; the parser zeroes it when the token is
+ * absent. Only the strings need construction, the numbers stay uninitialised until the parser fills them. */
+
+/* keyword 0x143 element */
+struct InterfaceItem4C {
+    std::string name;      /* +000 lowercased */
+    std::string text;      /* +01C */
+    unsigned char flag;    /* +038 the low byte of the first number token */
+    float x;               /* +03C */
+    float y;               /* +040 */
+    float x2;              /* +044 */
+    float y2;              /* +048 */
+
+    void Read(); /* 0x4A1A60 */
+};
+static_assert(sizeof(InterfaceItem4C) == 0x4C, "InterfaceItem4C is 0x4C bytes");
+static_assert(__builtin_offsetof(InterfaceItem4C, text) == 0x01C, "InterfaceItem4C::text");
+static_assert(__builtin_offsetof(InterfaceItem4C, flag) == 0x038, "InterfaceItem4C::flag");
+static_assert(__builtin_offsetof(InterfaceItem4C, x) == 0x03C, "InterfaceItem4C::x");
+static_assert(__builtin_offsetof(InterfaceItem4C, x2) == 0x044, "InterfaceItem4C::x2");
+
+/* keyword 0x144 element */
+struct InterfaceItem48 {
+    std::string name; /* +000 lowercased */
+    std::string text; /* +01C */
+    float x;          /* +038 */
+    float y;          /* +03C */
+    float x2;         /* +040 */
+    float y2;         /* +044 */
+
+    void Read(); /* 0x4A1B10 */
+};
+static_assert(sizeof(InterfaceItem48) == 0x48, "InterfaceItem48 is 0x48 bytes");
+static_assert(__builtin_offsetof(InterfaceItem48, text) == 0x01C, "InterfaceItem48::text");
+static_assert(__builtin_offsetof(InterfaceItem48, x) == 0x038, "InterfaceItem48::x");
+static_assert(__builtin_offsetof(InterfaceItem48, x2) == 0x040, "InterfaceItem48::x2");
+
+/* keyword 0x145 element */
+struct InterfaceItem2C {
+    std::string name; /* +000 */
+    float x;          /* +01C */
+    float y;          /* +020 */
+    float x2;         /* +024 */
+    float y2;         /* +028 */
+};
+static_assert(sizeof(InterfaceItem2C) == 0x2C, "InterfaceItem2C is 0x2C bytes");
+static_assert(__builtin_offsetof(InterfaceItem2C, x) == 0x01C, "InterfaceItem2C::x");
+static_assert(__builtin_offsetof(InterfaceItem2C, x2) == 0x024, "InterfaceItem2C::x2");
+
+/* keyword 0x146 element */
+struct InterfaceItem64 {
+    std::string name;     /* +000 */
+    float x;              /* +01C */
+    float y;              /* +020 */
+    unsigned char flag;   /* +024 the first character of its token */
+    std::string text1;    /* +028 */
+    float z;              /* +044 */
+    std::string text2;    /* +048 */
+};
+static_assert(sizeof(InterfaceItem64) == 0x64, "InterfaceItem64 is 0x64 bytes");
+static_assert(__builtin_offsetof(InterfaceItem64, flag) == 0x024, "InterfaceItem64::flag");
+static_assert(__builtin_offsetof(InterfaceItem64, text1) == 0x028, "InterfaceItem64::text1");
+static_assert(__builtin_offsetof(InterfaceItem64, z) == 0x044, "InterfaceItem64::z");
+static_assert(__builtin_offsetof(InterfaceItem64, text2) == 0x048, "InterfaceItem64::text2");
+
+/* keyword 0x14A element */
+struct InterfaceItemE4 {
+    std::string name;     /* +000 */
+    float x;              /* +01C */
+    float y;              /* +020 */
+    unsigned char flag;   /* +024 the first character of its token */
+    std::string text1;    /* +028 */
+    float z;              /* +044 */
+    std::string text2;    /* +048 */
+    float u;              /* +064 */
+    float v;              /* +068 */
+    unsigned char flag2;  /* +06C the first character of its token */
+    std::string text3;    /* +070 */
+    float w;              /* +08C */
+    std::string text4;    /* +090 */
+    std::string text5;    /* +0AC */
+    std::string text6;    /* +0C8 the name without its last character, lowercased */
+};
+static_assert(sizeof(InterfaceItemE4) == 0xE4, "InterfaceItemE4 is 0xE4 bytes");
+static_assert(__builtin_offsetof(InterfaceItemE4, flag) == 0x024, "InterfaceItemE4::flag");
+static_assert(__builtin_offsetof(InterfaceItemE4, text1) == 0x028, "InterfaceItemE4::text1");
+static_assert(__builtin_offsetof(InterfaceItemE4, text3) == 0x070, "InterfaceItemE4::text3");
+static_assert(__builtin_offsetof(InterfaceItemE4, text6) == 0x0C8, "InterfaceItemE4::text6");
+
+/* keyword 0x14C element */
+struct InterfaceItem118 {
+    std::string name;     /* +000 */
+    float x;              /* +01C */
+    float y;              /* +020 */
+    unsigned char flag;   /* +024 the first character of its token */
+    std::string text1;    /* +028 */
+    float z;              /* +044 */
+    std::string text2;    /* +048 */
+    float u;              /* +064 */
+    float v;              /* +068 */
+    float w;              /* +06C */
+    unsigned char flag2;  /* +070 the first character of its token */
+    std::string text3;    /* +074 */
+    float a;              /* +090 */
+    std::string text4;    /* +094 */
+    float b;              /* +0B0 */
+    std::string text5;    /* +0B4 */
+    float c;              /* +0D0 */
+    float d;              /* +0D4 */
+    unsigned char flag3;  /* +0D8 the first character of its token */
+    std::string text6;    /* +0DC */
+    float e;              /* +0F8 */
+    std::string text7;    /* +0FC */
+};
+static_assert(sizeof(InterfaceItem118) == 0x118, "InterfaceItem118 is 0x118 bytes");
+static_assert(__builtin_offsetof(InterfaceItem118, flag) == 0x024, "InterfaceItem118::flag");
+static_assert(__builtin_offsetof(InterfaceItem118, text3) == 0x074, "InterfaceItem118::text3");
+static_assert(__builtin_offsetof(InterfaceItem118, text7) == 0x0FC, "InterfaceItem118::text7");
+
+/* an engine vector: an empty allocator and the three pointers. Its elements are the interface items above
+ * (their destructors are the originals at 0x422B90 / 0x422BF0 / 0x422C50 / 0x420F10 / 0x420F90). */
 struct InterfaceVector {
     unsigned char allocator[4]; /* +00 */
     void *begin;                /* +04 */
     void *end;                  /* +08 */
     void *limit;                /* +0C */
+
+    void ReadItems64();  /* 0x4A6C00 keyword 0x146 */
+    void ReadItemsE4();  /* 0x4A61C0 keyword 0x14A */
+    void ReadItems118(); /* 0x4A63B0 keyword 0x14C */
 };
 static_assert(sizeof(InterfaceVector) == 0x10, "InterfaceVector is 0x10 bytes");
 
@@ -26,8 +150,13 @@ struct InterfaceCollection {
     void *begin;                /* +20 */
     void *end;                  /* +24 */
     void *limit;                /* +28 */
+
+    void ReadItems4C(); /* 0x4A5F00 keyword 0x143 */
+    void ReadItems48(); /* 0x4A5FD0 keyword 0x144 */
+    void ReadItems2C(); /* 0x4A60A0 keyword 0x145 */
 };
 static_assert(sizeof(InterfaceCollection) == 0x2C, "InterfaceCollection is 0x2C bytes");
+static_assert(__builtin_offsetof(InterfaceCollection, allocator) == 0x1C, "InterfaceCollection::allocator");
 
 /* One record of the interface dat. The parser keywords: 0x142 two strings ("text142"), 0x143/0x144/0x145 three
  * titled vectors, 0x146 a vector, 0x147 a string, 0x149 four floats (x, y and optionally x2, y2), 0x14A/0x14C two

@@ -19,13 +19,17 @@ ORIG_FN(00470410, int, ());                                            /* the ne
 ORIG_THISCALL(00424270, void *, (void *map, const void *key));         /* find the record's node, or insert one */
 
 /* the keyword parsers of the record fields (they read through the same lexer and leave the token global advanced) */
-ORIG_FASTCALL(004A5F00, void, (void *collection)); /* 0x143: titled vector, 0x4C-byte elements */
-ORIG_FASTCALL(004A5FD0, void, (void *collection)); /* 0x144: titled vector, 0x48-byte elements */
-ORIG_FASTCALL(004A60A0, void, (void *collection)); /* 0x145: titled vector, 0x2C-byte elements */
-ORIG_FASTCALL(004A61C0, void, (void *vector));     /* 0x14A: vector, 0xE4-byte elements */
-ORIG_FASTCALL(004A63B0, void, (void *vector));     /* 0x14C: vector, 0x118-byte elements */
-ORIG_FASTCALL(004A6C00, void, (void *vector));     /* 0x146: vector, 0x64-byte elements */
 ORIG_FASTCALL(004A1CA0, void, (float *floats));    /* 0x149: x, y and optionally x2, y2 */
+
+/* the vector append of each element type */
+ORIG_THISCALL(004A54F0, void, (void *vector, const void *item)); /* 0x4C-byte elements */
+ORIG_THISCALL(004A5710, void, (void *vector, const void *item)); /* 0x48-byte elements */
+ORIG_THISCALL(004A5930, void, (void *vector, const void *item)); /* 0x2C-byte elements */
+ORIG_THISCALL(004A6B70, void, (void *vector, const void *item)); /* 0x64-byte elements */
+ORIG_THISCALL(004A5BB0, void, (void *vector, const void *item)); /* 0xE4-byte elements */
+ORIG_THISCALL(004A5DF0, void, (void *vector, const void *item)); /* 0x118-byte elements */
+
+extern "C" __declspec(dllimport) char *__cdecl _strlwr(char *s); /* 0x607414 */
 
 /* vector assignment of the element types (std::vector::operator= of the game's own classes) */
 ORIG_THISCALL(004A5360, void *, (void *vector, const void *other)); /* 0x4C-byte elements */
@@ -121,6 +125,268 @@ InterfaceRecord &InterfaceRecord::operator=(const InterfaceRecord &other)
     return *this;
 }
 
+/* An element line: the name token is already the current one, the parser reads the rest itself and leaves the
+ * token global on the next line's first token. Numbers after a 0x105 token are the optional x2/y2 pair. */
+DECOMP(004A1A60)
+void InterfaceItem4C::Read()
+{
+    name = _strlwr(d_006C9068);
+    sub_00470410();
+    text = (const char *)d_006C9068;
+    sub_00470410();
+    flag = (unsigned char)(int)ORIG_VAR(006C9060, float);
+    sub_00470410();
+    x = ORIG_VAR(006C9060, float);
+    sub_00470410();
+    y = ORIG_VAR(006C9060, float);
+
+    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    if (ORIG_VAR(006CA2BC, int) != 0x105) {
+        x2 = 0;
+        y2 = 0;
+        return;
+    }
+    x2 = ORIG_VAR(006C9060, float);
+    sub_00470410();
+    y2 = ORIG_VAR(006C9060, float);
+    ORIG_VAR(006CA2BC, int) = sub_00470410();
+}
+
+DECOMP(004A1B10)
+void InterfaceItem48::Read()
+{
+    name = _strlwr(d_006C9068);
+    sub_00470410();
+    text = (const char *)d_006C9068;
+    sub_00470410();
+    x = ORIG_VAR(006C9060, float);
+    sub_00470410();
+    y = ORIG_VAR(006C9060, float);
+
+    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    if (ORIG_VAR(006CA2BC, int) != 0x105) {
+        x2 = 0;
+        y2 = 0;
+        return;
+    }
+    x2 = ORIG_VAR(006C9060, float);
+    sub_00470410();
+    y2 = ORIG_VAR(006C9060, float);
+    ORIG_VAR(006CA2BC, int) = sub_00470410();
+}
+
+/* A titled block: "title { lines }"; the opening brace is read and dropped, the block ends on token 0x103. */
+DECOMP(004A5F00)
+void InterfaceCollection::ReadItems4C()
+{
+    sub_00470410();
+    title = (const char *)d_006C9068;
+    sub_00470410();
+
+    InterfaceItem4C item;
+    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    while (ORIG_VAR(006CA2BC, int) != 0x103) {
+        item.Read();
+        sub_004A54F0(&allocator, &item);
+    }
+}
+
+DECOMP(004A5FD0)
+void InterfaceCollection::ReadItems48()
+{
+    sub_00470410();
+    title = (const char *)d_006C9068;
+    sub_00470410();
+
+    InterfaceItem48 item;
+    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    while (ORIG_VAR(006CA2BC, int) != 0x103) {
+        item.Read();
+        sub_004A5710(&allocator, &item);
+    }
+}
+
+DECOMP(004A60A0)
+void InterfaceCollection::ReadItems2C()
+{
+    sub_00470410();
+    title = (const char *)d_006C9068;
+    sub_00470410();
+
+    InterfaceItem2C item;
+    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    while (ORIG_VAR(006CA2BC, int) != 0x103) {
+        item.name = (const char *)d_006C9068;
+        sub_00470410();
+        item.x = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.y = ORIG_VAR(006C9060, float);
+
+        ORIG_VAR(006CA2BC, int) = sub_00470410();
+        if (ORIG_VAR(006CA2BC, int) == 0x105) {
+            item.x2 = ORIG_VAR(006C9060, float);
+            sub_00470410();
+            item.y2 = ORIG_VAR(006C9060, float);
+            ORIG_VAR(006CA2BC, int) = sub_00470410();
+        } else {
+            item.x2 = 0;
+            item.y2 = 0;
+        }
+        sub_004A5930(&allocator, &item);
+    }
+}
+
+DECOMP(004A6C00)
+void InterfaceVector::ReadItems64()
+{
+    sub_00470410();
+
+    InterfaceItem64 item;
+    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    while (ORIG_VAR(006CA2BC, int) != 0x103) {
+        item.name = (const char *)d_006C9068;
+        sub_00470410();
+        item.x = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.y = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.flag = d_006C9068[0];
+        sub_00470410();
+        item.text1 = (const char *)d_006C9068;
+        sub_00470410();
+        item.z = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.text2 = (const char *)d_006C9068;
+
+        sub_004A6B70(this, &item);
+        ORIG_VAR(006CA2BC, int) = sub_00470410();
+    }
+}
+
+/* The 0x14A lines keep the name twice: the raw token and, at +0xC8, the token without its last character,
+ * lowercased. */
+DECOMP(004A61C0)
+void InterfaceVector::ReadItemsE4()
+{
+    sub_00470410();
+
+    InterfaceItemE4 item;
+    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    while (ORIG_VAR(006CA2BC, int) != 0x103) {
+        item.name = (const char *)d_006C9068;
+        d_006C9068[strlen(d_006C9068) - 1] = '\0';
+        _strlwr(d_006C9068);
+        item.text6 = (const char *)d_006C9068;
+
+        sub_00470410();
+        item.x = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.y = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.flag = d_006C9068[0];
+        sub_00470410();
+        item.text1 = (const char *)d_006C9068;
+        sub_00470410();
+        item.z = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.text2 = (const char *)d_006C9068;
+        sub_00470410();
+        item.u = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.v = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.flag2 = d_006C9068[0];
+        sub_00470410();
+        item.text3 = (const char *)d_006C9068;
+        sub_00470410();
+        item.w = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.text4 = (const char *)d_006C9068;
+        sub_00470410();
+        item.text5 = (const char *)d_006C9068;
+
+        sub_004A5BB0(this, &item);
+        ORIG_VAR(006CA2BC, int) = sub_00470410();
+    }
+}
+
+DECOMP(004A63B0)
+void InterfaceVector::ReadItems118()
+{
+    sub_00470410();
+
+    InterfaceItem118 item;
+    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    while (ORIG_VAR(006CA2BC, int) != 0x103) {
+        item.name = (const char *)d_006C9068;
+        sub_00470410();
+        item.x = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.y = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.flag = d_006C9068[0];
+        sub_00470410();
+        item.text1 = (const char *)d_006C9068;
+        sub_00470410();
+        item.z = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.text2 = (const char *)d_006C9068;
+        sub_00470410();
+        item.u = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.v = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.w = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.flag2 = d_006C9068[0];
+        sub_00470410();
+        item.text3 = (const char *)d_006C9068;
+        sub_00470410();
+        item.a = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.text4 = (const char *)d_006C9068;
+        sub_00470410();
+        item.b = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.text5 = (const char *)d_006C9068;
+        sub_00470410();
+        item.c = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.d = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.flag3 = d_006C9068[0];
+        sub_00470410();
+        item.text6 = (const char *)d_006C9068;
+        sub_00470410();
+        item.e = ORIG_VAR(006C9060, float);
+        sub_00470410();
+        item.text7 = (const char *)d_006C9068;
+
+        sub_004A5DF0(this, &item);
+        ORIG_VAR(006CA2BC, int) = sub_00470410();
+    }
+}
+
+DECOMP(004A1CA0)
+void __fastcall ReadFloats149(float *floats)
+{
+    sub_00470410();
+    floats[0] = ORIG_VAR(006C9060, float);
+    sub_00470410();
+    floats[1] = ORIG_VAR(006C9060, float);
+
+    ORIG_VAR(006CA2BC, int) = sub_00470410();
+    if (ORIG_VAR(006CA2BC, int) != 0x105) {
+        floats[2] = 0;
+        floats[3] = 0;
+        return;
+    }
+    floats[2] = ORIG_VAR(006C9060, float);
+    sub_00470410();
+    floats[3] = ORIG_VAR(006C9060, float);
+    ORIG_VAR(006CA2BC, int) = sub_00470410();
+}
+
 /* The record's keywords up to the closing token 0x103. A keyword parser consumes its whole line, so the token
  * global already holds the next keyword; 0x149 advances it itself, so it goes straight back to the check. */
 DECOMP(004A6D30)
@@ -142,33 +408,33 @@ void InterfaceRecord::Read()
             text142[1] = (const char *)d_006C9068;
             break;
         case 0x143:
-            sub_004A5F00(&items143);
+            items143.ReadItems4C();
             break;
         case 0x144:
-            sub_004A5FD0(&items144);
+            items144.ReadItems48();
             break;
         case 0x145:
-            sub_004A60A0(&items145);
+            items145.ReadItems2C();
             break;
         case 0x146:
-            sub_004A6C00(&items146);
+            items146.ReadItems64();
             break;
         case 0x147:
             sub_00470410();
             text147 = (const char *)d_006C9068;
             break;
         case 0x149:
-            sub_004A1CA0(floats149);
+            ReadFloats149(floats149);
             continue;
         case 0x14A:
-            sub_004A61C0(&items14A);
+            items14A.ReadItemsE4();
             break;
         case 0x14B:
             sub_00470410();
             number14B = ORIG_VAR(006C9060, float);
             break;
         case 0x14C:
-            sub_004A63B0(&items14C);
+            items14C.ReadItems118();
             break;
         }
 

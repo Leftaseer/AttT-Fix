@@ -856,6 +856,10 @@ class Harness:
         import re as _re
         m = _re.match(rb'\s*([+-]?\d+)', self._cstr(self._arg(0)))
         self._ret(int(m.group(1)) & 0xFFFFFFFF if m else 0)
+    def crt_atof(self):
+        import re as _re
+        m = _re.match(rb'\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)', self._cstr(self._arg(0)))
+        self._ret_double(float(m.group(1)) if m else 0.0)
     def crt_tolower(self):
         c = self._arg(0) & 0xFFFFFFFF; self._ret(c + 32 if 65 <= c <= 90 else c)
     def crt_toupper(self):
