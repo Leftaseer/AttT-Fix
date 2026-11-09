@@ -40,6 +40,15 @@ CConsole::CConsole() : vftable(d_0060A2B8), updater(std::string(""), nullptr)
     gameFolder = "";
 }
 
+/* The original restores the console vtables first, then destroys the game folder, the 200 lines, the string at
+ * +0x3C and the updater, and finally drops to the CSingleton vtable; the member destructors make no virtual calls
+ * and none of them writes +0, so only the last store matters here. */
+DECOMP(004427E0)
+CConsole::~CConsole()
+{
+    vftable = d_0060A2B8;
+}
+
 /* Despite the name, the original never reads the log file name: it recomputes the game folder from the exe's full
  * path - cut after its last backslash, with a trailing backslash - and only the caller's "game.log" is unused. */
 DECOMP(004425E0)

@@ -63,6 +63,7 @@ struct CConsole {                            /* 0x1658 bytes */
     char pad1654[4];                         /* +1654 the allocation is 0x1658 bytes; neither ctor nor dtor touches it */
 
     CConsole();                              /* 0x4426E0 */
+    ~CConsole();                             /* 0x4427E0 */
     static CConsole *Instance();             /* 0x42F050 */
     void OpenLog(const std::string &name);   /* 0x4425E0 */
     std::string &GameFolder();               /* 0x441C50 */
