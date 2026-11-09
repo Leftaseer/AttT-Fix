@@ -21,6 +21,20 @@ std::string &CConsole::GameFolder()
     return *(std::string *)((char *)this + 0x1638);
 }
 
+/* Despite the name, the original never reads the log file name: it recomputes the game folder from the exe's full
+ * path - cut after its last backslash, with a trailing backslash - and only the caller's "game.log" is unused. */
+DECOMP(004425E0)
+void CConsole::OpenLog(const std::string &name)
+{
+    char path[MAX_PATH];
+    GetModuleFileNameA(GetModuleHandleA(nullptr), path, MAX_PATH);
+
+    std::string &folder = GameFolder();
+    folder = path;
+    folder = folder.substr(0, folder.rfind("\\", std::string::npos));
+    folder += "\\";
+}
+
 DECOMP(00441D10)
 CConfig::CConfig() : configDir(""), gameDir()
 {

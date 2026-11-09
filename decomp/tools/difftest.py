@@ -57,6 +57,7 @@ STRING_ALIAS = {
     '??A' + _S + 'QAEAADU_Size_type_nosscl@01@@Z': 'str_index',
     '?erase@' + _S + 'QAEAAV12@II@Z': 'str_erase',
     '?substr@' + _S + 'QBE?AV12@II@Z': 'str_substr', '?find@' + _S + 'QBEIDI@Z': 'str_find_char',
+    '?rfind@' + _S + 'QBEIPBDI@Z': 'str_rfind_cstr', '?rfind@' + _S + 'QBEIDI@Z': 'str_rfind_char',
     # (free operators, __cdecl: a result string through a hidden pointer first)
     _OP + '?HDU' + _T + 'YA?AV' + _B + 'ABV10@PBD@Z': 'str_plus_cstr',
     _OP + '?HDU' + _T + 'YA?AV' + _B + 'PBDABV10@@Z': 'str_cstr_plus',
@@ -425,6 +426,15 @@ class Harness:
             i = self._str_get(t).find(bytes([c]), pos)
             return 0xFFFFFFFF if i < 0 else i
         self._str_op(go, 8, ret_this=False)
+    def _str_rfind(self, make_needle):
+        def go(t):
+            needle, b, pos = make_needle(), self._str_get(t), self._arg(1)
+            # the match may start at any index up to pos but must lie inside the string
+            i = b.rfind(needle, 0, min(len(b), pos + len(needle)))
+            return 0xFFFFFFFF if i < 0 else i
+        self._str_op(go, 8, ret_this=False)
+    def crt_str_rfind_cstr(self): self._str_rfind(lambda: self._cstr(self._arg(0)))
+    def crt_str_rfind_char(self): self._str_rfind(lambda: bytes([self._arg(0) & 0xFF]))
     def _str_free(self, fn):
         try:
             r = fn()
