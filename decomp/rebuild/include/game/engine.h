@@ -4,8 +4,9 @@
 #include "game/common.h"
 
 /* CUpdateObject: the updatable base of the engine's object tree (0x38 bytes, vtable 0x607D5C); the frame update
- * calls Update, which accumulates the time and runs Tick in fixed steps.  Its vtable is a plain field as in the
- * other translated classes and the slots are called through it. */
+ * (slot 1, UpdateObjectFrame in updateobject.cpp) accumulates the time and runs Tick in fixed steps.  Its vtable is
+ * a plain field as in the other translated classes and the slots are called through it.  A derived class replaces
+ * slot 1 (CInput's reads DirectInput), so callers outside the tree dispatch it (UpdateObject). */
 struct CUpdateObject {
     void *vftable;                           /* +00 */
     void *link;                              /* +04 */
@@ -17,18 +18,26 @@ struct CUpdateObject {
     bool attached;                           /* +34 */
 
     CUpdateObject(const std::string &name, CUpdateObject *parent);   /* 0x424D00 */
-    void Update(float dt) { ((void (__thiscall *)(CUpdateObject *, float))((void **)vftable)[1])(this, dt); }
+    void Tick() { ((void (__thiscall *)(CUpdateObject *))((void **)vftable)[5])(this); }
+    void StepsDone(int count) { ((void (__thiscall *)(CUpdateObject *, int))((void **)vftable)[9])(this, count); }
     void Render() { ((void (__thiscall *)(CUpdateObject *))((void **)vftable)[2])(this); }
 };
 static_assert(sizeof(CUpdateObject) == 0x38, "CUpdateObject is 0x38 bytes");
 static_assert(__builtin_offsetof(CUpdateObject, name) == 0x08, "CUpdateObject::name");
 static_assert(__builtin_offsetof(CUpdateObject, parent) == 0x2C, "CUpdateObject::parent");
 
+/* the frame update of an object as its own class implements it (slot 1) */
+inline void UpdateObject(CUpdateObject *object, float dt)
+{
+    ((void (__thiscall *)(CUpdateObject *, float))((void **)object->vftable)[1])(object, dt);
+}
+
 /* A CUpdateObject embedded in a larger object (CInput +4, the GUI +4): only its vtable is named here, the rest of
  * the 0x38 bytes belongs to the owner's layout. */
 struct CUpdatePart {
     void *vftable;
     CUpdateObject *operator->() { return (CUpdateObject *)this; }
+    void Update(float dt) { UpdateObject((CUpdateObject *)this, dt); }
 };
 
 struct CScene {                              /* CScene / GUIScene / CWorldLevel, primary vtable */

@@ -64,11 +64,11 @@ bool CEngine::HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     bool used = scene->HandleMessage(hwnd, msg, wp, lp);
     if (used) {
         if (msg != WM_MOUSEMOVE && IsMouseMessage(msg)) {
-            CInput::Instance()->updater->Update(0.0f);
+            CInput::Instance()->updater.Update(0.0f);
             CInput::Instance()->ResetMouse();
         }
         if (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_CHAR) {
-            CInput::Instance()->updater->Update(0.0f);
+            CInput::Instance()->updater.Update(0.0f);
             CInput::Instance()->ResetKeys();
         }
     }
@@ -581,7 +581,7 @@ void CEngine::Frame()
     RankWatch((void *)scene, (unsigned)frameCount);
 #endif
     g_updateRoot->Update(dt);
-    input->updater->Update(dt);
+    input->updater.Update(dt);
 #ifdef DECOMP_TEST_INPUT
     if (g_testDik) {                         /* one more event of this frame (the buffer holds 0x40) */
         if (input->keyCount < 0x40) {
@@ -607,9 +607,9 @@ void CEngine::Frame()
         else if (k.dik == 0xC5)              /* DIK_PAUSE */
             timers->frame.paused = !timers->frame.paused;
     }
-    overlay->Update(dt);
+    UpdateObject(overlay, dt);
     scene->Update(dt);
-    gui->updater->Update(dt);
+    gui->updater.Update(dt);
 #ifdef DECOMP_TEST_INPUT
     TestLua();
 #endif
