@@ -42,6 +42,7 @@ struct FsHashMap {
 
     unsigned BucketIndex(const unsigned *key) const;        /* 0x450D20 */
     void FindInt(FsIntNode **node, const int *key) const;   /* 0x450DA0 */
+    void FindString(FsStringNode **node, const std::string *key) const; /* 0x450E60 */
 };
 static_assert(sizeof(FsHashMap) == 0x28, "FsHashMap is 0x28 bytes");
 
@@ -72,13 +73,16 @@ struct CFileSystem {
     unsigned char pad7D[3];
     std::ifstream *currentStream; /* +80 stream of the last pak */
     FsStringNode *lastEntry;      /* +84 node found by the last OpenFile */
-    unsigned char embedded[0x30]; /* +88 file system object, built by 0x577C60: a std::string at +0 (destroyed
-                                   * by hand in ~CFileSystem) and a tree map {pad, sentinel +4, size +8} at +1C */
+    unsigned char embedded[0x2C]; /* +88 file system archive object, built by 0x577C60: a std::string at +0
+                                   * (destroyed by hand in ~CFileSystem) and a tree map {pad, sentinel +4,
+                                   * size +8} at +1C */
+    FsHashMap *prefixes;          /* +B4 the archive's map name -> directory, owned by the archive singleton */
 
     CFileSystem();                           /* 0x451E00 */
     ~CFileSystem();                          /* 0x452580 */
     void OpenPaks(const std::string &name);  /* 0x451E90 */
     void *OpenFile(const std::string &name); /* 0x4514B0 */
+    bool ResolvePath(const std::string &name, std::string *path); /* 0x451220 */
 };
 static_assert(sizeof(CFileSystem) == 0xB8, "CFileSystem is 0xB8 bytes");
 static_assert(__builtin_offsetof(CFileSystem, files) == 0x10, "CFileSystem::files");
@@ -88,3 +92,4 @@ static_assert(__builtin_offsetof(CFileSystem, paksOpened) == 0x7C, "CFileSystem:
 static_assert(__builtin_offsetof(CFileSystem, currentStream) == 0x80, "CFileSystem::currentStream");
 static_assert(__builtin_offsetof(CFileSystem, lastEntry) == 0x84, "CFileSystem::lastEntry");
 static_assert(__builtin_offsetof(CFileSystem, embedded) == 0x88, "CFileSystem::embedded");
+static_assert(__builtin_offsetof(CFileSystem, prefixes) == 0xB4, "CFileSystem::prefixes");

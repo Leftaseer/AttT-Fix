@@ -21,13 +21,16 @@ ORIG_FASTCALL(00577C60, void *, (void *self));                                  
 ORIG_THISCALL(00451770, void, (void *map, void *result, const void *value));    /* insert a name in files */
 ORIG_THISCALL(00451A50, void, (void *map, void *result, const void *value));    /* insert a stream in streams */
 ORIG_THISCALL(00422D80, void, (void *map, void *node, const std::string *key)); /* find a name in files */
-ORIG_THISCALL(00451220, char, (void *self, const std::string *name, std::string *path)); /* path + name */
 ORIG_THISCALL(00450AE0, void *, (void *self, void *stream, unsigned size, unsigned offset, bool encrypted));
 ORIG_THISCALL(00450B20, void *, (void *self, const std::string *name));
 ORIG_FASTCALL(005224A0, void, (void *self));                                  /* break the string map's node list */
 ORIG_THISCALL(004EF350, void, (void *self, unsigned count, void *sentinelPtr)); /* refill the bucket vector */
 ORIG_FASTCALL(004EF7F0, void, (void *self));                                  /* clear the int map */
 ORIG_FASTCALL(00450F30, void, (void *self));                                  /* clear the embedded map */
+
+/* the hash map's case-folding string hash and its case-insensitive ordering (both pop their arguments) */
+ORIG_STDCALL(00579BB0, unsigned, (const std::string *key));
+ORIG_STDCALL(00579C00, bool, (const std::string *a, const std::string *b));
 
 /* the exe imports operator new (?2) but implements new[]/?_U itself as a jmp to it; delete[] is imported */
 ORIG_FN(005E3B10, void *, (unsigned int size)); /* operator new[] */
@@ -75,6 +78,28 @@ void FsHashMap::FindInt(FsIntNode **node, const int *key) const
         }
     }
     *node = (FsIntNode *)sentinel;
+}
+
+/* The string-keyed twin of FindInt: every bucket is a range of the one node list, the keys are ordered
+ * case-insensitively, and a greater key ends the search. */
+DECOMP(00450E60)
+void FsHashMap::FindString(FsStringNode **node, const std::string *key) const
+{
+    FsStringNode **buckets = (FsStringNode **)begin;
+    unsigned bucket = sub_00579BB0(key) & mask;
+    if (count <= bucket)
+        bucket += -1 - (mask >> 1);
+    FsStringNode *endNode = buckets[bucket + 1];
+    for (FsStringNode *it = buckets[bucket]; it != endNode; it = it->next) {
+        if (!sub_00579C00(&it->key, key)) {
+            if (!sub_00579C00(key, &it->key)) {
+                *node = it;
+                return;
+            }
+            break;
+        }
+    }
+    *node = (FsStringNode *)sentinel;
 }
 
 static void ThrowFsError(const std::string &msg, int line)
@@ -266,6 +291,19 @@ void CFileSystem::OpenPaks(const std::string &name)
         ThrowFsError(ORIG_STR(0060B1F4) + archiveName, 0x58);
 }
 
+/* A name without a drive is looked up in the archive's prefix map: a known name resolves to its mapped
+ * directory followed by the name, an unknown one fails. */
+DECOMP(00451220)
+bool CFileSystem::ResolvePath(const std::string &name, std::string *path)
+{
+    FsStringNode *node;
+    prefixes->FindString(&node, &name);
+    if (node == (FsStringNode *)prefixes->sentinel)
+        return false;
+    *path = **(std::string **)((char *)node + 0x24) + name;
+    return true;
+}
+
 /* Opens a file by name. With no open paks (or a name with a drive) the file is taken from disk; a name without
  * a drive first goes through the embedded file system's path prefixes. With open paks, a name is looked up in
  * the pak directories (lowercased) and comes back as a section of its pak stream; a missing name returns 0. */
@@ -275,7 +313,7 @@ void *CFileSystem::OpenFile(const std::string &name)
     if (!paksOpened || name.find(":", 0) != std::string::npos) {
         if (name.find(':', 0) == std::string::npos) {
             std::string path;
-            if (sub_00451220(this, &name, &path) == 1) {
+            if (ResolvePath(name, &path)) {
                 void *file = operator new(0x98);
                 return file ? sub_00450B20(file, &path) : nullptr;
             }
