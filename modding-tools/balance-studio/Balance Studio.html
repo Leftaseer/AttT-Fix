@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file:; img-src data:; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file:; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'">
   <title>AttT Balance Studio</title>
   <link rel="stylesheet" href="studio.css">
   <script defer src="core.js"></script>
@@ -15,6 +15,7 @@
   <script defer src="model-editor.js"></script>
   <script defer src="model-viewer.js"></script>
   <script defer src="army-map.js"></script>
+  <script defer src="campaign-ui.js"></script>
   <script defer src="studio.js"></script>
 </head>
 <body>
@@ -25,7 +26,10 @@
       <nav id="workspace-nav" aria-label="Tool" hidden>
         <h2>Workspace</h2>
         <button class="game" id="workspace-balance" aria-pressed="true">Balance &amp; models</button>
-        <button class="game" id="workspace-world" aria-pressed="false">World &amp; campaign</button>
+        <button class="game" id="workspace-world" aria-pressed="false" data-campaign="world">World</button>
+        <button class="game" id="workspace-forests" aria-pressed="false" data-campaign="forests">Forests</button>
+        <button class="game" id="workspace-story" aria-pressed="false" data-campaign="story">Story</button>
+        <button class="link-button" id="workspace-project" aria-haspopup="dialog">Open or switch game project</button>
       </nav>
 
       <section id="balance-data">
@@ -107,17 +111,35 @@
       <header class="top">
         <div>
           <div class="eyebrow">LOCAL WORKSPACE</div>
-          <h1>World &amp; campaign</h1>
-          <p>Edit the world draft and use it as the base for your balance export.</p>
+          <h1 id="campaign-title">World</h1>
+          <p id="campaign-summary">Inspect and edit the campaign.</p>
         </div>
         <div class="header-actions">
-          <button class="button primary" id="use-world-draft">Use world draft in Balance</button>
+          <button class="button primary" id="use-world-draft">Review combined export</button>
         </div>
       </header>
-      <iframe id="world-frame" title="World map and batch editor"></iframe>
+      <section id="campaign-workbench" class="campaign-workbench" aria-label="Campaign editor"></section>
       <div class="status" id="world-status" role="status" aria-live="polite"></div>
     </main>
   </div>
+
+  <dialog id="workspace-setup">
+    <form id="workspace-setup-form" method="dialog">
+      <div class="dialog-heading"><div><p class="eyebrow">ATTt MODDING STUDIO</p><h2>Open a game project</h2></div><button type="button" class="dialog-close" data-close="workspace-setup" aria-label="Close">×</button></div>
+      <label for="workspace-game-path">Game folder</label>
+      <div class="workspace-path">
+        <input id="workspace-game-path" required placeholder="Folder containing Resource0.pak">
+        <button class="button secondary" id="workspace-browse" type="button" hidden>Browse…</button>
+      </div>
+      <label for="workspace-edition">Game edition</label>
+      <select id="workspace-edition"><option value="attt">Original game</option><option value="valkyrie">Valkyrie</option></select>
+      <label id="workspace-localization"><input id="workspace-use-localization" type="checkbox"> Use Localization.pak (AttTFix English)</label>
+      <label for="workspace-project-name">Project name</label>
+      <input id="workspace-project-name" required maxlength="80" value="My mod">
+      <p id="workspace-setup-status" class="archive-feedback" role="status" hidden></p>
+      <div class="dialog-actions"><button class="button primary" id="workspace-open" type="submit">Open project</button></div>
+    </form>
+  </dialog>
 
   <dialog id="profile-dialog">
     <form method="dialog" id="profile-form">

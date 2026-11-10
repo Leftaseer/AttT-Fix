@@ -152,6 +152,20 @@ async function main() {
     assert.equal(field(combined, "armies", hunterKey, ["radius"]).value, 415);
     const draftOnly = core.planExport(draft, { edits: [] });
     assert.deepEqual(core.exportGame(draft, draftOnly), core.exportGame(base, encounterPlan));
+    const campaignEntries = new Map();
+    for (const [name, entry] of await core.readArchive(encounterFile)) {
+      campaignEntries.set(name, new Uint8Array(
+        await encounterFile.slice(entry.offset, entry.offset + entry.size).arrayBuffer()));
+    }
+    campaignEntries.set("fzone1test.fst", Uint8Array.of(0, 1, 2, 3));
+    campaignEntries.set("continent1quests.lua", new TextEncoder().encode("Quest = {}\n"));
+    const campaignFile = new File([core.makeArchive(campaignEntries)], encounterFile.name);
+    const campaign = await core.loadGame(edition, files, { worldOverlay: campaignFile });
+    assert.deepEqual(await campaign.readAsset("fzone1test.fst"), Uint8Array.of(0, 1, 2, 3));
+    const campaignPlan = core.planExport(campaign, { edits: [] });
+    assert.equal(campaignPlan.name, encounterFile.name);
+    assert.deepEqual(core.exportGame(campaign, campaignPlan),
+      new Uint8Array(await campaignFile.arrayBuffer()));
     assert.equal(core.planExport({ ...base, edition: edition === "attt" ? "valkyrie" : "attt" }, placement).changes.length, 1);
     const oversized = { ...custom, value: { ...custom.value, radius: 501 } };
     const invalidRadius = edit("shared", "armies", hunterKey, ["radius"], 501);

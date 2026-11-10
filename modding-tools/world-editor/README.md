@@ -186,7 +186,7 @@ archives; it only saves the JSON model when a request asks for it.
 python3 -m unittest discover -s tests -v
 ```
 
-94 tests, no game installation required: synthetic PAK and Lua chunks cover the
+95 tests, no game installation required: synthetic PAK and Lua chunks cover the
 archive format, bytecode patching, expression compilation, overlay identity and
 the CLI.
 

@@ -24,34 +24,49 @@ branch never conflict with them.
 Run with Python 3.8 or newer. In Windows PowerShell, from this directory:
 
 ```powershell
+py -3 attt.py serve
+```
+
+On Windows you can also double-click `Start Modding Studio.cmd`. On Linux or
+WSL, use `python3`. The launcher opens the local workspace in your browser and
+prints its address; no command-line game or world path is required. Choose the
+game folder, edition and project name in the setup dialog. Browser-created
+projects are stored locally and the last project is restored on the next launch.
+Use `--data-dir` to choose another project store.
+
+To open an existing world JSON directly, supply both paths:
+
+```powershell
 py -3 attt.py serve --game "E:\Games\Ascension to the Throne" --world "my-world.json"
 ```
 
-On Linux or WSL, use `python3` and the game folder's Linux path. The launcher
-opens the local workspace in your browser and prints its address. It creates the
-world JSON from the selected archives if the file does not exist. Pass
+The world JSON is created from the selected archives if it does not exist. Pass
 `--edition valkyrie` for Valkyrie or `--prefer-localization` to use
-`Localization.pak` in slot 1. The workspace reads the same archive selection
-in both tabs. Use consecutive numbered PAK slots starting at zero. For the
-original game, the workspace recognizes `AttTFix.pak` in the first missing slot
-when later numbered PAKs follow it, matching the AttTFix loader.
+`Localization.pak` in slot 1. All workspace tabs use the same archive selection.
+Use consecutive numbered PAK slots starting at zero. For the original game, the
+workspace recognizes `AttTFix.pak` in the first missing slot when later numbered
+PAKs follow it, matching the AttTFix loader.
 
-1. Open **World & campaign** to inspect the terrain map and apply World Editor
+1. Open **World** to inspect the terrain and army map and apply World Editor
    [batch operations](world-editor/README.md#world-editing). **Apply and save**
-   updates the world project JSON. Forest and story commands are available in
-   the CLI. Use `--forests` to display an extracted forest project in the map.
-2. Choose **Use world draft in Balance**. New or moved armies appear in
-   Balance Studio. Edit rosters, encounter radius, unit stats or spells as usual.
-3. Choose **Review export → Download PAK**. The download includes the world
-   draft and balance edits in one archive, with overlapping army scripts built
-   from the edited world. Install the combined PAK in the next slot after the
-   base archive set. Export model changes separately after this slot.
+   updates the world project JSON after a dry run. **Forests** adds, moves,
+   grounds and removes trees; **Story** edits, creates and removes quests,
+   triggers and dialogue records. Their drafts are saved beside the world JSON.
+   With direct paths, `--forests` selects an existing forest project.
+2. Edit rosters, encounter radius, unit stats or spells under **Balance &
+   models**. New or moved armies from the campaign draft are included.
+3. Choose **Review combined export → Download PAK**. This reloads the current
+   campaign draft and opens the export review. The download includes world,
+   forest, story and balance edits in one archive, with overlapping army scripts
+   built from the edited world. Install the combined PAK in the next slot after
+   the base archive set. Export model changes separately after this slot.
 
-Load the draft into Balance again after editing the world. Restart the launcher
-after changing the world JSON or archives with another process. Save a Balance
-Studio project JSON and open it in the new workspace to move profiles from the
-standalone HTML file. You can still open `balance-studio/Balance Studio.html`
-directly for offline balance and model editing.
+Return to **Review combined export** after further campaign edits. Restart the
+launcher after changing project JSON or archives with another process. Save a
+Balance Studio project JSON and open it in the new workspace to move profiles
+from the standalone HTML file. You can still open
+`balance-studio/Balance Studio.html` directly for offline balance and model
+editing.
 
 ## CLI for agents
 

@@ -617,10 +617,12 @@ end
       check(ordered.length <= 255 && worldOverlay.name === `Resource${ordered.length}.pak`,
         `The world overlay must be Resource${ordered.length}.pak for this archive set.`);
       const archive = await readArchive(worldOverlay);
-      check(archive.size && [...archive.keys()].every((name) => /^continent[1-3](towns|npcs|saos|armies|armypos)\.lua$/.test(name)),
-        "Choose a World Editor world overlay with continent data.");
+      check(archive.size && [...archive.keys()].every((name) =>
+        /^continent[1-3](towns|npcs|saos|armies|armypos|quests|triggers|conversations)\.lua$|^[a-z0-9_.]+\.fst$/.test(name)),
+      "Choose a campaign overlay with continent scripts or forest zones.");
       worldEntries = new Map(await Promise.all([...archive].map(async ([name, { file, offset, size }]) => {
-        check(size <= maxScript, `${name} in the world overlay exceeds the script size limit.`);
+        check(size <= (name.endsWith(".fst") ? 32 * 1024 * 1024 : maxScript),
+          `${name} in the campaign overlay exceeds the size limit.`);
         return [name, new Uint8Array(await file.slice(offset, offset + size).arrayBuffer())];
       })));
       archives.set(ordered.length, worldOverlay);
