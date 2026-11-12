@@ -45,7 +45,8 @@ window.createModelEditor = ({ redraw, previewTexture, enterEditMode, paintState,
   let paintSource, stroke;
   let rigRequest = 0, rigBusy = false;
 
-  const draft = () => drafts.get(game);
+  const draftKey = (loaded) => loaded.modelDraftKey ?? loaded;
+  const draft = () => drafts.get(draftKey(game));
   const part = () => scene?.parts[Number(partSelect.value)];
   const validTransform = () => fields.every((input) => input.validity.valid);
   const transformFor = (entry) => entry?.attachment && draft().meshes.get(scene.family)?.edits.get(entry.attachment);
@@ -347,7 +348,7 @@ window.createModelEditor = ({ redraw, previewTexture, enterEditMode, paintState,
   }
 
   async function readTexture(loaded, name) {
-    const replacement = drafts.get(loaded)?.textures.get(name);
+    const replacement = drafts.get(draftKey(loaded))?.textures.get(name);
     if (replacement) return replacement.image;
     try {
       const bytes = await loaded.readAsset(name);
@@ -509,7 +510,8 @@ window.createModelEditor = ({ redraw, previewTexture, enterEditMode, paintState,
       game = loaded;
       save = download;
       selection = undefined;
-      if (!drafts.has(game)) drafts.set(game, { meshes: new Map(), textures: new Map(), undo: new Map(), overrides: new Map() });
+      const key = draftKey(game);
+      if (!drafts.has(key)) drafts.set(key, { meshes: new Map(), textures: new Map(), undo: new Map(), overrides: new Map() });
       mode(false);
     },
     close() {
@@ -517,13 +519,13 @@ window.createModelEditor = ({ redraw, previewTexture, enterEditMode, paintState,
       game = save = undefined;
     },
     setScene,
-    overrides: (loaded) => drafts.get(loaded)?.overrides,
+    overrides: (loaded) => drafts.get(draftKey(loaded))?.overrides,
     painting: () => Boolean(paintSource),
     beginStroke,
     paintStroke,
     endStroke,
     apply(loaded, pose) {
-      const family = drafts.get(loaded)?.meshes.get(pose.family);
+      const family = drafts.get(draftKey(loaded))?.meshes.get(pose.family);
       if (family) for (const [key, edit] of family.edits) pose.setTransform(key, edit);
     },
     readTexture,

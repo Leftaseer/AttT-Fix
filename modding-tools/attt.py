@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT / 'world-editor'))
+sys.path[:0] = [str(ROOT), str(ROOT / 'world-editor')]
 
 import gres
 import worldctl

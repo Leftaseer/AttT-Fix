@@ -21,16 +21,16 @@ branch never conflict with them.
 
 ## HTML workspace
 
-Run with Python 3.8 or newer. In Windows PowerShell, from this directory:
+In the Windows delivery, double-click `Start Modding Studio.cmd`. It uses the
+Python runtime in the delivery folder. If you are running from a Git checkout,
+install Python 3.8 or newer, then double-click the same launcher or run:
 
 ```powershell
 py -3 attt.py serve
 ```
 
-On Windows you can also double-click `Start Modding Studio.cmd`. On Linux or
-WSL, use `python3`. The launcher opens the local workspace in your browser and
-prints its address; no command-line game or world path is required. Choose the
-game folder, edition and project name in the setup dialog. Browser-created
+On Linux or WSL, use `python3`. The launcher opens the local workspace in your
+browser. Choose the game folder, edition and project name in the setup dialog. Browser-created
 projects are stored locally and the last project is restored on the next launch.
 Use `--data-dir` to choose another project store.
 
@@ -47,11 +47,13 @@ Use consecutive numbered PAK slots starting at zero. For the original game, the
 workspace recognizes `AttTFix.pak` in the first missing slot when later numbered
 PAKs follow it, matching the AttTFix loader.
 
-1. Open **World** to inspect the terrain and army map and apply World Editor
-   [batch operations](world-editor/README.md#world-editing). **Apply and save**
-   updates the world project JSON after a dry run. **Forests** adds, moves,
-   grounds and removes trees; **Story** edits, creates and removes quests,
-   triggers and dialogue records. Their drafts are saved beside the world JSON.
+1. Open **World** to add or move armies and edit placements, towns and houses
+   with forms. Click the terrain to copy coordinates into an army or town form.
+   **Preview edit** shows the proposed changes and **Apply and save** saves them
+   to the draft. The advanced editor accepts World Editor [batch operations](world-editor/README.md#world-editing).
+   **Forests** adds, moves, grounds and removes trees. **Story** edits quest
+   titles, descriptions and dialogue as plain text. Record creation and function
+   fields accept JSON. Campaign drafts are saved beside the world JSON.
    With direct paths, `--forests` selects an existing forest project.
 2. Edit rosters, encounter radius, unit stats or spells under **Balance &
    models**. New or moved armies from the campaign draft are included.
@@ -61,7 +63,8 @@ PAKs follow it, matching the AttTFix loader.
    built from the edited world. Install the combined PAK in the next slot after
    the base archive set. Export model changes separately after this slot.
 
-Return to **Review combined export** after further campaign edits. Restart the
+Return to **Review combined export** after further campaign edits. The review
+shows validation errors when a draft cannot be exported. Restart the
 launcher after changing project JSON or archives with another process. Save a
 Balance Studio project JSON and open it in the new workspace to move profiles
 from the standalone HTML file. You can still open

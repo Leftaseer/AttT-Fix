@@ -123,9 +123,9 @@ class Campaign(State):
             self.revision += 1
         return {'changes': patch.changes}
 
-    def export_entries(self):
+    def export_entries(self, validate=True):
         changed = self.world.changed_modules()
-        for continent in sorted({number for number, _ in changed}):
+        for continent in sorted({number for number, _ in changed}) if validate else ():
             issues = self.world.validate(continent, self.archives, self.units)
             errors = [issue for issue in issues if issue['level'] == 'error']
             if errors:
@@ -135,11 +135,12 @@ class Campaign(State):
         if self.forests_path.exists() or self.forests is not None:
             model = self.forest_model()
             changes = model.changed_zones()
-            if changes:
+            if changes and validate:
                 errors = [issue for issue in model.validate(self.archives)
                           if issue['level'] == 'error' and (issue['continent'], issue['zone']) in changes]
                 if errors:
                     raise WorldError('Forest validation failed (%d errors). Open Validate for details.' % len(errors))
+            if changes:
                 entries.update(model.export_entries())
         entries.update(self.story_entries)
         return entries

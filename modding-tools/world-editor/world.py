@@ -771,6 +771,9 @@ class Placement:
 
     def record(self):
         x, z = self.world_xz
+        rotation = self.entry.get(ROTATION_KEYS[self.kind])
+        if self.kind == 'object':
+            rotation = rotation.get(2) if isinstance(rotation, dict) else None
         return {
             'id': 'c%d/%s/%s/%s/%s' % (self.continent, self.town_name, self.house_name,
                                        self.kind, self.index),
@@ -780,6 +783,7 @@ class Placement:
             'kind': self.kind,
             'index': self.index,
             'name': self.name,
+            'rotation': rotation if isinstance(rotation, (int, float)) else 0.0,
             'local': [self.position.get(1, 0.0), self.position.get(2, 0.0), self.position.get(3, 0.0)],
             'world': [x, self.world_y, z],
         }

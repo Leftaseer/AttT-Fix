@@ -252,7 +252,8 @@ dialog input:not([type=checkbox]), dialog select { width: 100%; }
 .campaign-apply-actions { justify-content: flex-end; margin-top: 10px; }
 .campaign-editor-label { display: grid; gap: 5px; font-size: 12px; font-weight: 650; }
 .campaign-code { display: block; width: 100%; min-height: 160px; resize: vertical; padding: 10px; border: 1px solid #cbd6e1; border-radius: 6px; color: var(--ink); background: #f8fafc; font: 12px/1.5 Consolas, monospace; tab-size: 2; }
-.campaign-story-value { min-height: 100px; }
+.campaign-story-value { min-height: 100px; width: 100%; padding: 9px; border: 1px solid #cbd6e1; border-radius: 6px; font: inherit; font-weight: normal; resize: vertical; }
+.campaign-story-value.campaign-code { font-family: Consolas, monospace; }
 .campaign-filter-grid, .campaign-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 .campaign-filter-grid label, .campaign-form-grid label { display: grid; gap: 4px; color: var(--quiet); font-size: 12px; font-weight: 650; }
 .campaign-filter-grid input, .campaign-filter-grid select, .campaign-form-grid input, .campaign-form-grid select { width: 100%; }
@@ -304,3 +305,9 @@ dialog input:not([type=checkbox]), dialog select { width: 100%; }
   .filters { grid-template-columns: 1fr 1fr; }
   .inspector { flex: 1; }
 }
+.campaign-world-form { display: grid; gap: 10px; margin-top: 10px; }
+.campaign-world-form > label { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.campaign-world-form .campaign-apply-actions { margin-top: 0; }
+.campaign-card > summary { cursor: pointer; font-weight: 650; }
+.campaign-card > summary + label { margin-top: 10px; }
+.campaign-world-tools { display: grid; min-width: 0; gap: 13px; }

@@ -142,6 +142,7 @@ async function readArchives(edition, selected, options, worldRevision) {
     const loaded = await core.loadGame(edition, selected, options);
     if (request !== archiveRequest) return;
     loaded.worldRevision = worldRevision;
+    loaded.modelDraftKey = options.modelDraftKey;
     games[edition] = loaded;
     state.edition = edition;
     resetSearch();
@@ -178,8 +179,14 @@ async function loadWorldDraft() {
   button.disabled = true;
   feedback.textContent = "Reading the campaign draft…";
   try {
-    const response = await fetch("/api/world-overlay");
+    const response = await fetch("/api/world-overlay?preview=1");
     if (!response.ok) throw new Error((await response.json()).error);
+    const revision = response.headers.get("X-World-Revision");
+    const current = games[selected.edition];
+    if (selected === workspace && current?.worldRevision === revision) {
+      if (state.edition !== selected.edition) selectGame(selected.edition);
+      return current;
+    }
     const worldOverlay = response.status === 204 ? undefined :
       new File([await response.blob()], `Resource${selected.archives.length}.pak`);
     if (selected !== workspace) return;
@@ -193,7 +200,8 @@ async function loadWorldDraft() {
         },
       }),
     }));
-    const loaded = await readArchives(selected.edition, archives, { worldOverlay }, response.headers.get("X-World-Revision"));
+    const modelDraftKey = selected.modelDraftKey ??= {};
+    const loaded = await readArchives(selected.edition, archives, { worldOverlay, modelDraftKey }, revision);
     if (!loaded) {
       feedback.textContent = $("status").textContent;
       return;
@@ -980,26 +988,33 @@ $("export").addEventListener("click", () => {
   $("export-game").replaceChildren(...core.editions.filter((e) => games[e])
     .map((e) => Object.assign(node("option", "", names[e]), { value: e })));
   $("export-game").value = state.edition;
+  $("export-error").hidden = true;
   exportPreview();
   $("export-dialog").showModal();
 });
-$("export-game").addEventListener("change", exportPreview);
+$("export-game").addEventListener("change", () => {
+  $("export-error").hidden = true;
+  exportPreview();
+});
 $("download-pak").addEventListener("click", async () => {
+  const button = $("download-pak");
+  const feedback = $("export-error");
   try {
     const { target, plan } = exportPreview();
+    feedback.hidden = true;
+    button.disabled = true;
     if (target.worldRevision != null) {
-      const response = await fetch("/api/session");
-      if (!response.ok || String((await response.json()).worldRevision) !== target.worldRevision) {
-        throw new Error("The campaign draft changed. Return to the campaign workspace and choose Review combined export.");
-      }
+      await campaignEditor.request(`/api/campaign/check-export?revision=${encodeURIComponent(target.worldRevision)}`);
     }
     const bytes = core.exportGame(target, plan);
     download(plan.name, new Blob([bytes], { type: "application/octet-stream" }));
     $("export-dialog").close();
     status(`Downloaded ${plan.name} for ${names[target.edition]}.`);
   } catch (error) {
-    $("export-dialog").close();
-    status(error.message, true);
+    feedback.textContent = error.message;
+    feedback.hidden = false;
+  } finally {
+    button.disabled = false;
   }
 });
 const recordTabs = $("sections").querySelectorAll("[data-kind]");

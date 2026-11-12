@@ -170,7 +170,12 @@ class WorkspaceHandler(Handler):
                 return self.world_request(super().do_GET)
             query = {key: value[0] for key, value in parse_qs(route.query).items()}
             if route.path == '/api/world-overlay':
-                return self.world_overlay()
+                return self.world_overlay(validate=query.get('preview') != '1')
+            if route.path == '/api/campaign/check-export':
+                if query.get('revision') != self.server.revision:
+                    return self.error('The campaign draft changed. Open Review combined export again.', 409)
+                self.state.export_entries()
+                return self.send_json({'revision': self.server.revision})
             if route.path.startswith('/api/archive/'):
                 return self.archive_slice(route, query)
             if route.path.startswith('/api/campaign/'):
@@ -256,6 +261,7 @@ class WorkspaceHandler(Handler):
                 armies=[{'name': name, 'title': army.get('DisplayName') or name,
                          'position': modules.get('armypos', {}).get(name)}
                         for name, army in modules.get('armies', {}).items() if isinstance(army, dict)],
+                npcs=sorted(name for name in modules.get('npcs', {}) if isinstance(name, str)),
                 placements=world.flat_entities(continent), units=sorted(state.units or []),
             )
         elif kind == 'forests':
@@ -301,10 +307,10 @@ class WorkspaceHandler(Handler):
             return self.error('not found', 404)
         return self.send_json(data)
 
-    def world_overlay(self):
+    def world_overlay(self, validate=True):
         state, archives = self.state, self.state.archives
         headers = [('X-World-Revision', self.server.revision)]
-        entries = state.export_entries()
+        entries = state.export_entries(validate)
         if not entries:
             return self.send_bytes(b'', 'application/octet-stream', 204, headers)
         with TemporaryDirectory(prefix='attt-campaign-export-') as folder:

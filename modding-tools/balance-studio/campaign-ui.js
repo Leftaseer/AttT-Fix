@@ -11,9 +11,14 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
     trigger: ["want_live", "condition", "action"],
     dialogue: ["who", "speech", "condition", "action", "do"],
   };
+  const storyLabels = {
+    display_name: "Display name", description: "Description", level: "Level", want_live: "Want live",
+    who: "Speaker", speech: "Dialogue text", condition: "Condition", action: "Action", do: "Do",
+  };
+  const storyText = new Set(["display_name", "description", "who", "speech"]);
   const state = {
     mode: "world", continent: 1, revision: null, syncedRevision: null,
-    world: null, selectedArmy: null,
+    world: null, selectedArmy: null, worldPatch: "[]",
     forest: null, forestZone: "", forestModel: "", forestOffset: 0,
     forestOperation: "add", forestSelected: null, forestIndex: null,
     story: null, storyDetail: null, storyKind: "quest", storySearch: "",
@@ -157,12 +162,137 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
     return value;
   }
 
-  function insertWorldOperation(operation) {
-    const input = container.querySelector("#campaign-world-patch");
-    const patch = worldPatchValue();
-    patch.operations.push(operation);
-    input.value = JSON.stringify(patch.operations, null, 2);
-    input.focus();
+  async function applyWorld(operations, dryRun) {
+    if (!operations.length) throw new Error("Add at least one world operation.");
+    const result = await request("/api/campaign/world", {
+      format: "attt-world-patch/1", operations, revision: state.revision, dry_run: dryRun,
+    });
+    if (!dryRun) {
+      state.revision = result.revision;
+      await loadMode();
+    }
+    showResult(dryRun ? "World dry run" : "World draft saved", result);
+    status(dryRun ? "Review the proposed changes before applying them." : "World draft saved.");
+  }
+
+  const worldActions = {
+    "add-army": "Add army", "move-army": "Move army or change radius", "remove-army": "Remove army",
+    add: "Add a placement", move: "Move a placement", rotate: "Rotate a placement",
+    clone: "Duplicate a placement", remove: "Remove a placement",
+    "add-town": "Add town", "add-house": "Add house", "remove-town": "Remove town",
+    "remove-house": "Remove house", snap: "Ground placements on terrain",
+  };
+
+  function worldForm(action, selection = {}) {
+    const data = state.world;
+    const form = container.querySelector("#campaign-world-form");
+    const fields = form.querySelector(".campaign-form-grid");
+    fields.replaceChildren();
+    form.elements.action.value = action;
+    const addField = (name, label, initial, options) => {
+      const field = node(options ? "select" : "input");
+      field.name = name;
+      field.required = true;
+      if (options) {
+        fillSelect(field, options, initial, (entry) => entry.label ?? entry);
+        if (initial !== undefined) field.value = initial;
+      } else {
+        field.type = typeof initial === "number" ? "number" : "text";
+        if (field.type === "number") field.step = "any";
+        field.value = initial ?? "";
+      }
+      const wrapper = node("label", "", label);
+      wrapper.append(field);
+      fields.append(wrapper);
+      return field;
+    };
+    const number = (name, label, value) => addField(name, label, value ?? 0);
+    const townOptions = Object.keys(data.towns);
+    const needsTown = ["add", "move", "rotate", "clone", "remove", "add-house", "remove-house", "remove-town"].includes(action);
+    const needsHouse = ["add", "move", "rotate", "clone", "remove", "remove-house"].includes(action);
+    const isPlacement = ["add", "move", "rotate", "clone", "remove"].includes(action);
+    const coordinates = (x, z, y) => {
+      number("x", "X", x);
+      if (y !== undefined) number("y", "Y", y);
+      number("z", "Z", z);
+    };
+    const town = needsTown && addField("town", "Town", selection.town ?? townOptions[0], townOptions);
+    const houses = data.towns[town?.value] ?? [];
+    const house = needsHouse && addField("house", "House", selection.house ?? houses[0], houses);
+    const selectContext = () => worldForm(action, { town: town?.value, house: house?.value, kind: form.elements.kind?.value });
+    town?.addEventListener?.("change", () => worldForm(action, { town: town.value }));
+    house?.addEventListener?.("change", selectContext);
+    if (["move-army", "remove-army"].includes(action)) {
+      const options = data.armies.filter((army) => action === "remove-army" ||
+        (Number.isFinite(army.position?.x) && Number.isFinite(army.position?.z)))
+        .map(({ name, title }) => ({ value: name, label: title === name ? name : title + " · " + name }));
+      const armyField = addField("name", "Army", selection.army ?? options[0]?.value, options);
+      const army = data.armies.find(({ name }) => name === armyField.value);
+      if (action === "move-army" && army) {
+        coordinates(army.position.x, army.position.z);
+        const radius = number("radius", "Encounter radius", army.position.radius);
+        if (army.position.radius == null) { radius.required = false; radius.value = ""; }
+      }
+      armyField.addEventListener("change", () => worldForm(action, { army: armyField.value }));
+    } else if (action === "add-army") {
+      addField("name", "Army ID", "aMod" + crypto.randomUUID().replaceAll("-", "").slice(0, 12));
+      addField("display_name", "Display name", "New army");
+      addField("attitude", "Attitude", "Agressive", [
+        {value: "Agressive", label: "Hostile"}, "Neutral", "Disabled", "Dead",
+      ]);
+      addField("standard", "Standard", "stVagrant");
+      const units = data.units.filter((id) => id !== "Hero");
+      addField("unit", "First unit", units.includes("uPeasant") ? "uPeasant" : units[0], units);
+      const quantity = number("quantity", "Quantity", 1);
+      quantity.min = quantity.step = "1";
+      coordinates();
+      number("radius", "Encounter radius", 150).min = "1";
+    } else if (isPlacement) {
+      const kind = addField("kind", "Placement type", selection.kind ?? "npc", ["npc", "object", "tree"]);
+      kind.addEventListener("change", selectContext);
+      const entries = data.placements.filter((p) => p.town === town.value && p.house === house.value && p.kind === kind.value);
+      let placement;
+      if (action === "add" && kind.value === "npc") addField("name", "NPC", data.npcs[0], data.npcs);
+      else if (action === "add") addField("name", "Model name", "");
+      else {
+        const index = addField("index", "Placement", selection.index ?? entries[0]?.index,
+          entries.map((p) => ({ value: p.index, label: p.name + " · " + p.index })));
+        placement = entries.find((p) => p.index === Number(index.value));
+        index.addEventListener("change", () => worldForm(action, { town: town.value, house: house.value, kind: kind.value, index: index.value }));
+      }
+      if (action === "add" || action === "move") coordinates(placement?.local[0], placement?.local[2], placement?.local[1] ?? 0);
+      if (action === "add" || action === "rotate") number("rot", "Rotation (degrees)", placement?.rotation);
+    } else if (action.startsWith("add-")) {
+      addField("name", action === "add-town" ? "Town ID" : "House ID", "");
+      coordinates(0, 0, 0);
+      number("rot", "Rotation (degrees)", 0);
+    } else if (action === "remove-town" || action === "remove-house") {
+      const force = addField("force", "Remove contained placements", "");
+      force.type = "checkbox";
+      force.required = false;
+    } else if (action === "snap") number("offset", "Height offset", 0);
+    const available = ![...fields.querySelectorAll("select")].some((select) => !select.options.length || !select.value);
+    for (const control of form.querySelectorAll("[data-world-submit]")) control.disabled = !available;
+  }
+
+  function worldFormOperation(form) {
+    const { action } = form.elements;
+    const operation = { op: action.value, continent: state.continent };
+    for (const field of form.querySelector(".campaign-form-grid").querySelectorAll("input, select")) {
+      if (field.value === "") continue;
+      operation[field.name] = field.type === "checkbox" ? field.checked :
+        field.type === "number" ? field.valueAsNumber : field.value;
+    }
+    if (operation.index !== undefined) operation.index = Number(operation.index);
+    if (operation.op === "add-army") {
+      operation.troops = [[operation.unit, operation.quantity]];
+      delete operation.unit;
+      delete operation.quantity;
+    }
+    if (operation.op === "remove-town" || operation.op === "remove-house") {
+      operation.name = operation.op === "remove-town" ? operation.town : operation.house;
+    }
+    return operation;
   }
 
   function renderWorldArmyList() {
@@ -189,23 +319,20 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
     const panel = container.querySelector("#campaign-world-selection");
     const army = state.selectedArmy;
     if (!army) {
-      panel.replaceChildren(node("p", "quiet", "Select an army to insert a move or removal operation."));
+      panel.replaceChildren(node("p", "quiet", "Select an army to move it or change its encounter radius."));
       return;
     }
     const position = army.position;
-    const move = button("Insert move operation");
+    const move = button("Move or change radius");
     move.disabled = !position || !Number.isFinite(position.x) || !Number.isFinite(position.z);
-    move.addEventListener("click", () => insertWorldOperation({
-      op: "move-army", continent: state.continent, name: army.name,
-      x: Math.trunc(position.x), z: Math.trunc(position.z),
-    }));
-    const remove = button("Insert remove operation");
-    remove.addEventListener("click", () => insertWorldOperation({
-      op: "remove-army", continent: state.continent, name: army.name,
-    }));
+    move.addEventListener("click", () => worldForm("move-army", { army: army.name }));
+    const remove = button("Remove army");
+    remove.addEventListener("click", () => worldForm("remove-army", { army: army.name }));
+    const actions = node("div", "campaign-inline-actions");
+    actions.append(move, remove);
     panel.replaceChildren(node("h3", "", army.title),
       node("p", "quiet", position ? `X ${position.x ?? "?"} · Z ${position.z ?? "?"} · Radius ${position.radius ?? "default"}` : "No recorded position"),
-      node("div", "campaign-inline-actions", move, remove));
+      actions);
   }
 
   function renderWorld() {
@@ -217,21 +344,48 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
           <div class="campaign-card-heading"><h2>Terrain and armies</h2><span class="quiet">Select a pin or a roster name</span></div>
           <div class="campaign-map" id="campaign-world-map"><img id="campaign-world-image" alt="Rendered continent terrain"></div>
         </section>
-        <section class="campaign-card campaign-catalog-card">
-          <input id="campaign-world-search" type="search" placeholder="Search armies" aria-label="Search world armies">
-          <p class="quiet" id="campaign-world-count"></p>
-          <div class="campaign-record-list" id="campaign-world-armies"></div>
-          <div class="campaign-selection" id="campaign-world-selection"></div>
-        </section>
-      </div>
-      <section class="campaign-card campaign-patch-card">
-        <div class="campaign-card-heading"><div><h2>World batch patch</h2><p class="quiet">Use the same typed operations as the World Editor CLI. Nothing is saved by a dry run.</p></div>
-          <div class="campaign-inline-actions"><button type="button" class="button secondary" id="campaign-world-add-army">Add army template</button><button type="button" class="button secondary" id="campaign-world-add-npc">Add NPC template</button></div>
+        <div class="campaign-world-tools">
+          <section class="campaign-card">
+            <h2>Edit the world</h2>
+            <form id="campaign-world-form" class="campaign-world-form">
+              <label>Action<select id="campaign-world-action" name="action"></select></label>
+              <div class="campaign-form-grid"></div>
+              <p class="quiet">Click the terrain to fill X and Z for armies and new towns. Placement and house coordinates are local to their parent.</p>
+              <div class="campaign-apply-actions">
+                <button type="submit" class="button secondary" data-world-submit="preview">Preview edit</button>
+                <button type="submit" class="button primary" data-world-submit="apply">Apply and save</button>
+              </div>
+            </form>
+          </section>
+          <section class="campaign-card campaign-catalog-card">
+            <input id="campaign-world-search" type="search" placeholder="Search armies" aria-label="Search world armies">
+            <p class="quiet" id="campaign-world-count"></p>
+            <div class="campaign-record-list" id="campaign-world-armies"></div>
+            <div class="campaign-selection" id="campaign-world-selection"></div>
+          </section>
         </div>
+      </div>
+      <details class="campaign-card">
+        <summary>Advanced world batch editor</summary>
         <label class="campaign-editor-label" for="campaign-world-patch">Operations JSON</label>
-        <textarea id="campaign-world-patch" class="campaign-code" spellcheck="false">[]</textarea>
+        <textarea id="campaign-world-patch" class="campaign-code" spellcheck="false"></textarea>
         <div class="campaign-apply-actions"><button type="button" class="button secondary" id="campaign-world-dry">Dry run</button><button type="button" class="button primary" id="campaign-world-apply">Apply and save</button></div>
-      </section>`;
+      </details>`;
+    const form = container.querySelector("#campaign-world-form");
+    fillSelect(form.elements.action, Object.entries(worldActions).map(([value, label]) => ({ value, label })),
+      "add-army", (entry) => entry.label);
+    form.elements.action.addEventListener("change", () => worldForm(form.elements.action.value));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const operation = worldFormOperation(form);
+      const preview = event.submitter?.dataset.worldSubmit !== "apply";
+      if (!preview && operation.op.startsWith("remove") && !confirm("Remove this record from the draft?")) return;
+      perform(event.submitter ?? form.querySelector("[data-world-submit]"), () => applyWorld([operation], preview));
+    });
+    worldForm("add-army");
+    const patchText = container.querySelector("#campaign-world-patch");
+    patchText.value = state.worldPatch;
+    patchText.addEventListener("input", () => { state.worldPatch = patchText.value; });
     const image = container.querySelector("#campaign-world-image");
     if (data.bounds) image.src = `/api/campaign/terrain?continent=${state.continent}&revision=${encodeURIComponent(state.revision)}`;
     else {
@@ -242,12 +396,20 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
       const [minX, maxX, minZ, maxZ] = data.bounds;
       const width = maxX - minX, depth = maxZ - minZ;
       if (width > 0 && depth > 0) {
+        image.addEventListener("click", (event) => {
+          if (!["add-army", "move-army", "add-town"].includes(form.elements.action.value)) return;
+          const rect = image.getBoundingClientRect();
+          if (!rect.width || !rect.height || !form.elements.x || !form.elements.z) return;
+          form.elements.x.value = Math.round(minX + width * (event.clientX - rect.left) / rect.width);
+          form.elements.z.value = Math.round(minZ + depth * (event.clientY - rect.top) / rect.height);
+          status("Map coordinates copied to the form.");
+        });
         for (const army of data.armies) {
           const position = army.position;
           if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.z)) continue;
           const pin = button("", "campaign-pin");
           pin.style.left = `${(position.x - minX) / width * 100}%`;
-          pin.style.top = `${(maxZ - position.z) / depth * 100}%`;
+          pin.style.top = `${(position.z - minZ) / depth * 100}%`;
           pin.title = army.title;
           pin.setAttribute("aria-label", `Select ${army.title}`);
           pin.setAttribute("aria-pressed", String(state.selectedArmy?.name === army.name));
@@ -263,39 +425,15 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
       }
     }
     container.querySelector("#campaign-world-search").addEventListener("input", renderWorldArmyList);
-    container.querySelector("#campaign-world-add-army").addEventListener("click", () => {
-      const unit = data.units.find((id) => id !== "Hero");
-      if (!unit) return status("No units are available for a new army.", true);
-      const x = data.bounds ? Math.trunc((data.bounds[0] + data.bounds[1]) / 2) : 0;
-      const z = data.bounds ? Math.trunc((data.bounds[2] + data.bounds[3]) / 2) : 0;
-      insertWorldOperation({
-        op: "add-army", continent: state.continent, name: `aMod${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`,
-        display_name: "New army", attitude: "Agressive", standard: "stVagrant",
-        troops: [[unit, 1]], x, z, radius: 60,
-      });
-    });
-    const firstTown = Object.entries(data.towns).find(([, houses]) => houses.length);
-    container.querySelector("#campaign-world-add-npc").disabled = !firstTown;
-    container.querySelector("#campaign-world-add-npc").addEventListener("click", () => {
-      if (!firstTown) return;
-      insertWorldOperation({ op: "add", continent: state.continent, town: firstTown[0], house: firstTown[1][0],
-        kind: "npc", name: "New NPC", x: 0, y: 0, z: 0, rot: 0 });
-    });
     for (const [id, dryRun] of [["campaign-world-dry", true], ["campaign-world-apply", false]]) {
-      container.querySelector(`#${id}`).addEventListener("click", (event) => {
+      container.querySelector("#" + id).addEventListener("click", (event) => {
         perform(event.currentTarget, async () => {
-          const patch = worldPatchValue();
-          if (!patch.operations.length) throw new Error("Add at least one world operation.");
-          status(dryRun ? "Checking the world patch…" : "Saving the world draft…");
-          const result = await request("/api/campaign/world", {
-            ...patch, revision: state.revision, dry_run: dryRun,
-          });
-          showResult(dryRun ? "World dry run" : "World draft saved", result);
+          const operations = worldPatchValue().operations;
+          await applyWorld(operations, dryRun);
           if (!dryRun) {
-            state.revision = result.revision;
-            await loadMode();
+            state.worldPatch = "[]";
+            container.querySelector("#campaign-world-patch").value = "[]";
           }
-          status(dryRun ? "Dry run complete. Review the result before applying it." : "World draft saved. Review the combined export to include it in a PAK.");
         });
       });
     }
@@ -318,7 +456,7 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
     for (const key of ["x", "z", "yaw", "scale", "y_scale"]) {
       const number = value(key);
       if (!Number.isFinite(number)) throw new Error(`Enter a finite ${key.replace("_", " ")} value.`);
-      requestBody[key] = number;
+      if (operation === "add" || number !== state.forestSelected[key]) requestBody[key] = number;
     }
     const ground = container.querySelector("#campaign-forest-ground").checked;
     requestBody.ground = ground;
@@ -340,7 +478,10 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
     if (!dryRun) {
       state.revision = result.revision;
       state.forestIndex = operation === "remove" ? null : result.index;
-      if (operation === "add") state.forestOffset = Math.floor(result.index / 100) * 100;
+      if (operation === "add") {
+        state.forestModel = "";
+        state.forestOffset = Math.floor(result.index / 100) * 100;
+      }
       state.forestSelected = null;
       state.forestOperation = operation === "remove" ? "add" : "move";
       await loadMode();
@@ -485,7 +626,16 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
 
   function setStoryValue() {
     const operation = container.querySelector("#campaign-story-operation").value;
+    const field = container.querySelector("#campaign-story-field").value;
     const input = container.querySelector("#campaign-story-value");
+    const toggle = container.querySelector("#campaign-story-boolean");
+    const useToggle = operation === "field" && field === "want_live";
+    toggle.hidden = useToggle === false;
+    input.hidden = useToggle;
+    const plain = operation === "field" && (storyText.has(field) || field === "level" || useToggle);
+    input.classList.toggle("campaign-code", !plain);
+    container.querySelector("#campaign-story-value-label").textContent = operation === "create" ?
+      "Create payload (JSON)" : plain ? storyLabels[field] : "Function or literal (JSON)";
     if (operation === "remove") {
       input.value = "";
       return;
@@ -499,7 +649,10 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
       input.value = JSON.stringify(templates[state.storyKind], null, 2);
       return;
     }
-    input.value = JSON.stringify(storyRecordValue(), null, 2);
+    const value = storyRecordValue();
+    if (useToggle) toggle.value = String(value === true);
+    else if (plain) input.value = value;
+    else input.value = value && typeof value === "object" && value.function ? "" : JSON.stringify(value, null, 2);
   }
 
   function syncStoryOperation() {
@@ -507,7 +660,6 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
     state.storyOperation = operation;
     container.querySelector("#campaign-story-field-row").hidden = operation !== "field";
     container.querySelector("#campaign-story-value-row").hidden = operation === "remove";
-    container.querySelector("#campaign-story-value-label").textContent = operation === "create" ? "Create payload (JSON)" : "Field value (JSON)";
     setStoryValue();
   }
 
@@ -554,7 +706,13 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
     else if (operation === "create") result.create = parseJson(container.querySelector("#campaign-story-value"), "Create payload");
     else {
       result.field = container.querySelector("#campaign-story-field").value;
-      result.value = parseJson(container.querySelector("#campaign-story-value"), "Story field value");
+      const input = container.querySelector("#campaign-story-value");
+      if (storyText.has(result.field)) result.value = input.value;
+      else if (result.field === "want_live") result.value = container.querySelector("#campaign-story-boolean").value === "true";
+      else if (result.field === "level") {
+        result.value = Number(input.value);
+        if (!input.value.trim() || !Number.isFinite(result.value)) throw new Error("Enter a number for the quest level.");
+      } else result.value = parseJson(input, "Story field value");
     }
     return result;
   }
@@ -592,14 +750,14 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
         <section class="campaign-card campaign-story-detail" id="campaign-story-record"></section>
       </div>
       <section class="campaign-card campaign-patch-card">
-        <div class="campaign-card-heading"><div><h2>Story operation</h2><p class="quiet">Values use JSON: quote strings, or use $expr and $ref objects for supported functions.</p></div></div>
+        <div class="campaign-card-heading"><div><h2>Story operation</h2><p class="quiet">Edit text and settings directly. Advanced record creation and function fields accept JSON.</p></div></div>
         <div class="campaign-form-grid campaign-story-form">
           <label>Operation<select id="campaign-story-operation"><option value="field">Edit field</option><option value="create">Create record or reply</option><option value="remove">Remove record or reply</option></select></label>
           <label>Record name<input id="campaign-story-name" required></label>
           <label id="campaign-story-path-row">Dialogue path<input id="campaign-story-path" value="root"></label>
           <label id="campaign-story-field-row">Field<select id="campaign-story-field"></select></label>
         </div>
-        <label class="campaign-editor-label" id="campaign-story-value-row"><span id="campaign-story-value-label">Field value (JSON)</span><textarea id="campaign-story-value" class="campaign-code campaign-story-value" spellcheck="false"></textarea></label>
+        <label class="campaign-editor-label" id="campaign-story-value-row"><span id="campaign-story-value-label">Value</span><textarea id="campaign-story-value" class="campaign-story-value"></textarea><select id="campaign-story-boolean" hidden><option value="true">On</option><option value="false">Off</option></select></label>
         <div class="campaign-apply-actions"><button type="button" class="button secondary" id="campaign-story-dry">Dry run</button><button type="button" class="button primary" id="campaign-story-apply">Apply and save</button></div>
       </section>`;
     container.querySelector("#campaign-story-kind").value = state.storyKind;
@@ -645,7 +803,8 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
     container.querySelector("#campaign-story-name").value = state.storySelected?.name || "";
     container.querySelector("#campaign-story-path").value = state.storySelected?.path || "root";
     container.querySelector("#campaign-story-path-row").hidden = state.storyKind !== "dialogue";
-    fillSelect(container.querySelector("#campaign-story-field"), storyFields[state.storyKind], storyFields[state.storyKind][0]);
+    fillSelect(container.querySelector("#campaign-story-field"), storyFields[state.storyKind], storyFields[state.storyKind][0],
+      (field) => storyLabels[field]);
     container.querySelector("#campaign-story-operation").addEventListener("change", syncStoryOperation);
     container.querySelector("#campaign-story-field").addEventListener("change", setStoryValue);
     container.querySelector("#campaign-story-path").addEventListener("change", setStoryValue);
@@ -700,6 +859,7 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
       syncContinents(data.continents);
       if (mode === "world") {
         state.world = data;
+        if (state.selectedArmy) state.selectedArmy = data.armies.find((army) => army.name === state.selectedArmy.name);
         renderWorld();
       } else if (mode === "forests") {
         state.forest = data;
@@ -742,6 +902,9 @@ window.makeCampaignEditor = function makeCampaignEditor(container, statusElement
       state.revision = null;
       state.syncedRevision = null;
       state.world = null;
+      state.worldPatch = "[]";
+      state.selectedArmy = null;
+      state.continent = 1;
       state.forest = null;
       state.forestZone = "";
       state.forestModel = "";
