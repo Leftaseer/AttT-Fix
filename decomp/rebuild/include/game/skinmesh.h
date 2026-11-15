@@ -122,6 +122,9 @@ static_assert(__builtin_offsetof(CSkinAnimationManager, animations) == 0x2C, "CS
  * 0x6CA490 (the objects count themselves in 0x6CA48C). */
 CSkinAnimationManager *__thiscall InitSkinAnimationManager(CSkinAnimationManager *self); /* 0x4C01B0 */
 void *__cdecl GetSkinAnimationManager();                                                 /* 0x4C0EE0 */
+void __thiscall DestroySkinAnimationManager(CSkinAnimationManager *self);                 /* 0x4BFF70 */
+CSkinAnimationManager *__thiscall DeleteSkinAnimationManager(CSkinAnimationManager *self,
+                                                             unsigned char flags); /* 0x4C0220 */
 
 /* the effect object 0x448F10 hands out (0x6CAA28 holds one): 0x447A50 builds it with its file name at +04 */
 struct Effect {

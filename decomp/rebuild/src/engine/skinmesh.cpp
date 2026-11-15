@@ -42,6 +42,7 @@ ORIG_THISCALL(00475720, void *, (void *self, CGameFile *file));       /* matrix 
 ORIG_DATA(00611258); /* "Castle01GateBar.skm", compared with the lowered model name */
 ORIG_DATA(0061126C); /* "Не правильное имя анимации!!!" (cp1251) */
 ORIG_DATA(00611254); /* CSkinAnimationManager::vftable */
+ORIG_DATA(00611238); /* the singleton vtable the destroyed manager ends with */
 ORIG_DATA(00607BAC); /* "e:\\prog\\att1\\Singleton.h" */
 ORIG_DATA(00607BC8); /* the manager creation failure message (cp1251) */
 
@@ -60,6 +61,7 @@ ORIG_THISCALL(004BEA10, void, (MeshDrawTable *self, const MeshDrawTable *source)
 ORIG_THISCALL(004BE990, void, (SkinModelRecord *self));
 ORIG_THISCALL(004C00E0, SkinModelRecord *, (FsHashMap *map, const std::string *key)); /* the model's slot */
 ORIG_THISCALL(004BD930, void *, (void *self, const std::string *name)); /* the animation clip */
+ORIG_THISCALL(004BD430, void, (void *self)); /* the animation clip's destructor */
 ORIG_THISCALL(005542E0, void **, (FsHashMap *map, const std::string *key)); /* the map's value slot */
 ORIG_FN(005E3EAE, void *, (unsigned int size)); /* operator new, called through the original thunk so that the
                                                  * compiler keeps the null checks (it assumes `operator new`
@@ -515,4 +517,94 @@ void *__cdecl GetSkinAnimationManager()
         }
     }
     return manager;
+}
+
+/* 0x4BF940: empties the model map - every node's record (0x4BE990) and key die, then the node itself.  Like
+ * the file maps, the library's view of the map begins at FsHashMap+4: the sentinel is the field at +8 and the
+ * size at +0xC. */
+DECOMP(004BF940)
+void __fastcall ClearSkinModelNodeList(char *mapObject)
+{
+    FsStringNode *head = *(FsStringNode **)(mapObject + 4);
+    FsStringNode *node = head->next;
+    head->next = head;
+    head->prev = head;
+    *(unsigned *)(mapObject + 8) = 0;
+    while (node != head) {
+        FsStringNode *next = node->next;
+        sub_004BE990((SkinModelRecord *)((char *)node + 0x24));
+        node->key.~basic_string();
+        operator delete(node);
+        node = next;
+    }
+}
+
+/* 0x4BFF70: the manager's destructor.  Every cached model's meshes go through their deleting destructor, then
+ * the model nodes (with their records and keys), the clips and their nodes, the two bucket vectors and the
+ * sentinels.  The maps' masks and counts are left as they were, and the vtable ends as the singleton's. */
+DECOMP(004BFF70)
+void __thiscall DestroySkinAnimationManager(CSkinAnimationManager *self)
+{
+    self->vftable = d_00611254;
+
+    FsStringNode *modelsEnd = (FsStringNode *)self->models.sentinel;
+    for (FsStringNode *node = modelsEnd->next; node != modelsEnd; node = node->next) {
+        SkinModelRecord *record = (SkinModelRecord *)((char *)node + 0x24);
+        for (CSkinMesh **mesh = record->meshes.begin; mesh != record->meshes.end; mesh++) {
+            if (*mesh) {
+                void **vftable = *(void ***)*mesh;
+                ((void (__thiscall *)(CSkinMesh *, int))vftable[0])(*mesh, 1);
+            }
+        }
+    }
+    if (self->models.begin)
+        operator delete(self->models.begin);
+    self->models.begin = nullptr;
+    self->models.end = nullptr;
+    self->models.limit = nullptr;
+    ClearSkinModelNodeList((char *)&self->models + 4);
+    operator delete(self->models.sentinel);
+    self->models.sentinel = nullptr;
+
+    FsStringNode *animationsEnd = (FsStringNode *)self->animations.sentinel;
+    for (FsStringNode *node = animationsEnd->next; node != animationsEnd; node = node->next) {
+        void *clip = *(void **)((char *)node + 0x24);
+        if (clip) {
+            sub_004BD430(clip);
+            operator delete(clip);
+        }
+    }
+    if (self->animations.begin)
+        operator delete(self->animations.begin);
+    self->animations.begin = nullptr;
+    self->animations.end = nullptr;
+    self->animations.limit = nullptr;
+    {
+        FsStringNode *head = (FsStringNode *)self->animations.sentinel;
+        FsStringNode *node = head->next;
+        head->next = head;
+        head->prev = head;
+        self->animations.size = 0;
+        while (node != head) {
+            FsStringNode *next = node->next;
+            node->key.~basic_string();
+            operator delete(node);
+            node = next;
+        }
+    }
+    operator delete(self->animations.sentinel);
+    self->animations.sentinel = nullptr;
+
+    self->vftable = d_00611238;
+}
+
+/* 0x4C0220: the deleting destructor, the manager vtable's slot 0 (the skin mesh objects call it with flag 1
+ * when the last of them goes). */
+DECOMP(004C0220)
+CSkinAnimationManager *__thiscall DeleteSkinAnimationManager(CSkinAnimationManager *self, unsigned char flags)
+{
+    DestroySkinAnimationManager(self);
+    if (flags & 1)
+        operator delete(self);
+    return self;
 }
