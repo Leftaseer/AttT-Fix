@@ -1,6 +1,6 @@
 # Differential tests for rebuild/src/engine/input.cpp: CInput state resets on random objects.
 
-from unicorn.x86_const import UC_X86_REG_ECX
+from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ECX
 
 def make_input(h):
     obj = h.alloc(0x7CC, bytes(random.getrandbits(8) for _ in range(0x7CC)))
@@ -365,3 +365,357 @@ def test_input_record_frame_empty(h):
     if got != want:
         return ['recording %r, want %r' % (got, want)]
     return []
+
+
+# ---- the device polls (0x46C980 keyboard, 0x46CB50 mouse) -----------------------------------------
+# The DirectInput devices are faked: the GetDeviceData slot (10) copies scripted DIDEVICEOBJECTDATA events
+# (offset, data) from a cursor and returns the scripted HRESULT, logging every call; the Acquire slot (7) returns
+# DIERR_OTHERAPPHASPRIO a scripted number of times before the scripted result.  The editor flag (EditorUtils +0x40)
+# and the input's listener lists are set for the duration of the test and restored afterwards.
+
+KEYBOARD = 0x0046C980
+MOUSE = 0x0046CB50
+EDITOR = 0x006C88D8
+MOVE_LISTENERS = 0x006C9054
+KEY_DOWN_LISTENERS = 0x006C9044
+
+
+def _poll_getdata(h, script, cursor, log):
+    """stdcall (dev, size, data, count*, flags) -> hr: logs the call, fills count and copies the events"""
+    code = (b'\x53\x56\x57\x55'                       # push ebx/esi/edi/ebp
+            + b'\x8b\x1d' + struct.pack('<I', log)
+            + b'\xff\x05' + struct.pack('<I', log)    # inc dword [log]
+            + b'\x6b\xdb\x14'                          # imul ebx, ebx, 20
+            + b'\x81\xc3' + struct.pack('<I', log + 4)   # add ebx, log+4
+            + b'\x8b\x44\x24\x14\x89\x03'              # [ebx] = dev
+            + b'\x8b\x44\x24\x18\x89\x43\x04'          # [ebx+4] = size
+            + b'\x8b\x44\x24\x1c\x89\x43\x08'          # [ebx+8] = data
+            + b'\x8b\x44\x24\x20\x8b\x00\x89\x43\x0c'  # [ebx+0C] = *count
+            + b'\x8b\x44\x24\x24\x89\x43\x10'          # [ebx+10] = flags
+            + b'\x8b\x6c\x24\x20'                      # mov ebp, count*
+            + b'\x8b\x7c\x24\x1c'                      # mov edi, data
+            + b'\x8b\x1d' + struct.pack('<I', cursor)  # mov ebx, [cursor]
+            + b'\xbe' + struct.pack('<I', script)      # mov esi, script
+            + b'\x03\xf3'                              # add esi, ebx
+            + b'\x8b\x06'                              # mov eax, [esi]      n
+            + b'\x8b\x56\x04'                          # mov edx, [esi+4]    hr
+            + b'\x89\x45\x00'                          # mov [ebp], eax
+            + b'\x6b\xc8\x14'                          # imul ecx, eax, 0x14
+            + b'\x03\xd9'                              # add ebx, ecx
+            + b'\x83\xc3\x08'                          # add ebx, 8
+            + b'\x89\x1d' + struct.pack('<I', cursor)  # mov [cursor], ebx
+            + b'\x8d\x76\x08'                          # lea esi, [esi+8]
+            + b'\xf3\xa4'                              # rep movsb (ecx = n * 0x14 bytes)
+            + b'\x89\xd0'                              # mov eax, edx
+            + b'\x5d\x5f\x5e\x5b'                      # pop ebp/edi/esi/ebx
+            + b'\xc2\x14\x00')                         # ret 0x14
+    area = h.alloc(len(code), code)
+    return area
+
+
+def _poll_acquire(h, cell):
+    """stdcall (dev) -> hr: [cell] errors of 0x8007001E, then [cell+4]; [cell+8] counts the calls"""
+    code = (b'\xb8' + struct.pack('<I', cell)
+            + b'\x83\x38\x00'                          # cmp dword [eax], 0
+            + b'\x74\x0e'                              # je done
+            + b'\x83\x28\x01'                          # sub dword [eax], 1
+            + b'\xff\x40\x08'                          # inc dword [eax+8]
+            + b'\xb8\x1e\x00\x07\x80'                  # mov eax, 0x8007001E
+            + b'\xc2\x04\x00'                          # ret 4
+            + b'\xff\x40\x08'                          # done: inc dword [eax+8]
+            + b'\x8b\x40\x04'                          # mov eax, [eax+4]
+            + b'\xc2\x04\x00')                         # ret 4
+    area = h.alloc(len(code), code)
+    return area
+
+
+def _poll_device(h, events, hr=0, acquire_pending=0, acquire_result=0):
+    """a device (vtable slot 7 Acquire, 10 GetDeviceData) and the cells its stubs work from"""
+    script = struct.pack('<II', len(events), hr & 0xFFFFFFFF)
+    for offset, data in events:
+        script += struct.pack('<5I', offset, data & 0xFFFFFFFF, 0, 0, 0)
+    script += bytes(8)
+    cells = {
+        'script': h.alloc(len(script), script),
+        'cursor': h.alloc(4, bytes(4)),
+        'log': h.alloc(4 + 32 * 20, bytes(4 + 32 * 20)),
+        'acquire': h.alloc(12, struct.pack('<III', acquire_pending, acquire_result & 0xFFFFFFFF, 0)),
+    }
+    getdata = _poll_getdata(h, cells['script'], cells['cursor'], cells['log'])
+    acquire = _poll_acquire(h, cells['acquire'])
+    vtable = h.alloc(0x2C, bytes(0x2C))
+    h.uc.mem_write(vtable + 0x1C, struct.pack('<I', acquire))
+    h.uc.mem_write(vtable + 0x28, struct.pack('<I', getdata))
+    device = h.alloc(4, struct.pack('<I', vtable))
+    cells['device'] = device
+    cells['vtable'] = vtable
+    return cells
+
+
+def _poll_input(h, device, acquired_offset):
+    obj = h.alloc(0x7CC, bytes(0x7CC))
+    h.uc.mem_write(obj + 0x44, struct.pack('<I', device))     # also +0x148: both devices point here
+    h.uc.mem_write(obj + 0x148, struct.pack('<I', device))
+    h.uc.mem_write(obj + acquired_offset, b'\x01')
+    keys = h.alloc(0x100, bytes(0x100))
+    buttons = h.alloc(0x100, bytes(0x100))
+    h.uc.mem_write(obj + 0x660, struct.pack('<II', keys, 0))
+    h.uc.mem_write(obj + 0x66C, struct.pack('<II', buttons, 0))
+    return obj, keys, buttons
+
+
+def _poll_getdata_calls(h, cells):
+    n = _loader_u32(h, cells['log'])
+    return [struct.unpack('<5I', h.uc.mem_read(cells['log'] + 4 + 20 * i, 20)) for i in range(n)]
+
+
+def _with_editor(h, flag):
+    """points the editor singleton at a fake object with the given mode flag; returns the saved pointer"""
+    saved = bytes(h.uc.mem_read(EDITOR, 4))
+    editor = h.alloc(0x48, bytes(0x48))
+    h.uc.mem_write(editor + 0x40, bytes([1 if flag else 0]))
+    h.uc.mem_write(EDITOR, struct.pack('<I', editor))
+    return saved
+
+
+def test_input_poll_keyboard(h):
+    cells = _poll_device(h, [(0x10, 0x80), (0x20, 0x00), (0x30, 0x81)])
+    obj, keys, _ = _poll_input(h, cells['device'], 0x7C7)
+    edge = bytes([0x02, 0x08, 0x0A, 0x00, 0x01, 0x04, 0xFF]) + bytes(0x100 - 7)
+    h.uc.mem_write(obj + 0x6C4, edge)
+    h.uc.mem_write(obj + 0x14C, struct.pack('<I', 0x40))
+    h.uc.mem_write(obj + 0x40, struct.pack('<I', 0))
+    diffs = h.compare(KEYBOARD, regs={UC_X86_REG_ECX: obj})
+    if diffs:
+        return diffs
+    res = h.call(KEYBOARD, regs={UC_X86_REG_ECX: obj})
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    problems = []
+    calls = _poll_getdata_calls(h, cells)
+    if calls != [(cells['device'], 0x14, obj + 0x150, 0x40, 0)]:
+        problems.append('device calls %r' % (calls,))
+    if res['eax'] != 3:
+        problems.append('eax %r, want 3' % res['eax'])
+    if _loader_u32(h, obj + 0x14C) != 3:
+        problems.append('event count %d' % _loader_u32(h, obj + 0x14C))
+    if _loader_u32(h, obj + 0x664) != 3:
+        problems.append('key count %d' % _loader_u32(h, obj + 0x664))
+    if bytes(h.uc.mem_read(keys, 6)) != bytes([0x10, 1, 0x20, 0, 0x30, 1]):
+        problems.append('key events %r' % bytes(h.uc.mem_read(keys, 6)))
+    state = h.uc.mem_read(obj + 0x48, 0x100)
+    if state[0x10] != 0x90 or state[0x20] != 0x20 or state[0x30] != 0xB0 or state[0] != 0:
+        problems.append('key state %02X %02X %02X' % (state[0x10], state[0x20], state[0x30]))
+    gotten = h.uc.mem_read(obj + 0x6C4, 0x100)
+    want_edge = bytearray(edge)
+    want_edge[0], want_edge[1], want_edge[2], want_edge[5], want_edge[6] = 1, 4, 1, 4, 1
+    want_edge[0x10] = (want_edge[0x10] & 0xFB) | 2
+    want_edge[0x20] = (want_edge[0x20] & 0xFE) | 8
+    want_edge[0x30] = (want_edge[0x30] & 0xFB) | 2
+    if bytes(gotten) != bytes(want_edge):
+        i = next(j for j in range(0x100) if gotten[j] != want_edge[j])
+        problems.append('edge flags differ at %02X: %02X want %02X' % (i, gotten[i], want_edge[i]))
+    if _loader_u32(h, obj + 0x40) != 0:
+        problems.append('result %08X' % _loader_u32(h, obj + 0x40))
+    return problems
+
+
+def test_input_poll_keyboard_retry(h):
+    cells = _poll_device(h, [], hr=0x80070001, acquire_pending=2, acquire_result=0)
+    obj, _, _ = _poll_input(h, cells['device'], 0x7C7)
+    h.uc.mem_write(obj + 0x48, b'\xff' * 0x100)
+    h.uc.mem_write(obj + 0x664, struct.pack('<I', 7))
+    diffs = h.compare(KEYBOARD, regs={UC_X86_REG_ECX: obj})
+    if diffs:
+        return diffs
+    res = h.call(KEYBOARD, regs={UC_X86_REG_ECX: obj})
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    problems = []
+    if bytes(h.uc.mem_read(obj + 0x48, 0x100)) != bytes(0x100):
+        problems.append('key state not cleared')
+    if _loader_u32(h, obj + 0x664):
+        problems.append('key count %d' % _loader_u32(h, obj + 0x664))
+    if res['eax'] != obj + 0x48:                      # the original returns the memset's destination
+        problems.append('eax %08X, want the cleared key state' % res['eax'])
+    if _loader_u32(h, cells['acquire'] + 8) != 3:
+        problems.append('acquire calls %d, want 3' % _loader_u32(h, cells['acquire'] + 8))
+    return problems
+
+
+def test_input_poll_keyboard_not_acquired(h):
+    cells = _poll_device(h, [(0x10, 0x80)])
+    obj, _, _ = _poll_input(h, cells['device'], 0x7C7)
+    h.uc.mem_write(obj + 0x7C7, b'\x00')
+    h.uc.mem_write(obj + 0x48, b'\xaa' * 0x100)
+    eax = 0x12345678
+    diffs = h.compare(KEYBOARD, regs={UC_X86_REG_ECX: obj, UC_X86_REG_EAX: eax}, ret=None)
+    if diffs:
+        return diffs
+    res = h.call(KEYBOARD, regs={UC_X86_REG_ECX: obj, UC_X86_REG_EAX: eax})
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    problems = []
+    if _poll_getdata_calls(h, cells):
+        problems.append('the device was read')
+    if bytes(h.uc.mem_read(obj + 0x48, 0x100)) != b'\xaa' * 0x100:
+        problems.append('key state changed')
+    return problems
+
+
+def test_input_poll_mouse(h):
+    cells = _poll_device(h, [(0, 5), (4, 0xFFFFFFFD), (8, 1), (0xC, 0x80), (0xC, 0x00), (0xE, 0x80)])
+    obj, _, buttons = _poll_input(h, cells['device'], 0x7C8)
+    h.uc.mem_write(obj + 0x660, struct.pack('<II', h.alloc(0x20, bytes(0x20)), 0))
+    h.uc.mem_write(obj + 0x40, struct.pack('<I', 0x55))
+    saved = _with_editor(h, False)
+    try:
+        diffs = h.compare(MOUSE, regs={UC_X86_REG_ECX: obj, UC_X86_REG_EAX: 0x12345678})
+        if diffs:
+            return diffs
+        res = h.call(MOUSE, regs={UC_X86_REG_ECX: obj, UC_X86_REG_EAX: 0x12345678})
+        if res['fault']:
+            return ['replacement faulted: %s' % res['fault']]
+        problems = []
+        if _poll_getdata_calls(h, cells) != [(cells['device'], 0x14, obj + 0x150, 0x40, 0)]:
+            problems.append('device calls %r' % (_poll_getdata_calls(h, cells),))
+        if struct.unpack('<fff', h.uc.mem_read(obj + 0x650, 12)) != (5.0, -3.0, 1.0):
+            problems.append('motion %r' % (h.uc.mem_read(obj + 0x650, 12),))
+        if _loader_u32(h, obj + 0x670) != 3 or struct.unpack('<III', h.uc.mem_read(buttons, 12)) != (0, 1, 4):
+            problems.append('button log %d %r' % (_loader_u32(h, obj + 0x670), h.uc.mem_read(buttons, 12)))
+        if h.uc.mem_read(obj + 0x7C5, 1) != b'\x00' or h.uc.mem_read(obj + 0x7C6, 1) != b'\x01':
+            problems.append('held flags left %02X middle %02X'
+                            % (h.uc.mem_read(obj + 0x7C5, 1)[0], h.uc.mem_read(obj + 0x7C6, 1)[0]))
+        if h.uc.mem_read(obj + 0x7C9, 1) != b'\x01':
+            problems.append('motion not marked')
+        if res['eax'] != 0x40A00000:                  # the motion floats, no listeners
+            problems.append('eax %08X, want the mouseX bits' % res['eax'])
+        if _loader_u32(h, obj + 0x40) != 0:
+            problems.append('result %08X' % _loader_u32(h, obj + 0x40))
+        return problems
+    finally:
+        h.uc.mem_write(EDITOR, saved)
+
+
+def test_input_poll_mouse_button_guard(h):
+    """without the editor, the left press while the right button is down is dropped; in the editor it counts"""
+    problems = []
+    for editor, want_count, want_log in ((False, 1, (2,)), (True, 2, (2, 0))):
+        cells = _poll_device(h, [(0xD, 0x80), (0xC, 0x80)])
+        obj, _, buttons = _poll_input(h, cells['device'], 0x7C8)
+        h.uc.mem_write(obj + 0x7C4, b'\x01')          # the right button is held
+        saved = _with_editor(h, editor)
+        try:
+            diffs = h.compare(MOUSE, regs={UC_X86_REG_ECX: obj, UC_X86_REG_EAX: 0})
+            if diffs:
+                return diffs
+            res = h.call(MOUSE, regs={UC_X86_REG_ECX: obj, UC_X86_REG_EAX: 0})
+            if res['fault']:
+                return ['replacement faulted: %s' % res['fault']]
+            count = _loader_u32(h, obj + 0x670)
+            if count != want_count:
+                problems.append('editor %d: button count %d, want %d' % (editor, count, want_count))
+            if h.uc.mem_read(obj + 0x7C5, 1) != bytes([1 if editor else 0]):
+                problems.append('editor %d: left held flag %02X' % (editor, h.uc.mem_read(obj + 0x7C5, 1)[0]))
+            if struct.unpack('<%dI' % count, h.uc.mem_read(buttons, 4 * count)) != want_log:
+                problems.append('editor %d: button log %r, want %r'
+                                % (editor, h.uc.mem_read(buttons, 4 * count), want_log))
+        finally:
+            h.uc.mem_write(EDITOR, saved)
+    return problems
+
+
+def test_input_poll_mouse_retry(h):
+    cells = _poll_device(h, [], hr=0x80070001, acquire_pending=1, acquire_result=0x80004005)
+    obj, _, buttons = _poll_input(h, cells['device'], 0x7C8)
+    h.uc.mem_write(obj + 0x650, b'\x11' * 12)
+    h.uc.mem_write(obj + 0x670, struct.pack('<I', 5))
+    h.uc.mem_write(buttons, b'\x03' * 4)
+    diffs = h.compare(MOUSE, regs={UC_X86_REG_ECX: obj, UC_X86_REG_EAX: 0})
+    if diffs:
+        return diffs
+    res = h.call(MOUSE, regs={UC_X86_REG_ECX: obj, UC_X86_REG_EAX: 0})
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    problems = []
+    if bytes(h.uc.mem_read(obj + 0x650, 12)) != bytes(12):
+        problems.append('motion %r, want cleared' % (h.uc.mem_read(obj + 0x650, 12),))
+    if _loader_u32(h, obj + 0x670):
+        problems.append('button count %d' % _loader_u32(h, obj + 0x670))
+    if _loader_u32(h, obj + 0x40) != 0x80004005:
+        problems.append('result %08X' % _loader_u32(h, obj + 0x40))
+    if _loader_u32(h, cells['acquire'] + 8) != 2:
+        problems.append('acquire calls %d, want 2' % _loader_u32(h, cells['acquire'] + 8))
+    if res['eax'] != 0x80004005:
+        problems.append('eax %08X, want the last result' % res['eax'])
+    return problems
+
+
+def test_input_poll_mouse_not_acquired(h):
+    cells = _poll_device(h, [(0, 7)])
+    obj, _, _ = _poll_input(h, cells['device'], 0x7C8)
+    h.uc.mem_write(obj + 0x7C8, b'\x00')
+    h.uc.mem_write(obj + 0x650, b'\x2a' * 12)
+    eax = 0xDEADBEEF
+    diffs = h.compare(MOUSE, regs={UC_X86_REG_ECX: obj, UC_X86_REG_EAX: eax}, ret=None)
+    if diffs:
+        return diffs
+    res = h.call(MOUSE, regs={UC_X86_REG_ECX: obj, UC_X86_REG_EAX: eax})
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    problems = []
+    if res['eax'] != eax:
+        problems.append('eax %08X, want the previous EAX' % res['eax'])
+    if _poll_getdata_calls(h, cells):
+        problems.append('the device was read')
+    if bytes(h.uc.mem_read(obj + 0x650, 12)) != b'\x2a' * 12:
+        problems.append('the motion was cleared')
+    return problems
+
+
+def _move_listener_stub(h, log):
+    code = (b'\x53\x56\x57'                           # push ebx/esi/edi
+            + b'\xbb' + struct.pack('<I', log)        # mov ebx, log
+            + b'\x8b\x03'                              # mov eax, [ebx]   the count
+            + b'\xff\x03'                              # inc dword [ebx]
+            + b'\x6b\xc0\x10'                          # imul eax, eax, 16
+            + b'\x8d\x7c\x03\x04'                      # lea edi, [ebx+eax+4]
+            + b'\x8b\x74\x24\x10'                      # mov esi, [esp+0x10]   the event
+            + b'\xb9\x04\x00\x00\x00'                  # mov ecx, 4
+            + b'\xf3\xa5'                              # rep movsd
+            + b'\xb8\xcd\xab\x00\x00'                  # mov eax, 0xABCD
+            + b'\x5f\x5e\x5b'                          # pop edi/esi/ebx
+            + b'\xc2\x04\x00')                         # ret 4
+    return h.alloc(len(code), code)
+
+
+def test_input_poll_mouse_motion_listener(h):
+    cells = _poll_device(h, [(0, 2), (4, 4)])
+    obj, _, _ = _poll_input(h, cells['device'], 0x7C8)
+    log = h.alloc(4 + 16 * 4, bytes(4 + 16 * 4))
+    stub = _move_listener_stub(h, log)
+    vt = h.alloc(8, struct.pack('<II', 0, stub))
+    listener = h.alloc(8, struct.pack('<II', vt, 0))
+    saved = bytes(h.uc.mem_read(MOVE_LISTENERS, 4))
+    h.uc.mem_write(MOVE_LISTENERS, struct.pack('<I', listener))
+    try:
+        diffs = h.compare(MOUSE, regs={UC_X86_REG_ECX: obj, UC_X86_REG_EAX: 0})
+        if diffs:
+            return diffs
+        res = h.call(MOUSE, regs={UC_X86_REG_ECX: obj, UC_X86_REG_EAX: 0})
+        if res['fault']:
+            return ['replacement faulted: %s' % res['fault']]
+        problems = []
+        if _loader_u32(h, log) != 1:
+            problems.append('listener calls %d, want 1' % _loader_u32(h, log))
+        else:
+            got = struct.unpack('<Ifff', h.uc.mem_read(log + 4, 16))
+            if got[0] != 0x0060C798 or got[1:] != (2.0, 4.0, 0.0):
+                problems.append('move event %r' % (got,))
+        if res['eax'] != 0xABCD:
+            problems.append('eax %08X, want the listener result' % res['eax'])
+        if bytes(h.uc.mem_read(MOVE_LISTENERS, 4)) != struct.pack('<I', listener):
+            problems.append('the listener list head was not kept')
+        return problems
+    finally:
+        h.uc.mem_write(MOVE_LISTENERS, saved)

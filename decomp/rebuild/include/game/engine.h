@@ -82,12 +82,25 @@ struct CInputKey {                           /* pressed key of this frame */
     unsigned char pressed;
 };
 
+struct CInputEvent {                         /* DIDEVICEOBJECTDATA of the buffered reads */
+    unsigned offset;                         /* 00: key dik / DIMOFS_* offset of the mouse */
+    unsigned data;                           /* 04: key state (0x80 down) / mouse delta or button mask */
+    unsigned timestamp;                      /* 08 */
+    unsigned sequence;                       /* 0C */
+    unsigned appData;                        /* 10 */
+};
+
 struct CInput {                              /* CSingleton<CInput> (0x7CC bytes), CUpdateObject at +4 */
     void *vftable;
     CUpdatePart updater;                     /* +004 */
-    char pad008[0x048 - 0x008];
-    unsigned char keyState[256];             /* +048 DirectInput keyboard state */
-    char pad148[0x650 - 0x148];
+    char pad008[0x03C - 0x008];
+    void *directInput;                       /* +03C IDirectInput8 */
+    long result;                             /* +040 HRESULTs of the polls */
+    void *keyboard;                          /* +044 IDirectInputDevice8 (keyboard) */
+    unsigned char keyState[256];             /* +048 DirectInput keyboard state, 0x80 while held */
+    void *mouse;                             /* +148 IDirectInputDevice8 (mouse) */
+    unsigned eventCount;                     /* +14C buffered events read by the last poll */
+    CInputEvent events[0x40];                /* +150 */
     float mouseX;                            /* +650 the frame's mouse motion */
     float mouseY;                            /* +654 */
     float mouseWheel;                        /* +658 */
@@ -101,20 +114,31 @@ struct CInput {                              /* CSingleton<CInput> (0x7CC bytes)
     unsigned char *playbackData;             /* +678 the recording (input.dat) */
     unsigned playbackSize;                   /* +67C its size in bytes / the writer's position */
     unsigned playbackCursor;                 /* +680 the player's position */
-    char pad684[0x7C4 - 0x684];
-    bool click;                              /* +7C4 */
-    bool doubleClick;                        /* +7C5 */
-    bool rightClick;                         /* +7C6 */
-    char pad7C7[0x7CC - 0x7C7];
+    char pad684[0x6C4 - 0x684];
+    unsigned char keyEdge[0x100];            /* +6C4 per key: 2 press pending, 1 held seen, 8 release
+                                                pending, 4 free seen (the next poll turns 2 / 8 into 1 / 4) */
+    bool rightButton;                        /* +7C4 held */
+    bool leftButton;                         /* +7C5 */
+    bool middleButton;                       /* +7C6 */
+    bool keyboardAcquired;                   /* +7C7 */
+    bool mouseAcquired;                      /* +7C8 */
+    bool mouseMoved;                         /* +7C9 the last mouse poll saw motion */
+    char pad7CA[0x7CC - 0x7CA];
 
     static CInput *Instance();               /* 0x4215D0 */
     void LoadPlayback();                     /* 0x46B4F0 */
     void PlaybackFrame();                    /* 0x46C6E0 */
     void RecordFrame();                      /* 0x46D0E0 */
+    unsigned PollKeyboard();                 /* 0x46C980 */
     void ResetMouse();                       /* 0x46CEB0 */
     void ResetKeys();                        /* 0x46CEF0 */
     void Reset();                            /* 0x46CF30 */
 };
+
+/* The mouse poll of the input object: the original passes the input in ECX and threads the previous EAX (from the
+ * keyboard poll) through it, and it returns EAX untouched when the mouse is not acquired. */
+unsigned PollMouse(CInput *input, unsigned previous);   /* 0x46CB50 */
+
 static_assert(sizeof(CInput) == 0x7CC, "CInput is 0x7CC bytes");
 #ifdef DECOMP_DEBUG_LOG
 extern "C" void DebugLog(const char *text);  /* main.cpp: a line in decomp_debug.log next to the exe */
@@ -182,6 +206,12 @@ struct CEngine {
 static_assert(sizeof(CEngine) == 0xD8, "CEngine is 0xD8 bytes");
 static_assert(__builtin_offsetof(CEngine, state) == 0xAC, "CEngine::state");
 static_assert(__builtin_offsetof(CInput, keys) == 0x660, "CInput::keys");
+static_assert(__builtin_offsetof(CInput, keyboard) == 0x44, "CInput::keyboard");
+static_assert(__builtin_offsetof(CInput, events) == 0x150, "CInput::events");
+static_assert(__builtin_offsetof(CInput, keyEdge) == 0x6C4, "CInput::keyEdge");
+static_assert(__builtin_offsetof(CInput, leftButton) == 0x7C5, "CInput::leftButton");
+static_assert(__builtin_offsetof(CInput, keyboardAcquired) == 0x7C7, "CInput::keyboardAcquired");
+static_assert(__builtin_offsetof(CInput, mouseMoved) == 0x7C9, "CInput::mouseMoved");
 static_assert(__builtin_offsetof(CInput, mouseX) == 0x650, "CInput::mouseX");
 static_assert(__builtin_offsetof(CInput, mode) == 0x674, "CInput::mode");
 static_assert(__builtin_offsetof(CInput, playbackData) == 0x678, "CInput::playbackData");
