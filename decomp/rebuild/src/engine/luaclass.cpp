@@ -835,15 +835,19 @@ ORIG_THISCALL(00465950, void *, (void *self, void *lua, void *collector)); /* CH
 ORIG_THISCALL(00525B50, void *, (void *self, void *lua, void *collector)); /* CBorder */
 
 ORIG_DATA(0061048C); /* String's first method name (none in this build) */
+ORIG_DATA(00610490); /* String's method functions */
 ORIG_DATA(00610494); /* String's {name, function} entries from the second one */
 ORIG_DATA(00563900); /* String's method dispatcher */
 ORIG_DATA(0061CF00); /* LuaWrapper's first method name */
+ORIG_DATA(0061CF04); /* LuaWrapper's method functions */
 ORIG_DATA(0061CF08);
 ORIG_DATA(00563950);
 ORIG_DATA(006C0AC8); /* CWorldHero's first method name */
+ORIG_DATA(006C0AD0);
 ORIG_DATA(006C0AD8);
 ORIG_DATA(005639A0);
 ORIG_DATA(006C3960); /* CBorder's first method name */
+ORIG_DATA(006C3964); /* CBorder's method functions */
 ORIG_DATA(006C3968);
 ORIG_DATA(005639F0);
 
@@ -941,4 +945,52 @@ int __cdecl LuaBorderBinding(void *lua)
     ORIG_CALL(004032A0)(lua, wrapper);
     ORIG_CALL(00403610)(lua, -2, 0);
     return 1;
+}
+
+/* 0x563900, 0x563950, 0x5639A0, 0x5639F0: the closures the four tables above fill.  The method's number rides
+ * in the closure's upvalue(1); the call's only argument (index 1) is the wrapper table, whose [0] is the light
+ * userdata the class's method gets as its this.  CWorldHero's entries also hold an offset into the object. */
+typedef int (__thiscall *LuaMethodFunction)(void *object, void *lua);
+
+static void *TakeScriptObject(void *lua, int &method)
+{
+    method = (int)ORIG_CALL(00402DE0)(lua, -10003); /* lua_tonumber(L, lua_upvalueindex(1)) */
+    ORIG_CALL(00403390)(lua, 1, 0);                 /* the wrapper table */
+    void *object = ORIG_CALL(00402FD0)(lua, -1);
+    ORIG_CALL(00402A70)(lua, -2);
+    return object;
+}
+
+DECOMP(00563900)
+int __cdecl LuaStringMethodDispatch(void *lua)
+{
+    int method;
+    void *object = TakeScriptObject(lua, method);
+    return (*(LuaMethodFunction *)(d_00610490 + method * 8))(object, lua);
+}
+
+DECOMP(00563950)
+int __cdecl LuaWrapperMethodDispatch(void *lua)
+{
+    int method;
+    void *object = TakeScriptObject(lua, method);
+    return (*(LuaMethodFunction *)(d_0061CF04 + method * 8))(object, lua);
+}
+
+DECOMP(005639A0)
+int __cdecl LuaWorldHeroMethodDispatch(void *lua)
+{
+    int method;
+    void *object = TakeScriptObject(lua, method);
+    const char *entry = d_006C0AD0 + method * 16;
+    int offset = *(const int *)(entry + 4);
+    return (*(LuaMethodFunction *)entry)((char *)object + offset, lua);
+}
+
+DECOMP(005639F0)
+int __cdecl LuaBorderMethodDispatch(void *lua)
+{
+    int method;
+    void *object = TakeScriptObject(lua, method);
+    return (*(LuaMethodFunction *)(d_006C3964 + method * 8))(object, lua);
 }
