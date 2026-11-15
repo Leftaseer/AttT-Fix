@@ -38,6 +38,24 @@ ORIG_DATA(006CA490); /* the manager the objects created (deleted with the last o
 ORIG_THISCALL(00459290, CGameFile *, (CGameFile *self, const std::string *name, int noLoad));
 ORIG_THISCALL(004BD0F0, void *, (void *self, CGameFile *file));       /* skeleton sub object */
 ORIG_THISCALL(00475720, void *, (void *self, CGameFile *file));       /* matrix sub object */
+
+ORIG_DATA(00611258); /* "Castle01GateBar.skm", compared with the lowered model name */
+ORIG_DATA(0061126C); /* "Не правильное имя анимации!!!" (cp1251) */
+
+extern "C" __declspec(dllimport) int __cdecl msvc_atoi(const char *s) __asm__("_atoi");
+
+ORIG_THISCALL(00422D80, void, (FsHashMap *map, FsStringNode **node, const std::string *key)); /* FindName */
+ORIG_THISCALL(00434AB0, void, (StringVector *self, const std::string *item)); /* vector<string>::push_back */
+ORIG_THISCALL(004BEE20, SkinMeshVector *, (CSkinAnimationManager *self, SkinMeshVector *out,
+                                           const std::string *name, int frames, MeshDrawTable *drawTable));
+ORIG_THISCALL(004BE940, SkinModelRecord *, (SkinModelRecord *self, const SkinMeshVector *meshes,
+                                            const MeshDrawTable *drawTable)); /* the record constructor */
+ORIG_THISCALL(004EE310, void, (SkinMeshVector *self, const SkinMeshVector *source));
+ORIG_THISCALL(004BEA10, void, (MeshDrawTable *self, const MeshDrawTable *source));
+ORIG_THISCALL(004BE990, void, (SkinModelRecord *self));
+ORIG_THISCALL(004C00E0, SkinModelRecord *, (FsHashMap *map, const std::string *key)); /* the model's slot */
+ORIG_THISCALL(004BD930, void *, (void *self, const std::string *name)); /* the animation clip */
+ORIG_THISCALL(005542E0, void **, (FsHashMap *map, const std::string *key)); /* the map's value slot */
 ORIG_THISCALL(00487860, void, (SkinSubObjectVector *self, SkinSubObject **position, unsigned count,
                                SkinSubObject **value));
 
@@ -356,4 +374,106 @@ SkinMeshObject *__thiscall DeleteSkinMeshObject(SkinMeshObject *self, unsigned c
     if (flags & 1)
         operator delete(self);
     return self;
+}
+
+/* --- model loading ------------------------------------------------------------------------------------- */
+
+/* Splits the text at every separator into copies; the tail after the last separator is a part even when it is
+ * empty (the original pushes it outside the loop). */
+DECOMP(004F7290)
+StringVector *__cdecl SplitStringVector(StringVector *parts, const std::string *text, char separator)
+{
+    parts->begin = nullptr;
+    parts->end = nullptr;
+    parts->limit = nullptr;
+
+    std::string::size_type start = 0;
+    std::string::size_type pos = text->find(separator, start);
+    while (pos != std::string::npos) {
+        {
+            std::string piece = text->substr(start, pos - start);
+            sub_00434AB0(parts, &piece);
+        }
+        start = pos + 1;
+        pos = text->find(separator, start);
+    }
+    {
+        std::string tail = text->substr(start, text->size() - start);
+        sub_00434AB0(parts, &tail);
+    }
+    return parts;
+}
+
+/* 0x434A60: std::vector<std::string>'s destructor - every element, then the buffer; the pointers always end
+ * up cleared, the allocator slot at +00 is left as it was. */
+DECOMP(00434A60)
+void __cdecl DestroyStringVector(StringVector *parts, unsigned int unusedEax)
+{
+    (void)unusedEax;
+    if (parts->begin) {
+        for (std::string *it = parts->begin; it != parts->end; it++)
+            it->~basic_string();
+        operator delete(parts->begin);
+    }
+    parts->begin = nullptr;
+    parts->end = nullptr;
+    parts->limit = nullptr;
+}
+
+/* 0x4C0240: a model name is "model;frames;animation".  The model is looked up by its lowered first token (the
+ * castle gate bar has a special case of its own) and loaded on a miss; the loaded meshes and draw table are
+ * copied into the object and the new model is cached as a copy.  The clip of the third token comes from the
+ * clip map, a missing one being built by 0x4BD930.  Fewer than three tokens throws.  The loaded vector only
+ * has its buffer freed, as in the original. */
+DECOMP(004C0240)
+void __thiscall LoadSkinModel(CSkinAnimationManager *self, const std::string *name, SkinMeshVector *meshes,
+                              void **animation, MeshDrawTable *drawTable)
+{
+    StringVector parts;
+    SplitStringVector(&parts, name, ';');
+    if (!parts.begin || (unsigned)(parts.end - parts.begin) < 3) {
+        CGameException e(std::string(ORIG_STR(0061126C)), nullptr, 0);
+        _CxxThrowException(&e, d_0069916C);
+    }
+
+    std::string modelName = parts.begin[0];
+    std::string framesName = parts.begin[1];
+    std::string animationName = parts.begin[2];
+    int frames = msvc_atoi(framesName.c_str());
+    modelName = CharLowerA((char *)modelName.c_str());
+
+    FsStringNode *node;
+    sub_00422D80(&self->models, &node, &modelName);
+
+    if (modelName == ORIG_STR(00611258) || node == (FsStringNode *)self->models.sentinel) {
+        SkinMeshVector loaded;
+        sub_004BEE20(self, &loaded, &modelName, frames, drawTable);
+        sub_004EE310(meshes, &loaded);
+        if (loaded.begin)
+            operator delete(loaded.begin);
+
+        SkinModelRecord record;
+        sub_004BE940(&record, meshes, drawTable);
+        SkinModelRecord *entry = sub_004C00E0(&self->models, &modelName);
+        sub_004EE310(&entry->meshes, &record.meshes);
+        sub_004BEA10(&entry->drawTable, &record.drawTable);
+        sub_004BE990(&record);
+    } else {
+        SkinModelRecord *record = (SkinModelRecord *)((char *)node + 0x24);
+        sub_004EE310(meshes, &record->meshes);
+        sub_004BEA10(drawTable, &record->drawTable);
+    }
+
+    FsStringNode *clipNode;
+    sub_00422D80(&self->animations, &clipNode, &animationName);
+    if (clipNode == (FsStringNode *)self->animations.sentinel) {
+        void *memory = operator new(0x38);
+        void *clip = memory ? sub_004BD930(memory, &animationName) : nullptr;
+        *animation = clip;
+        *sub_005542E0(&self->animations, &animationName) = clip;
+    } else {
+        *animation = *(void **)((char *)clipNode + 0x24);
+    }
+
+    DestroyStringVector(&parts, 0);
 }

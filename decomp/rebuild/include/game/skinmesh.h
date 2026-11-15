@@ -8,6 +8,7 @@
  * here (the build's convention check counts its words). */
 #pragma once
 #include "game/common.h"
+#include "game/filesystem.h"
 #include "game/gamefile.h"
 
 typedef struct { unsigned int w[7]; } Str_4C07C0; /* std::string passed by value */
@@ -73,6 +74,50 @@ struct SkinMeshVector {
 static_assert(sizeof(SkinMeshVector) == 0x10, "SkinMeshVector is 0x10 bytes");
 static_assert(__builtin_offsetof(SkinMeshVector, begin) == 0x04, "SkinMeshVector::begin");
 
+/* std::vector<std::string>: the elements are the 28-byte MSVC strings */
+struct StringVector {
+    unsigned char allocator[4]; /* +00 */
+    std::string *begin;         /* +04 */
+    std::string *end;           /* +08 */
+    std::string *limit;         /* +0C */
+};
+static_assert(sizeof(StringVector) == 0x10, "StringVector is 0x10 bytes");
+static_assert(__builtin_offsetof(StringVector, begin) == 0x04, "StringVector::begin");
+
+/* ---------------------------------------------------------------------------------------------------------
+ * The animation manager (0x4C0EE0 creates it once, 0x4C01B0 fills it): a vtable and two of the file system's
+ * string maps - the loaded models by their lowered name, the animation clips by name. */
+
+/* the model record the cache keeps and the object copies its vectors from */
+struct SkinModelRecord {
+    SkinMeshVector meshes;   /* +00 */
+    MeshDrawTable drawTable; /* +10 */
+};
+static_assert(sizeof(SkinModelRecord) == 0x20, "SkinModelRecord is 0x20 bytes");
+
+/* a node of the model cache: the string key, then the record */
+struct SkinModelNode {
+    FsStringNode head;      /* +00 next, prev and the name at +08 */
+    SkinModelRecord record; /* +24 */
+};
+static_assert(__builtin_offsetof(SkinModelNode, record) == 0x24, "SkinModelNode::record");
+
+/* a node of the clip map: the string key, then the clip 0x4BD930 builds (0x38 bytes) */
+struct SkinAnimationNode {
+    FsStringNode head; /* +00 */
+    void *animation;   /* +24 */
+};
+static_assert(__builtin_offsetof(SkinAnimationNode, animation) == 0x24, "SkinAnimationNode::animation");
+
+struct CSkinAnimationManager {
+    void *vftable;        /* +00 0x611254 */
+    FsHashMap models;     /* +04 map<string, SkinModelNode> */
+    FsHashMap animations; /* +2C map<string, SkinAnimationNode> */
+};
+static_assert(sizeof(CSkinAnimationManager) == 0x54, "CSkinAnimationManager is 0x54 bytes");
+static_assert(__builtin_offsetof(CSkinAnimationManager, models) == 0x04, "CSkinAnimationManager::models");
+static_assert(__builtin_offsetof(CSkinAnimationManager, animations) == 0x2C, "CSkinAnimationManager::animations");
+
 /* the effect object 0x448F10 hands out (0x6CAA28 holds one): 0x447A50 builds it with its file name at +04 */
 struct Effect {
     void *vftable;        /* +00 */
@@ -119,6 +164,17 @@ static_assert(__builtin_offsetof(SkinMeshObject, drawTable) == 0x238, "SkinMeshO
 /* 0x4C0B20 receives the this pointer in ECX and an unused EAX, so it is a cdecl function with the registers
  * first (the adapter of the build moves them) */
 void __cdecl TickSkinMeshObject(SkinMeshObject *self, void *unusedEax);
+
+/* Splits the text at every separator (a model name is "model;frames;animation"); the tail after the last
+ * separator is always a part, empty or not. */
+StringVector *__cdecl SplitStringVector(StringVector *parts, const std::string *text, char separator); /* 0x4F7290 */
+/* std::vector<std::string>'s destructor; the original receives a dead EAX besides the vector in ECX */
+void __cdecl DestroyStringVector(StringVector *parts, unsigned int unusedEax); /* 0x434A60 */
+
+/* 0x4C0240: fills the object's meshes and draw table with the model of the name (from the manager's cache,
+ * reloading the castle gate bar) and looks the animation clip up by the third token. */
+void __thiscall LoadSkinModel(CSkinAnimationManager *self, const std::string *name, SkinMeshVector *meshes,
+                              void **animation, MeshDrawTable *drawTable);
 
 /* The lifetime, spelled out as thiscall helpers returning the object in EAX as the original's callers expect.
  * Both constructors copy the name, attach the object to the animation manager and reset the animation; the second
