@@ -8,9 +8,15 @@ from unicorn.x86_const import UC_X86_REG_EAX
 
 D3DCREATE = 0x005A0990
 BEGIN_EVENT = 0x005A09B0
+SET_MARKER = 0x005A09F0
+SET_REGION = 0x005A0A10
+SET_OPTIONS = 0x005A0A50
 RESOLVER = 0x005A0870
 EXPORT_D3DCREATE = 0x008D128C
 EXPORT_BEGIN = 0x008D1290
+EXPORT_MARKER = 0x008D1298
+EXPORT_REGION = 0x008D129C
+EXPORT_OPTIONS = 0x008D12A4
 
 LOG_CALLS = 0x00
 LOG_THIS = 0x04
@@ -49,7 +55,8 @@ def _symbol(h, name):
 
 
 def _patch_resolver(h, found):
-    code = b'\xB0\x01\xC3' if found else b'\x32\xC0\xC3'                          # mov al,1 / xor al,al; ret
+    # 0x5A0870 leaves EAX = 0 on both failure paths, and the wrappers without an explicit mask return it
+    code = b'\xB0\x01\xC3' if found else b'\x31\xC0\xC3'                          # mov al,1 / xor eax,eax; ret
     for address in {RESOLVER, _symbol(h, 'sub_005A0870')} - {None}:
         _patch(h, address, code)
 
@@ -123,6 +130,59 @@ def test_d3dperf_begin(h):
                                                ('d3d9 missing', 0, begin, -1)):
             errs = _run(h, BEGIN_EVENT, [0x00FF00FF, 0x20001000], log, EXPORT_BEGIN, found, have_export,
                         want & 0xFFFFFFFF, 0x00FF00FF, name)
+            if errs:
+                return errs
+    finally:
+        for address, code in saved.items():
+            h.uc.mem_write(address, code)
+            h.uc.ctl_remove_cache(address, address + len(code))
+        saved.clear()
+        h.heap_ptr = heap0
+    return None
+
+
+def _export2(h, log, ret):
+    return _stub(h, b'\x8B\x44\x24\x04\xA3' + _dword(log + LOG_ARG0)         # mov eax, [esp+4]; mov [arg0], eax
+                    + b'\x8B\x44\x24\x08\xA3' + _dword(log + LOG_ARG1)       # mov eax, [esp+8]; mov [arg1], eax
+                    + b'\xFF\x05' + _dword(log + LOG_CALLS)                  # inc [calls]
+                    + b'\xB8' + _dword(ret)                                  # mov eax, ret
+                    + b'\xC2\x08\x00')                                       # ret 8
+
+
+def test_d3dperf_marker_region(h):
+    heap0 = h.heap_ptr
+    try:
+        log = h.alloc(LOG_SIZE, bytes(LOG_SIZE))
+        for entry, export, tag in ((SET_MARKER, EXPORT_MARKER, 'marker'), (SET_REGION, EXPORT_REGION, 'region')):
+            call = _export2(h, log, 7)
+            for name, found, have_export, want in (('resolved', 1, call, 7),
+                                                   ('export missing', 1, 0, 0),
+                                                   ('d3d9 missing', 0, call, 0)):
+                errs = _run(h, entry, [0x00112233, 0x20002000], log, export, found, have_export,
+                            want, 0x00112233, '%s %s' % (tag, name))
+                if errs:
+                    return errs
+    finally:
+        for address, code in saved.items():
+            h.uc.mem_write(address, code)
+            h.uc.ctl_remove_cache(address, address + len(code))
+        saved.clear()
+        h.heap_ptr = heap0
+    return None
+
+
+def test_d3dperf_set_options(h):
+    heap0 = h.heap_ptr
+    try:
+        log = h.alloc(LOG_SIZE, bytes(LOG_SIZE))
+        set_options = _stub(h, b'\x8B\x44\x24\x04\xA3' + _dword(log + LOG_ARG0)  # mov eax, [esp+4]; mov [arg0], eax
+                               + b'\xFF\x05' + _dword(log + LOG_CALLS)           # inc [calls]
+                               + b'\xB8\x09\x00\x00\x00'                         # mov eax, 9
+                               + b'\xC2\x04\x00')                                # ret 4
+        for name, found, have_export, want in (('resolved', 1, set_options, 9),
+                                               ('export missing', 1, 0, 0),
+                                               ('d3d9 missing', 0, set_options, 0)):
+            errs = _run(h, SET_OPTIONS, [0xFF], log, EXPORT_OPTIONS, found, have_export, want, 0xFF, name)
             if errs:
                 return errs
     finally:
