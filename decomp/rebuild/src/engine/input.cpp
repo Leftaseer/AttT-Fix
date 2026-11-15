@@ -35,6 +35,8 @@ ORIG_THISCALL(00422000, void, (void *self));                               /* ~O
 typedef long (__stdcall *device_getdata)(void *dev, unsigned size, void *data, unsigned *count, unsigned flags);
 typedef long (__stdcall *device_acquire)(void *dev);
 
+extern "C" __declspec(dllimport) char *__cdecl _strlwr(char *text); /* 0x607414 */
+
 #define DIERR_OTHERAPPHASPRIO_ (-0x7ff8ffe2L)      /* 0x8007001E: another application has the device */
 
 /* The editor takes the mouse buttons for its own tools, so outside it a press of one button while the other is
@@ -57,6 +59,143 @@ CInput *CInput::Instance()
             ThrowGameException(ORIG_STR(00607BC8), ORIG_STR(00607BAC), 16);
     }
     return instance;
+}
+
+/* 0x46D380: the DirectInput scan code the input configuration's key name stands for (the name is matched
+ * case-insensitively; the original lowercases the copy it is handed).  0xFF means no key has that name.  The three
+ * generic modifier names at the end are the game's own pseudo-codes, not scan codes. */
+static const struct {
+    const char *name;
+    unsigned char dik;
+} kKeyNames[] = {
+    { "esc", 1 },
+    { "1", 2 },
+    { "2", 3 },
+    { "3", 4 },
+    { "4", 5 },
+    { "5", 6 },
+    { "6", 7 },
+    { "7", 8 },
+    { "8", 9 },
+    { "9", 10 },
+    { "0", 11 },
+    { "-", 12 },
+    { "=", 13 },
+    { "backspace", 14 },
+    { "tab", 15 },
+    { "q", 16 },
+    { "w", 17 },
+    { "e", 18 },
+    { "r", 19 },
+    { "t", 20 },
+    { "y", 21 },
+    { "u", 22 },
+    { "i", 23 },
+    { "o", 24 },
+    { "p", 25 },
+    { "[", 26 },
+    { "]", 27 },
+    { "enter", 28 },
+    { "leftctrl", 29 },
+    { "a", 30 },
+    { "s", 31 },
+    { "d", 32 },
+    { "f", 33 },
+    { "g", 34 },
+    { "h", 35 },
+    { "j", 36 },
+    { "k", 37 },
+    { "l", 38 },
+    { ";", 39 },
+    { "'", 40 },
+    { "`", 41 },
+    { "leftshift", 42 },
+    { "\\", 43 },
+    { "z", 44 },
+    { "x", 45 },
+    { "c", 46 },
+    { "v", 47 },
+    { "b", 48 },
+    { "n", 49 },
+    { "m", 50 },
+    { ",", 51 },
+    { ".", 52 },
+    { "/", 53 },
+    { "rightshift", 54 },
+    { "numpad*", 55 },
+    { "leftalt", 56 },
+    { "space", 57 },
+    { "capslock", 58 },
+    { "f1", 59 },
+    { "f2", 60 },
+    { "f3", 61 },
+    { "f4", 62 },
+    { "f5", 63 },
+    { "f6", 64 },
+    { "f7", 65 },
+    { "f8", 66 },
+    { "f9", 67 },
+    { "f10", 68 },
+    { "numlock", 69 },
+    { "scrolllock", 70 },
+    { "numpad7", 71 },
+    { "numpad8", 72 },
+    { "numpad9", 73 },
+    { "numpad-", 74 },
+    { "numpad4", 75 },
+    { "numpad5", 76 },
+    { "numpad6", 77 },
+    { "numpad+", 78 },
+    { "numpad1", 79 },
+    { "numpad2", 80 },
+    { "numpad3", 81 },
+    { "numpad0", 82 },
+    { "numpad.", 83 },
+    { "numpad/", 181 },
+    { "numpadenter", 156 },
+    { "f11", 87 },
+    { "f12", 88 },
+    { "rightctrl", 157 },
+    { "printscreen", 183 },
+    { "pause", 197 },
+    { "rightalt", 184 },
+    { "leftwin", 219 },
+    { "rightwin", 220 },
+    { "app", 221 },
+    { "up", 200 },
+    { "down", 208 },
+    { "left", 203 },
+    { "right", 205 },
+    { "insert", 210 },
+    { "delete", 211 },
+    { "home", 199 },
+    { "end", 207 },
+    { "pgup", 201 },
+    { "pgdown", 209 },
+    { "shift", 243 },
+    { "ctrl", 244 },
+    { "alt", 245 },
+};
+
+DECOMP(0046D380)
+unsigned char __cdecl KeyCodeFromName(std::string name)
+{
+    _strlwr(&name[0]);
+    for (const auto &key : kKeyNames)
+        if (name == key.name)
+            return key.dik;
+    return 0xFF;
+}
+
+/* 0x46C1A0: a lowercased copy of a string (the map keys the input configuration and the key lookup use).  The
+ * original copies the text into a 256-byte buffer first, so the source can be whatever the caller passes. */
+DECOMP(0046C1A0)
+void __stdcall LowercaseCopy(const std::string *text, std::string *out)
+{
+    char buffer[256];
+    __builtin_strcpy(buffer, text->c_str());
+    _strlwr(buffer);
+    *out = buffer;
 }
 
 /* Reads the whole input.dat: the size, then that many bytes into a fresh buffer.  A missing file leaves the input
