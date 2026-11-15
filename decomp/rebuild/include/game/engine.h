@@ -82,6 +82,15 @@ struct CInputKey {                           /* pressed key of this frame */
     unsigned char pressed;
 };
 
+/* One command of the input's binding table (+0x6BC): the key codes bound to it and how many of them are used.
+ * A binding's sequence always starts with one code, so the length is at least 1. */
+struct CInputBinding {
+    void *vftable;                           /* +00 */
+    char *sequence;                          /* +04 the key codes (by DIK code) */
+    unsigned length;                         /* +08 */
+};
+static_assert(sizeof(CInputBinding) == 0x0C, "CInputBinding is 0xC bytes");
+
 struct CInputEvent {                         /* DIDEVICEOBJECTDATA of the buffered reads */
     unsigned offset;                         /* 00: key dik / DIMOFS_* offset of the mouse */
     unsigned data;                           /* 04: key state (0x80 down) / mouse delta or button mask */
@@ -114,7 +123,13 @@ struct CInput {                              /* CSingleton<CInput> (0x7CC bytes)
     unsigned char *playbackData;             /* +678 the recording (input.dat) */
     unsigned playbackSize;                   /* +67C its size in bytes / the writer's position */
     unsigned playbackCursor;                 /* +680 the player's position */
-    char pad684[0x6C4 - 0x684];
+    void *config684;                         /* +684 CConfig::Instance (0x427990) */
+    void *bindingSource;                     /* +688 CReadInputCfg (0x46EA50) */
+    int bindingCount;                        /* +68C the commands of the binding table */
+    char bindingMap[0x28];                   /* +690 FsHashMap: command name -> command id (the id at +24) */
+    void *commandsVftable;                   /* +6B8 */
+    CInputBinding *bindings;                 /* +6BC one entry per command */
+    unsigned bindingCapacity;                /* +6C0 */
     unsigned char keyEdge[0x100];            /* +6C4 per key: 2 press pending, 1 held seen, 8 release
                                                 pending, 4 free seen (the next poll turns 2 / 8 into 1 / 4) */
     bool rightButton;                        /* +7C4 held */
@@ -133,7 +148,15 @@ struct CInput {                              /* CSingleton<CInput> (0x7CC bytes)
     void ResetMouse();                       /* 0x46CEB0 */
     void ResetKeys();                        /* 0x46CEF0 */
     void Reset();                            /* 0x46CF30 */
+    void ClearBindings();                    /* 0x46CF80: every sequence back to the empty one */
+    void SetBinding(const std::string &name, unsigned char code);                 /* 0x46ED10 */
+    void SetBindingByName(const std::string &name, const std::string &keyName);   /* 0x46EDC0 */
+    int BindingCommand(const std::string &name);                                  /* 0x46F480 */
 };
+
+/* the key configuration's lowercase copies and DIK names (input.cpp) */
+void __stdcall LowercaseCopy(const std::string *text, std::string *out);   /* 0x46C1A0 */
+unsigned char __cdecl KeyCodeFromName(std::string name);                   /* 0x46D380 */
 
 /* The mouse poll of the input object: the original passes the input in ECX and threads the previous EAX (from the
  * keyboard poll) through it, and it returns EAX untouched when the mouse is not acquired. */
@@ -245,3 +268,6 @@ static_assert(__builtin_offsetof(CInput, mode) == 0x674, "CInput::mode");
 static_assert(__builtin_offsetof(CInput, playbackData) == 0x678, "CInput::playbackData");
 static_assert(__builtin_offsetof(CInput, playbackSize) == 0x67C, "CInput::playbackSize");
 static_assert(__builtin_offsetof(CInput, playbackCursor) == 0x680, "CInput::playbackCursor");
+static_assert(__builtin_offsetof(CInput, bindingCount) == 0x68C, "CInput::bindingCount");
+static_assert(__builtin_offsetof(CInput, bindingMap) == 0x690, "CInput::bindingMap");
+static_assert(__builtin_offsetof(CInput, bindings) == 0x6BC, "CInput::bindings");
