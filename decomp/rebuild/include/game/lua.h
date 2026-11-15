@@ -25,9 +25,26 @@ static const int kLuaGlobalsIndex = -10002;
  * these read EBX, so lua_objlen names that register first). */
 ORIG_DATA(008D122C); /* lua_State* */
 #define g_luaState ORIG_VAR(008D122C, void *)
-ORIG_FN(00402A70, void, (void *lua, int index));              /* lua_settop */
-ORIG_FN(00402F40, int, (unsigned ebx, void *lua, int index)); /* lua_objlen */
-ORIG_FN(00403390, void, (void *lua, int index, int n));       /* lua_rawgeti */
+ORIG_FN(00402190, int, (void *lua, int index));                    /* luaL_ref */
+ORIG_FN(00402A60, int, (void *lua));                               /* lua_gettop */
+ORIG_FN(00402A70, void, (void *lua, int index));                   /* lua_settop */
+ORIG_FN(00402BF0, void, (void *lua, int index));                   /* lua_pushvalue */
+ORIG_FN(00402F40, int, (unsigned ebx, void *lua, int index));      /* lua_objlen */
+ORIG_FN(004030E0, void, (void *lua, const char *text, unsigned len)); /* lua_pushlstring */
+ORIG_FN(00403120, void, (void *lua, const char *text));            /* lua_pushstring */
+ORIG_FN(004031F0, void, (void *lua, void *function, int upvalues)); /* lua_pushcclosure */
+ORIG_FN(004032A0, void, (void *lua, void *pointer));               /* lua_pushlightuserdata */
+ORIG_FN(00403390, void, (void *lua, int index, int n));            /* lua_rawgeti */
+ORIG_FN(004033D0, void, (void *lua, int arraySize, int hashSize)); /* lua_createtable */
+ORIG_FN(004034C0, void, (void *lua, int index));                   /* lua_settable */
+
+/* the module tables' fields (every script module's registrar pushes these) */
+ORIG_DATA(0060CA4C); /* "delete" */
+ORIG_DATA(006114AC); /* "new" */
+ORIG_DATA(00689840); /* "__eq" */
+ORIG_DATA(00689850); /* "__gc" */
+ORIG_DATA(00689864); /* "__index" */
+ORIG_DATA(0068A54C); /* "__tostring" */
 
 inline void RetainLuaObject(LuaObject *object)
 {

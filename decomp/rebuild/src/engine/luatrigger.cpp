@@ -7,8 +7,6 @@
 #include "game/nscript.h"
 #include "game/trigger.h"
 
-ORIG_FN(00402A60, int, (void *lua)); /* lua_gettop */
-
 inline void *operator new(unsigned int, void *p) { return p; }
 
 namespace {
@@ -115,4 +113,55 @@ LuaTrigger *__thiscall DeleteLuaTrigger(LuaTrigger *self, unsigned char flags)
     if (flags & 1)
         operator delete(self);
     return self;
+}
+
+/* 0x569F10: the module's named functions enter the table on top of the stack.  Every entry is {name; data}:
+ * the closure gets the entry as its upvalue, so the data follows the name. */
+DECOMP(00569F10)
+void FillLuaTriggerFunctions(const void **entries)
+{
+    for (const void **entry = entries; *entry; entry += 2) {
+        ORIG_CALL(00403120)(g_luaState, (const char *)*entry);
+        ORIG_CALL(004032A0)(g_luaState, (void *)entry);
+        ORIG_CALL(004031F0)(g_luaState, (void *)d_005683E0, 1);
+        ORIG_CALL(004034C0)(g_luaState, -3);
+    }
+}
+
+/* 0x56E7B0: the module's table in the globals (its "new" builds a LuaTrigger), its metatable in the registry,
+ * and the named functions of 0x8D105C in the table the scripts call them through. */
+DECOMP(0056E7B0)
+void RegisterLuaTriggerModule(const char *name)
+{
+    void *lua = g_luaState;
+    ORIG_VAR(008D0990, const void *) = name;
+    ORIG_CALL(00403120)(lua, name);
+    ORIG_CALL(004033D0)(lua, 0, 0);
+    int module = ORIG_CALL(00402A60)(lua);
+    ORIG_CALL(004030E0)(lua, d_006114AC, 3);                  /* "new" */
+    ORIG_CALL(004031F0)(lua, (void *)d_00568300, 0);
+    ORIG_CALL(004034C0)(lua, module);
+    ORIG_CALL(004034C0)(lua, kLuaGlobalsIndex);
+    ORIG_CALL(004033D0)(lua, 0, 0);
+    int methods = ORIG_CALL(00402A60)(lua);
+    ORIG_CALL(004033D0)(lua, 0, 0);
+    int functions = ORIG_CALL(00402A60)(lua);
+    ORIG_CALL(004030E0)(lua, d_0060CA4C, 6);                  /* "delete" */
+    ORIG_CALL(004031F0)(lua, (void *)d_00563150, 0);
+    ORIG_CALL(004034C0)(lua, methods);
+    ORIG_CALL(004030E0)(lua, d_0068A54C, 10);                 /* "__tostring" */
+    ORIG_CALL(004031F0)(lua, (void *)d_005636D0, 0);
+    ORIG_CALL(004034C0)(lua, functions);
+    ORIG_CALL(004030E0)(lua, d_00689840, 4);                  /* "__eq" */
+    ORIG_CALL(004031F0)(lua, (void *)d_00563020, 0);
+    ORIG_CALL(004034C0)(lua, functions);
+    ORIG_CALL(004030E0)(lua, d_00689850, 4);                  /* "__gc" */
+    ORIG_CALL(004031F0)(lua, (void *)d_00562F60, 0);
+    ORIG_CALL(004034C0)(lua, functions);
+    ORIG_CALL(004030E0)(lua, d_00689864, 7);                  /* "__index" */
+    ORIG_CALL(00402BF0)(lua, methods);
+    ORIG_CALL(004034C0)(lua, functions);
+    ORIG_VAR(006C0F90, int) = ORIG_CALL(00402190)(lua, kLuaRegistryIndex);
+    FillLuaTriggerFunctions((const void **)d_008D105C);
+    ORIG_CALL(00402A70)(lua, -2);
 }
