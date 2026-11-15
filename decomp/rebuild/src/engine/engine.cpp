@@ -653,3 +653,32 @@ void CEngine::Render()
         RestoreDevice();
     }
 }
+
+/* The engine's own script functions (0x44EA20 registers them into Lua): the last stack value is the optional
+ * argument, and the functions return how many Lua values they push. */
+ORIG_FN(00402C20, int, (void *L, int index));             /* lua_type */
+ORIG_FN(00402EA0, int, (void *L, int index));             /* lua_toboolean */
+ORIG_FN(00403280, void, (void *L, int value));            /* lua_pushboolean */
+
+/* "ExitGame([credits])": the game leaves the current game and starts the main menu (state 3); a true argument
+ * makes the menu show the Credits level first (the end of a game). */
+DECOMP(0044B1F0)
+int LuaExitGame(void *L)
+{
+    bool credits = ORIG_CALL(00402C20)(L, -1) == 1 /* LUA_TBOOLEAN */ && ORIG_CALL(00402EA0)(L, -1) != 0;
+    CEngine *engine = CEngine::Instance();
+    engine->unknownB0 = false;
+    engine->credits = credits;
+    engine->state = 3;
+    return 0;
+}
+
+/* "IsShiftDown()": whether either Shift key is held (the keyboard state of the input). */
+DECOMP(0044B6A0)
+int LuaIsShiftDown(void *L)
+{
+    CInput *input = CInput::Instance();
+    bool down = (input->keyState[0x2A] & 0x80) != 0 || (input->keyState[0x36] & 0x80) != 0;
+    ORIG_CALL(00403280)(L, down);
+    return 1;
+}

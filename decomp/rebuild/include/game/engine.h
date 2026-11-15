@@ -199,7 +199,10 @@ struct CEngine {
     unsigned frameCount;                     /* +A8 */
     int state;                               /* +AC: 0 idle, 1 update, 2 render, 3 start main menu, 4 event,
                                                 5 scene finished, 6 leave scene, 7 load world, 8 new game */
-    char padB0[0xD8 - 0xB0];
+    bool unknownB0;                          /* +B0 cleared whenever the game goes back to the menu */
+    bool credits;                            /* +B1 the main menu opens the Credits level instead of its first
+                                                screen (ExitGame(true), the end of a game) */
+    char padB2[0xD8 - 0xB2];
 
     static CEngine *Instance();              /* 0x42F160 */
     void Init(const std::string &cmdLine);   /* 0x44F2E0 */
@@ -214,6 +217,7 @@ struct CEngine {
 };
 static_assert(sizeof(CEngine) == 0xD8, "CEngine is 0xD8 bytes");
 static_assert(__builtin_offsetof(CEngine, state) == 0xAC, "CEngine::state");
+static_assert(__builtin_offsetof(CEngine, credits) == 0xB1, "CEngine::credits");
 static_assert(__builtin_offsetof(CInput, keys) == 0x660, "CInput::keys");
 static_assert(__builtin_offsetof(CInput, keyboard) == 0x44, "CInput::keyboard");
 static_assert(__builtin_offsetof(CInput, events) == 0x150, "CInput::events");
