@@ -4,8 +4,12 @@
 #include "game/common.h"
 #include "game/lua.h"
 #include "game/luaclass.h"
+#include "game/trigger.h"
 
 ORIG_FN(004030E0, void, (void *lua, const char *text, unsigned len)); /* lua_pushlstring */
+ORIG_FN(004034F0, void, (void *lua, int index, const char *key));     /* lua_setfield */
+ORIG_FN(0044E5A0, void *, ());                                        /* the usual collector singleton */
+ORIG_THISCALL(00432620, void, (void *self, const char *fileName));    /* CLuaWrapper::DoFile */
 ORIG_DATA(00562F60);                                                  /* the shared "__gc" */
 ORIG_DATA(00563020);                                                  /* the shared "__eq" */
 
@@ -711,4 +715,115 @@ void RegisterLuaNPCListModule(const char *name)
                               (int *)d_006C1600,
                               fill };
     RegisterLuaClassModule(name, module);
+}
+
+ORIG_DATA(006C88D4); /* CLuaWrapper */
+ORIG_DATA(00563CC0); /* "String" the scripts get */
+ORIG_DATA(00563DD0); /* "LuaWrapper" */
+ORIG_DATA(00563ED0); /* "CWorldHero" */
+ORIG_DATA(00563FE0); /* "CBorder" */
+ORIG_DATA(00610484);
+ORIG_DATA(0061CEF0);
+ORIG_DATA(0060BF28);
+ORIG_DATA(00614A84);
+ORIG_DATA(006CA98C);
+ORIG_DATA(008D0FC4);
+ORIG_DATA(006CAAC8);
+ORIG_DATA(008D0FC8);
+ORIG_DATA(0061CC44);
+ORIG_DATA(0061CC54);
+ORIG_DATA(0061CC64);
+ORIG_DATA(0061CC74);
+ORIG_DATA(0061CC88);
+ORIG_DATA(0061CC94);
+ORIG_DATA(0061CC9C);
+ORIG_DATA(00611ADC);
+ORIG_DATA(0061CCAC);
+ORIG_DATA(0061CCB8);
+ORIG_DATA(0061CCC4);
+ORIG_DATA(0061CDC0);
+ORIG_DATA(0061CD08);
+ORIG_DATA(0061CD18);
+ORIG_DATA(0061CD24);
+ORIG_DATA(0061CD30);
+ORIG_DATA(0061CD54);
+ORIG_DATA(0060C26C);
+ORIG_DATA(0061CD68);
+ORIG_DATA(0061CD74);
+ORIG_DATA(0061CD80);
+ORIG_DATA(0061CD90);
+ORIG_DATA(0061CD38);
+ORIG_DATA(0061CDA4);
+ORIG_DATA(0061CD40);
+ORIG_DATA(0061CDD4);
+ORIG_DATA(0061CD9C);
+ORIG_DATA(0060AE90);
+ORIG_DATA(00612C28);
+ORIG_DATA(0061CDB4);
+ORIG_DATA(0061CDDC);
+
+/* 0x562A50: runs the script file the std::string names (the game's DoFile takes the c_str) */
+DECOMP(00562A50)
+void RunLuaFile(const std::string *fileName)
+{
+    ORIG_CALL(00432620)(ORIG_VAR(006C88D4, void *), fileName->c_str());
+}
+
+/* 0x56FE20: on the first call, the four bindings the scripts use (std::string, the wrapper itself, the world
+ * hero and the border) enter _G, then every class module is registered by name and MainInit runs. */
+DECOMP(0056FE20)
+void __fastcall RegisterLuaModules(LuaModuleInit *init)
+{
+    if (!init->pending)
+        return;
+    init->pending = false;
+    void *lua = g_luaState;
+    ORIG_CALL(004031F0)(lua, (void *)d_00563CC0, 0);
+    ORIG_CALL(004034F0)(lua, kLuaGlobalsIndex, d_00610484); /* "String" */
+    ORIG_VAR(006CA98C, void *) = ORIG_CALL(0044E5A0)();
+    ORIG_CALL(004031F0)(lua, (void *)d_00563DD0, 0);
+    ORIG_CALL(004034F0)(lua, kLuaGlobalsIndex, d_0061CEF0); /* "LuaWrapper" */
+    ORIG_VAR(008D0FC4, void *) = ORIG_CALL(0044E5A0)();
+    ORIG_CALL(004031F0)(lua, (void *)d_00563ED0, 0);
+    ORIG_CALL(004034F0)(lua, kLuaGlobalsIndex, d_0060BF28); /* "CWorldHero" */
+    ORIG_VAR(006CAAC8, void *) = ORIG_CALL(0044E5A0)();
+    ORIG_CALL(004031F0)(lua, (void *)d_00563FE0, 0);
+    ORIG_CALL(004034F0)(lua, kLuaGlobalsIndex, d_00614A84); /* "CBorder" */
+    ORIG_VAR(008D0FC8, void *) = ORIG_CALL(0044E5A0)();
+
+    RegisterLuaParticleSystemMeshModule(d_0061CC74);
+    RegisterLuaGUIElementModule(d_0061CC88);
+    RegisterLuaImageModule(d_0061CC94);
+    RegisterLuaButtonContourModule(d_0061CC9C);
+    RegisterLuaTextModule(d_00611ADC);
+    RegisterLuaButtonAlphaModule(d_0061CCAC);
+    RegisterLuaViewportModule(d_0061CCB8);
+    RegisterLuaRectModule(d_0061CCC4);
+    RegisterLuaParticleSystemModule(d_0061CC44);
+    RegisterLuaRenderObjectModule(d_0061CC54);
+    RegisterLuaChooseHeroRotatorModule(d_0061CDC0);
+    RegisterLuaGUISceneClassModule(d_0061CD08);
+    RegisterLuaUnitIconModule(d_0061CD18);
+    RegisterLuaTroopIconModule(d_0061CD24);
+    RegisterLuaButtonModule(d_0061CD30);
+    RegisterLuaMainMenuSceneClassModule(d_0061CD54);
+    RegisterLuaWorldUnitModule(d_0060C26C);
+    RegisterLuaItemIconModule(d_0061CD68);
+    RegisterLuaTriggerModule(d_0061CD74);
+    RegisterLuaAttackSphereModule(d_0061CD80);
+    RegisterLuaEditorArmyModule(d_0061CD90);
+    RegisterLuaCNpcModule(d_0061CD38);
+    RegisterLuaMessageModule(d_0061CDA4);
+    RegisterLuaGUISceneClass3Module(d_0061CD08);
+    RegisterLuaGUISceneClassWorldModule(d_0061CD40);
+    RegisterLuaNPCListModule(d_0061CDD4);
+    RegisterLuaTacticCreatureModule(d_0061CC64);
+    RegisterLuaToolTipModule(d_0061CD9C);
+    RegisterLuaMusicManagerModule(d_0060AE90);
+    RegisterLuaUnitSoundManagerModule(d_00612C28);
+    RegisterLuaGUISceneClass2Module(d_0061CD08);
+    RegisterLuaEnemyArmyModule(d_0061CDB4);
+
+    std::string mainInit(d_0061CDDC);
+    RunLuaFile(&mainInit);
 }

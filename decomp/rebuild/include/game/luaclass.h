@@ -14,6 +14,13 @@ struct LuaModuleFiller {
     const void *data;
 };
 
+/* the one-shot object 0x563C90 builds for 0x56FE20: its +8 byte keeps the registration from running twice */
+struct LuaModuleInit {
+    void *vftable;  /* +00 */
+    int unknown04;  /* +04 */
+    bool pending;   /* +08 */
+};
+
 /* one registrar's data; fill is a null-function-terminated array */
 struct LuaClassModule {
     const char **nameSlot;           /* the global that keeps the module name */
@@ -25,6 +32,9 @@ struct LuaClassModule {
 };
 
 void RegisterLuaClassModule(const char *name, const LuaClassModule &module);
+
+void __fastcall RegisterLuaModules(LuaModuleInit *init); /* 0x56FE20 registers every module once */
+void RunLuaFile(const std::string *fileName);      /* 0x562A50 CLuaWrapper::DoFile(fileName) */
 
 void RegisterLuaParticleSystemModule(const char *name); /* 0x56BC40 */
 void RegisterLuaRenderObjectModule(const char *name); /* 0x56BE20 */
