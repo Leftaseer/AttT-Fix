@@ -36,6 +36,13 @@ void RegisterLuaClassModule(const char *name, const LuaClassModule &module);
 void __fastcall RegisterLuaModules(LuaModuleInit *init); /* 0x56FE20 registers every module once */
 void RunLuaFile(const std::string *fileName);      /* 0x562A50 CLuaWrapper::DoFile(fileName) */
 
+/* the four constructor bindings 0x56FE20 installs in _G: each returns the class's method table with a fresh
+ * wrapper around the collector object at [0]; a null collector yields nil */
+int __cdecl LuaStringBinding(void *lua);    /* 0x563CC0 _G.String */
+int __cdecl LuaWrapperBinding(void *lua);   /* 0x563DD0 _G.LuaWrapper */
+int __cdecl LuaWorldHeroBinding(void *lua); /* 0x563ED0 _G.CWorldHero */
+int __cdecl LuaBorderBinding(void *lua);    /* 0x563FE0 _G.CBorder */
+
 void RegisterLuaParticleSystemModule(const char *name); /* 0x56BC40 */
 void RegisterLuaRenderObjectModule(const char *name); /* 0x56BE20 */
 void RegisterLuaTacticCreatureModule(const char *name); /* 0x56C000 */

@@ -30,6 +30,8 @@ ORIG_FN(00402A60, int, (void *lua));                               /* lua_gettop
 ORIG_FN(00402A70, void, (void *lua, int index));                   /* lua_settop */
 ORIG_FN(00402BF0, void, (void *lua, int index));                   /* lua_pushvalue */
 ORIG_FN(00402F40, int, (unsigned ebx, void *lua, int index));      /* lua_objlen */
+ORIG_FN(00403080, void, (void *lua));                              /* lua_pushnil */
+ORIG_FN(004030A0, void, (void *lua, float number));                /* lua_pushnumber */
 ORIG_FN(004030E0, void, (void *lua, const char *text, unsigned len)); /* lua_pushlstring */
 ORIG_FN(00403120, void, (void *lua, const char *text));            /* lua_pushstring */
 ORIG_FN(004031F0, void, (void *lua, void *function, int upvalues)); /* lua_pushcclosure */
@@ -37,6 +39,7 @@ ORIG_FN(004032A0, void, (void *lua, void *pointer));               /* lua_pushli
 ORIG_FN(00403390, void, (void *lua, int index, int n));            /* lua_rawgeti */
 ORIG_FN(004033D0, void, (void *lua, int arraySize, int hashSize)); /* lua_createtable */
 ORIG_FN(004034C0, void, (void *lua, int index));                   /* lua_settable */
+ORIG_FN(00403610, void, (void *lua, int index, int n));            /* lua_rawseti */
 
 /* the module tables' fields (every script module's registrar pushes these) */
 ORIG_DATA(0060CA4C); /* "delete" */

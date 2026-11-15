@@ -827,3 +827,118 @@ void __fastcall RegisterLuaModules(LuaModuleInit *init)
     std::string mainInit(d_0061CDDC);
     RunLuaFile(&mainInit);
 }
+
+ORIG_FN(005E3EAE, void *, (unsigned int size)); /* operator new, through the original thunk */
+ORIG_THISCALL(004AFEF0, void *, (void *self, void *lua, void *collector)); /* CRenderString */
+ORIG_THISCALL(00571130, void *, (void *self, void *lua, void *collector)); /* the LuaWrapper object */
+ORIG_THISCALL(00465950, void *, (void *self, void *lua, void *collector)); /* CHero */
+ORIG_THISCALL(00525B50, void *, (void *self, void *lua, void *collector)); /* CBorder */
+
+ORIG_DATA(0061048C); /* String's first method name (none in this build) */
+ORIG_DATA(00610494); /* String's {name, function} entries from the second one */
+ORIG_DATA(00563900); /* String's method dispatcher */
+ORIG_DATA(0061CF00); /* LuaWrapper's first method name */
+ORIG_DATA(0061CF08);
+ORIG_DATA(00563950);
+ORIG_DATA(006C0AC8); /* CWorldHero's first method name */
+ORIG_DATA(006C0AD8);
+ORIG_DATA(005639A0);
+ORIG_DATA(006C3960); /* CBorder's first method name */
+ORIG_DATA(006C3968);
+ORIG_DATA(005639F0);
+
+/* 0x563CC0, 0x563DD0, 0x563ED0, 0x563FE0: the closures _G.String, _G.LuaWrapper, _G.CWorldHero and _G.CBorder
+ * hold.  Each returns the class's method table; every method's value is the class's dispatcher closure, carrying
+ * the method's index as its upvalue (the dispatcher then finds the implementation in the class's table), and the
+ * table's [0] is a fresh wrapper around the collector object.  A class without a collector yields nil. */
+struct LuaBindingTable {
+    const char *first;         /* the first method's name, in the class's own global */
+    const char *const *names;  /* the second method's name; the entries are "stride" bytes apart */
+    unsigned stride;
+    const void *dispatcher;
+};
+
+static void PushBindingTable(void *lua, const LuaBindingTable &table)
+{
+    ORIG_CALL(004033D0)(lua, 0, 0);
+    const char *name = table.first;
+    for (int index = 0; name; ++index) {
+        ORIG_CALL(00403120)(lua, name);
+        ORIG_CALL(004030A0)(lua, (float)index);
+        ORIG_CALL(004031F0)(lua, (void *)table.dispatcher, 1);
+        ORIG_CALL(004034C0)(lua, -3);
+        name = *(const char *const *)((const char *)table.names + index * table.stride);
+    }
+}
+
+DECOMP(00563CC0)
+int __cdecl LuaStringBinding(void *lua)
+{
+    if (ORIG_VAR(006CA98C, void *) == nullptr) {
+        ORIG_CALL(00403080)(lua);
+        return 1;
+    }
+    LuaBindingTable table = { ORIG_VAR(0061048C, const char *), (const char *const *)d_00610494, 8,
+                              (const void *)d_00563900 };
+    PushBindingTable(lua, table);
+    void *wrapper = ORIG_CALL(005E3EAE)(0x254);
+    if (wrapper)
+        wrapper = ORIG_CALL(004AFEF0)(wrapper, lua, ORIG_VAR(006CA98C, void *));
+    ORIG_CALL(004032A0)(lua, wrapper);
+    ORIG_CALL(00403610)(lua, -2, 0);
+    return 1;
+}
+
+DECOMP(00563DD0)
+int __cdecl LuaWrapperBinding(void *lua)
+{
+    if (ORIG_VAR(008D0FC4, void *) == nullptr) {
+        ORIG_CALL(00403080)(lua);
+        return 1;
+    }
+    LuaBindingTable table = { ORIG_VAR(0061CF00, const char *), (const char *const *)d_0061CF08, 8,
+                              (const void *)d_00563950 };
+    PushBindingTable(lua, table);
+    void *wrapper = ORIG_CALL(005E3EAE)(0x38);
+    if (wrapper)
+        wrapper = ORIG_CALL(00571130)(wrapper, lua, ORIG_VAR(008D0FC4, void *));
+    ORIG_CALL(004032A0)(lua, wrapper);
+    ORIG_CALL(00403610)(lua, -2, 0);
+    return 1;
+}
+
+DECOMP(00563ED0)
+int __cdecl LuaWorldHeroBinding(void *lua)
+{
+    if (ORIG_VAR(006CAAC8, void *) == nullptr) {
+        ORIG_CALL(00403080)(lua);
+        return 1;
+    }
+    LuaBindingTable table = { ORIG_VAR(006C0AC8, const char *), (const char *const *)d_006C0AD8, 16,
+                              (const void *)d_005639A0 };
+    PushBindingTable(lua, table);
+    void *wrapper = ORIG_CALL(005E3EAE)(0x508);
+    if (wrapper)
+        wrapper = ORIG_CALL(00465950)(wrapper, lua, ORIG_VAR(006CAAC8, void *));
+    ORIG_CALL(004032A0)(lua, wrapper);
+    ORIG_CALL(00403610)(lua, -2, 0);
+    return 1;
+}
+
+DECOMP(00563FE0)
+int __cdecl LuaBorderBinding(void *lua)
+{
+    if (ORIG_VAR(008D0FC8, void *) == nullptr) {
+        ORIG_CALL(00403080)(lua);
+        return 1;
+    }
+    LuaBindingTable table = { ORIG_VAR(006C3960, const char *), (const char *const *)d_006C3968, 8,
+                              (const void *)d_005639F0 };
+    PushBindingTable(lua, table);
+    void *wrapper = ORIG_CALL(005E3EAE)(0xC8);
+    if (wrapper)
+        wrapper = ORIG_CALL(00525B50)(wrapper, lua, ORIG_VAR(008D0FC8, void *));
+    ORIG_CALL(004032A0)(lua, wrapper);
+    ORIG_CALL(00403610)(lua, -2, 0);
+    return 1;
+}
