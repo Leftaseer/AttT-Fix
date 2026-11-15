@@ -7,6 +7,10 @@
 #include "game/nscript.h"
 #include "game/trigger.h"
 
+ORIG_FN(00402A60, int, (void *lua)); /* lua_gettop */
+
+inline void *operator new(unsigned int, void *p) { return p; }
+
 namespace {
 
 inline void **TriggerListVtable()
@@ -86,6 +90,22 @@ DECOMP(0046F980)
 void PushTriggerUserdata(unsigned trigger)
 {
     PushUserdataValue(trigger);
+}
+
+DECOMP(00568300)
+int __stdcall LuaTriggerModuleNew(void)
+{
+    void *memory = operator new(0x50);
+    LuaTrigger *trigger = nullptr;
+    if (memory) {
+        char read[sizeof(NsTableGet)];
+        NsTableGet *results = ::new (read) NsTableGet((NsTable *)ORIG_VAR(008D0990, void *),
+                                                      ORIG_CALL(00402A60)(g_luaState) - 1, true);
+        trigger = ::new (memory) LuaTrigger(results);
+        results->~NsTableGet();
+    }
+    PushTriggerUserdata((unsigned)trigger);
+    return 1;
 }
 
 DECOMP(0046FB70)

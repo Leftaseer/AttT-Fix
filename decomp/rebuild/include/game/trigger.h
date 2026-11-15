@@ -12,6 +12,7 @@ ORIG_DATA(0060CC94); /* iTrigger::vftable */
 ORIG_DATA(0060CCC0); /* LuaTrigger::vftable */
 ORIG_DATA(006C0F90); /* metatable of the trigger userdata */
 ORIG_DATA(006C905C); /* the trigger list (set by 0x53A6A0) */
+ORIG_DATA(008D0990); /* the trigger module's table: its "new" field is 0x568300 */
 
 ORIG_FN(00403BF0, void *, (void *lua, unsigned int size)); /* lua_newuserdata */
 ORIG_FN(004036B0, int, (void *lua, int index));            /* lua_setmetatable */

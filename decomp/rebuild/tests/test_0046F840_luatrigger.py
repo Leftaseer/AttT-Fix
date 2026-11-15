@@ -23,6 +23,7 @@ CREATETABLE = 0x004033D0
 LUA_REF = 0x00402190
 RAWGETI = 0x00403390
 RAWEQUAL = 0x00402D10
+LUA_TYPE = 0x00402C20
 TABLEGET_CTOR = 0x004277B0
 
 ITRIGGER_CTOR = 0x0046F840
@@ -33,6 +34,9 @@ LUATRIGGER_UPDATE = 0x0046FA00
 LUATRIGGER_PUSH = 0x0046F9C0
 PUSH_TRIGGER = 0x0046F980
 DELETE_LUATRIGGER = 0x0046FB70
+TRIGGER_MODULE_NEW = 0x00568300
+
+LUA_TFUNCTION = 6
 
 ITRIGGER_VTABLE = 0x0060CC94
 LUATRIGGER_VTABLE = 0x0060CCC0
@@ -280,4 +284,46 @@ def test_trigger_userdata_push(h):
     userdata = _u32(h, _u32(h, state + 8) - 8)
     if _u32(h, userdata + 0x18) != trigger:
         return ['the free push holds %08X, want the trigger %08X' % (_u32(h, userdata + 0x18), trigger)]
+    return None
+
+
+def test_trigger_module_new(h):
+    """0x568300, the trigger module's "new": the script at stack index 2 becomes a LuaTrigger, which is returned
+    as userdata with the module's metatable."""
+    state = _state(h)
+    _call(h, CREATETABLE, args=(state, 0, 0))          # the receiver, index 1
+    receiver = _u32(h, _u32(h, state + 8) - 8)
+    _load(h, state, 'return true')                     # the script, index 2
+    h.uc.mem_write(0x008D0990, struct.pack('<I', receiver))
+    _call(h, CREATETABLE, args=(state, 0, 0))
+    metatable = _u32(h, _u32(h, state + 8) - 8)
+    reference = _call(h, LUA_REF, args=(state, LUA_REGISTRY))['eax']
+    h.uc.mem_write(TRIGGER_METATABLE, struct.pack('<i', reference))
+    add, remove = _trigger_list(h)
+
+    diffs = h.compare(TRIGGER_MODULE_NEW, ret='eax')
+    if diffs:
+        return diffs
+
+    res = _call(h, TRIGGER_MODULE_NEW)
+    if res['eax'] != 1:
+        return ['returned %d, want 1' % res['eax']]
+    if _top(h, state) != 2:
+        return ['top %d after the call, want 2 (the receiver and the userdata)' % _top(h, state)]
+    userdata = _u32(h, _u32(h, state + 8) - 8)
+    trigger = _u32(h, userdata + 0x18)
+    if not trigger:
+        return ['the userdata holds no trigger']
+    got = _fields(h, trigger, 0x50 // 4)
+    if got[0] != LUATRIGGER_VTABLE or got[14] != FUNCTION_VTABLE or got[19] == 0:
+        return ['the trigger (%08X, function %08X, reference %08X) is not a built LuaTrigger'
+                % (got[0], got[14], got[19])]
+    if _u32(h, userdata + 8) != metatable:
+        return ['the userdata metatable is %08X, want the module table %08X'
+                % (_u32(h, userdata + 8), metatable)]
+    if _u32(h, add) != 1:
+        return ['the trigger registered %d times with the trigger list, want 1' % _u32(h, add)]
+    _call(h, RAWGETI, args=(state, LUA_REGISTRY, got[19]))
+    if _call(h, LUA_TYPE, args=(state, -1))['eax'] != LUA_TFUNCTION:
+        return ['the trigger does not reference the script function']
     return None
