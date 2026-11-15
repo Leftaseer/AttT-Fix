@@ -256,6 +256,40 @@ void __fastcall ClearCollection48(InterfaceCollection *collection)
     }
 }
 
+/* The collections' destructors: the elements and their buffer go, the three pointers are zeroed, then the title
+ * string empties. */
+DECOMP(00423870)
+void __fastcall DestroyCollection4C(InterfaceCollection *collection)
+{
+    InterfaceItem4C *first = (InterfaceItem4C *)collection->begin;
+    if (first) {
+        DestroyItems4C(first, (InterfaceItem4C *)collection->end);
+        operator delete[](collection->begin);
+    }
+    collection->begin = collection->end = collection->limit = nullptr;
+    collection->title.~basic_string();
+}
+
+DECOMP(00423950)
+void __fastcall DestroyCollection48(InterfaceCollection *collection)
+{
+    InterfaceItem48 *first = (InterfaceItem48 *)collection->begin;
+    if (first) {
+        DestroyItems48(first, (InterfaceItem48 *)collection->end);
+        operator delete[](collection->begin);
+    }
+    collection->begin = collection->end = collection->limit = nullptr;
+    collection->title.~basic_string();
+}
+
+/* The 0x2C collection frees its buffer through the vector destructor, which destroys the elements itself. */
+DECOMP(00423A30)
+void __fastcall DestroyCollection2C(InterfaceCollection *collection)
+{
+    DestroyVector2C((InterfaceVector *)&collection->allocator);
+    collection->title.~basic_string();
+}
+
 /* A vector copy: the elements are copied into a fresh buffer of the source's size and the three pointers
  * replace this vector's; the allocator bytes stay as the caller had them, as in the original. */
 template <typename T>
