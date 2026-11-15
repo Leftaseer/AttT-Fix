@@ -9,7 +9,14 @@
 #pragma once
 #include "game/common.h"
 
+ORIG_DATA(00607C88); /* Object::vftable */
 ORIG_DATA(00607CC4); /* nScript::Table::vftable */
+ORIG_DATA(00607CB8); /* nScript::VMObjImpl::vftable */
+ORIG_DATA(00608260); /* nScript::TableGet::vftable */
+ORIG_DATA(006098F0); /* nScript::Function::vftable */
+ORIG_DATA(0061D90C); /* the nScript::Table the calls read their results through */
+
+ORIG_THISCALL(00422000, void, (void *self)); /* Object::~Object */
 
 struct NsTable;
 
@@ -47,6 +54,68 @@ struct NsTable {
 };
 static_assert(sizeof(NsTable) == 0x0C, "NsTable is 0x0C bytes");
 static_assert(__builtin_offsetof(NsTable, reference) == 0x08, "NsTable::reference");
+
+/* Object / nScript::VMObjImpl: the script-object base of the wrappers (vtable 0x607C88).  +04 is the child the
+ * object is registered with; Object::~Object throws while it is still set.  VMObjImpl adds no data, it only
+ * switches the vtable to 0x607CB8 before the base goes. */
+struct NsObject {
+    void *vftable; /* +00 */
+    void *owner;   /* +04 */
+
+    NsObject() : vftable(nullptr), owner(nullptr) {}
+    ~NsObject() { ORIG_CALL(00422000)(this); }
+};
+
+struct NsVMObjImpl : NsObject {
+    ~NsVMObjImpl() { vftable = d_00607CB8; }
+};
+
+struct NsTableGet;
+
+/* nScript::Function (0x18): a reference to a Lua function and the table the wrapper carries.  The constructor
+ * references the value at a stack index (0x46F790); the assignment (0x436FD0) and the destructor (0x4378D0)
+ * move / drop the registry references.  Calling it (0x57A180) pushes the function, passes its table as the single
+ * argument when there is one, and wraps the results in a TableGet. */
+struct NsFunction : NsVMObjImpl {
+    NsTable table;  /* +08 the table the function is called with; its reference at +10 is -1 when there is none */
+    int reference;  /* +14 registry reference of the function */
+
+    NsFunction() : reference(-1) { vftable = d_006098F0; }
+    explicit NsFunction(int index);                 /* 0x46F790 */
+    ~NsFunction();                                  /* 0x4378D0 */
+    NsFunction &operator=(const NsFunction &other); /* 0x436FD0 */
+    NsTableGet *Call(NsTableGet *out, int results); /* 0x57A180 */
+};
+static_assert(sizeof(NsFunction) == 0x18, "NsFunction is 0x18 bytes");
+static_assert(__builtin_offsetof(NsFunction, table) == 0x08, "NsFunction::table");
+static_assert(__builtin_offsetof(NsFunction, reference) == 0x14, "NsFunction::reference");
+
+/* nScript::TableGet (0x18): the values a table read or a function call left on the Lua stack.  The constructor
+ * (0x4277B0) remembers where they start (+10) and how many there are (+0C); the destructor (0x427820) pops them
+ * when the read owns them (+14). */
+struct NsTableGet : NsVMObjImpl {
+    NsTable *table; /* +08 the table the values were read from */
+    int count;      /* +0C number of values on the stack */
+    int base;       /* +10 stack index before the first value */
+    bool owns;      /* +14 pops the values when the wrapper dies */
+
+    NsTableGet(NsTable *table, int count, bool owns);            /* 0x4277B0 */
+    ~NsTableGet();                                               /* 0x427820 */
+    NsFunction *FunctionAt(NsFunction *out, int position) const; /* 0x46F810 */
+};
+static_assert(sizeof(NsTableGet) == 0x18, "NsTableGet is 0x18 bytes");
+static_assert(__builtin_offsetof(NsTableGet, base) == 0x10, "NsTableGet::base");
+static_assert(__builtin_offsetof(NsTableGet, owns) == 0x14, "NsTableGet::owns");
+
+/* A value of a TableGet read and its position (1 = the first value).  The handlers of the Lua globals build it
+ * inline and turn it into a function (0x46FA90), a bool (0x437040), a number (0x547CD0) or a pointer (0x547D00). */
+struct NsValueRef {
+    NsTableGet *values; /* +00 */
+    int position;       /* +04 */
+
+    NsFunction *ToFunction(NsFunction *out) const; /* 0x46FA90 */
+};
+
 
 /* nScript::Table::i_iterator (0x14): the inlined table-walking loop of the loaders keeps this shape while it
  * iterates (the constructor 0x463C60 and destructor 0x463D20 are inlined into those loops). */
