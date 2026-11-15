@@ -93,13 +93,18 @@ struct CInput {                              /* CSingleton<CInput> (0x7CC bytes)
     char pad668[0x66C - 0x668];
     int *mouseButtons;                       /* +66C button states (6 = released) */
     unsigned mouseButtonCount;               /* +670 */
-    char pad674[0x7C4 - 0x674];
+    unsigned mode;                           /* +674 input source: 1 records, 2 plays back */
+    unsigned char *playbackData;             /* +678 the recording (input.dat) */
+    unsigned playbackSize;                   /* +67C its size in bytes */
+    unsigned playbackCursor;                 /* +680 the player's position */
+    char pad684[0x7C4 - 0x684];
     bool click;                              /* +7C4 */
     bool doubleClick;                        /* +7C5 */
     bool rightClick;                         /* +7C6 */
     char pad7C7[0x7CC - 0x7C7];
 
     static CInput *Instance();               /* 0x4215D0 */
+    void LoadPlayback();                     /* 0x46B4F0 */
     void ResetMouse();                       /* 0x46CEB0 */
     void ResetKeys();                        /* 0x46CEF0 */
     void Reset();                            /* 0x46CF30 */
@@ -171,3 +176,7 @@ struct CEngine {
 static_assert(sizeof(CEngine) == 0xD8, "CEngine is 0xD8 bytes");
 static_assert(__builtin_offsetof(CEngine, state) == 0xAC, "CEngine::state");
 static_assert(__builtin_offsetof(CInput, keys) == 0x660, "CInput::keys");
+static_assert(__builtin_offsetof(CInput, mode) == 0x674, "CInput::mode");
+static_assert(__builtin_offsetof(CInput, playbackData) == 0x678, "CInput::playbackData");
+static_assert(__builtin_offsetof(CInput, playbackSize) == 0x67C, "CInput::playbackSize");
+static_assert(__builtin_offsetof(CInput, playbackCursor) == 0x680, "CInput::playbackCursor");
