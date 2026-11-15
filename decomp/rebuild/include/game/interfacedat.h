@@ -226,6 +226,8 @@ static_assert(__builtin_offsetof(InterfaceRecordPair, value) == 0x01C, "Interfac
 InterfaceRecordNode *__stdcall CreateRecordNodeSentinel(); /* 0x4A2B40 */
 FsHashMap *__thiscall InitRecordMap(FsHashMap *map, const unsigned char *allocator, const void *compare); /* 0x4A7040 */
 void __fastcall ClearRecordNodeList(char *mapObject); /* 0x422AD0 the map's tree part (map + 4) */
+void __thiscall EraseRecordRange(char *mapObject, InterfaceRecordNode **result, InterfaceRecordNode *first,
+                                 InterfaceRecordNode *last); /* 0x422E40 the map's tree part (map + 4) */
 InterfaceRecord *__thiscall RecordMapAtIndex(FsHashMap *map, const std::string *key); /* 0x424270 */
 
 struct CReadInterfaceDat {

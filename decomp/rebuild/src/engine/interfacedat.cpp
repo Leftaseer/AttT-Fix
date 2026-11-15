@@ -988,6 +988,34 @@ void __fastcall ClearRecordNodeList(char *mapObject)
     }
 }
 
+/* Erases the record map's nodes [first, last): a range that covers the whole map only empties it, every other
+ * listed node is unlinked, its record and key destroyed and the node freed.  *result receives the iterator the
+ * range ended on (the map's head after a clear). */
+DECOMP(00422E40)
+void __thiscall EraseRecordRange(char *mapObject, InterfaceRecordNode **result, InterfaceRecordNode *first,
+                                 InterfaceRecordNode *last)
+{
+    InterfaceRecordNode *head = *(InterfaceRecordNode **)(mapObject + 4);
+    if (first == head->next && last == head) {
+        ClearRecordNodeList(mapObject);
+        last = *(InterfaceRecordNode **)(mapObject + 4);
+    } else {
+        while (first != last) {
+            InterfaceRecordNode *next = first->next;
+            if (first != head) {
+                first->prev->next = next;
+                next->prev = first->prev;
+                first->value.~InterfaceRecord();
+                first->key.~basic_string();
+                operator delete(first);
+                *(unsigned *)(mapObject + 8) -= 1;
+            }
+            first = next;
+        }
+    }
+    *result = last;
+}
+
 /* The record map's size guard (the library's map view starts four bytes into FsHashMap): growing past the
  * library's limit throws std::length_error, as in the file maps' guards. */
 DECOMP(00422410)
