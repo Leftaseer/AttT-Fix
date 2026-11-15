@@ -719,3 +719,146 @@ def test_input_poll_mouse_motion_listener(h):
         return problems
     finally:
         h.uc.mem_write(MOVE_LISTENERS, saved)
+
+# ---- the input's update part (0x46D030): the mode switch and the fixed-step timer --------------------------------
+# The part (CInput + 4) has its own vtable; slot 5 (Tick) is a stub here that logs its calls and returns 0x1000 + 4n.
+UPDATE = 0x0046D030
+
+
+def _tick_stub(h, log):
+    """thiscall (part): the n-th call returns 0x1000 + 4n"""
+    code = (b'\x56'                                   # push esi
+            + b'\xbe' + struct.pack('<I', log)        # mov esi, log
+            + b'\x8b\x06'                              # mov eax, [esi]
+            + b'\xff\x06'                              # inc dword [esi]
+            + b'\x6b\xc0\x04'                          # imul eax, eax, 4
+            + b'\x05\x00\x10\x00\x00'                  # add eax, 0x1000
+            + b'\x5e'                                  # pop esi
+            + b'\xc3')                                 # ret
+    return h.alloc(len(code), code)
+
+
+def _update_case(h, mode, accumulator, interval, dt):
+    """an input whose update part has a logging Tick; returns the object and the call log"""
+    obj = h.alloc(0x7CC, bytes(0x7CC))
+    log = h.alloc(4, bytes(4))
+    vtable = h.alloc(0x18, bytes(0x18))
+    h.uc.mem_write(vtable + 0x14, struct.pack('<I', _tick_stub(h, log)))
+    h.uc.mem_write(obj + 4, struct.pack('<I', vtable))
+    h.uc.mem_write(obj + 4 + 0x24, struct.pack('<f', interval))
+    h.uc.mem_write(obj + 4 + 0x28, struct.pack('<f', accumulator))
+    h.uc.mem_write(obj + 0x674, struct.pack('<I', mode))
+    return obj, log
+
+
+def _update_call(h, obj, dt):
+    from unicorn.x86_const import UC_X86_REG_ECX
+    return [struct.unpack('<I', struct.pack('<f', dt))[0]], {UC_X86_REG_ECX: obj + 4}
+
+
+def _part_floats(h, obj):
+    return struct.unpack('<ff', h.uc.mem_read(obj + 4 + 0x24, 8))
+
+
+def test_input_update_frame_polls(h):
+    """mode 0 reads the devices and never runs the timer"""
+    obj, log = _update_case(h, 0, 25.0, 10.0, 1.0)
+    args, regs = _update_call(h, obj, 1.0)
+    diffs = h.compare(UPDATE, args=args, regs=regs)
+    if diffs:
+        return diffs
+    res = h.call(UPDATE, args=args, regs=regs)
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    problems = []
+    if _loader_u32(h, log):
+        problems.append('the timer ran %d times' % _loader_u32(h, log))
+    if _part_floats(h, obj) != (10.0, 25.0):
+        problems.append('the timer moved: %r' % (_part_floats(h, obj),))
+    if res['eax'] != 0:                               # neither device acquired: the mouse poll returns its EAX
+        problems.append('eax %08X' % res['eax'])
+    return problems
+
+
+def test_input_update_frame_timer(h):
+    """in the recording / playback modes a frame short of an interval only drops this frame's input"""
+    problems = []
+    for mode, want in ((1, 0), (2, 1)):
+        obj, log = _update_case(h, mode, 10.0, 33.0, 5.0)
+        h.uc.mem_write(obj + 0x650, struct.pack('<fff', 1.5, -2.5, 3.5))
+        h.uc.mem_write(obj + 0x664, struct.pack('<I', 7))
+        h.uc.mem_write(obj + 0x670, struct.pack('<I', 5))
+        keys, buttons = h.alloc(4, b'\x11' * 4), h.alloc(4, b'\x22' * 4)
+        h.uc.mem_write(obj + 0x660, struct.pack('<I', keys))
+        h.uc.mem_write(obj + 0x66C, struct.pack('<I', buttons))
+        args, regs = _update_call(h, obj, 5.0)
+        diffs = h.compare(UPDATE, args=args, regs=regs)
+        if diffs:
+            return diffs
+        res = h.call(UPDATE, args=args, regs=regs)
+        if res['fault']:
+            return ['replacement faulted: %s' % res['fault']]
+        if res['eax'] != want:
+            problems.append('mode %d: eax %08X, want %d' % (mode, res['eax'], want))
+        if _loader_u32(h, log):
+            problems.append('mode %d: the timer ran %d times' % (mode, _loader_u32(h, log)))
+        if _part_floats(h, obj) != (33.0, 15.0):
+            problems.append('mode %d: the timer %r' % (mode, _part_floats(h, obj)))
+        if bytes(h.uc.mem_read(obj + 0x650, 12)) != bytes(12):
+            problems.append('mode %d: motion %r' % (mode, h.uc.mem_read(obj + 0x650, 12)))
+        if _loader_u32(h, obj + 0x664) or _loader_u32(h, obj + 0x670):
+            problems.append('mode %d: counts %d %d' % (mode, _loader_u32(h, obj + 0x664),
+                                                       _loader_u32(h, obj + 0x670)))
+        if _loader_u32(h, obj + 0x660) != keys or _loader_u32(h, obj + 0x66C) != buttons:
+            problems.append('mode %d: the buffers were dropped' % mode)
+    return problems
+
+
+def test_input_update_frame_tick(h):
+    """a frame that fills the interval runs one Tick and drains the interval; the frame's input stays"""
+    problems = []
+    for mode in (1, 2):
+        obj, log = _update_case(h, mode, 25.0, 10.0, 1.0)
+        h.uc.mem_write(obj + 0x650, struct.pack('<fff', 1.5, -2.5, 3.5))
+        h.uc.mem_write(obj + 0x664, struct.pack('<I', 7))
+        h.uc.mem_write(obj + 0x670, struct.pack('<I', 5))
+        args, regs = _update_call(h, obj, 1.0)
+        diffs = h.compare(UPDATE, args=args, regs=regs)
+        if diffs:
+            return diffs
+        res = h.call(UPDATE, args=args, regs=regs)
+        if res['fault']:
+            return ['replacement faulted: %s' % res['fault']]
+        if _loader_u32(h, log) != 1:
+            problems.append('mode %d: the timer ran %d times, want 1' % (mode, _loader_u32(h, log)))
+        if res['eax'] != 0x1000:
+            problems.append('mode %d: eax %08X, want the Tick value' % (mode, res['eax']))
+        if _part_floats(h, obj) != (10.0, 6.0):
+            problems.append('mode %d: the timer %r' % (mode, _part_floats(h, obj)))
+        if struct.unpack('<fff', h.uc.mem_read(obj + 0x650, 12)) != (1.5, -2.5, 3.5):
+            problems.append('mode %d: the motion was dropped' % mode)
+        if _loader_u32(h, obj + 0x664) != 7 or _loader_u32(h, obj + 0x670) != 5:
+            problems.append('mode %d: the counts were dropped' % mode)
+    return problems
+
+
+def test_input_update_frame_other_mode(h):
+    """any other mode does nothing but return mode - 1"""
+    problems = []
+    for mode in (3, 5):
+        obj, log = _update_case(h, mode, 25.0, 10.0, 1.0)
+        h.uc.mem_write(obj + 0x650, struct.pack('<fff', 1.5, -2.5, 3.5))
+        args, regs = _update_call(h, obj, 1.0)
+        diffs = h.compare(UPDATE, args=args, regs=regs)
+        if diffs:
+            return diffs
+        res = h.call(UPDATE, args=args, regs=regs)
+        if res['fault']:
+            return ['replacement faulted: %s' % res['fault']]
+        if res['eax'] != mode - 1:
+            problems.append('mode %d: eax %08X' % (mode, res['eax']))
+        if _loader_u32(h, log) or _part_floats(h, obj) != (10.0, 25.0):
+            problems.append('mode %d: the timer moved' % mode)
+        if struct.unpack('<fff', h.uc.mem_read(obj + 0x650, 12)) != (1.5, -2.5, 3.5):
+            problems.append('mode %d: the motion was dropped' % mode)
+    return problems

@@ -239,6 +239,37 @@ unsigned PollMouse(CInput *input, unsigned previous)
     return eax;
 }
 
+/* 0x46D030: the input's update part (CInput + 4, vtable 0x60CC20 slot 1).  Mode 0 polls the devices and returns
+ * the mouse poll's value; in the recording / playback modes (1 and 2) the elapsed time accumulates and, once an
+ * interval is full, one fixed Tick runs (slot 5) and the accumulator drains of intervals, otherwise the frame's
+ * mouse motion, key events and button log are dropped (the counts go to zero, the buffers stay).  Other modes do
+ * nothing but return mode - 1. */
+DECOMP(0046D030)
+unsigned UpdateInputFrame(CUpdatePart *updater, float dt)
+{
+    CInput *input = (CInput *)((char *)updater - __builtin_offsetof(CInput, updater));
+    if (!input->mode)
+        return PollMouse(input, input->PollKeyboard());
+    if (input->mode - 1 >= 2)
+        return input->mode - 1;
+
+    CUpdateObject *timer = (CUpdateObject *)updater;
+    timer->accumulator += dt;
+    if (timer->accumulator < timer->interval) {
+        input->mouseWheel = 0.0f;
+        input->mouseY = 0.0f;
+        input->mouseX = 0.0f;
+        input->keyCount = 0;
+        input->mouseButtonCount = 0;
+        return input->mode - 1;
+    }
+    unsigned result = ((unsigned(__thiscall *)(CUpdateObject *))((void **)timer->vftable)[5])(timer);
+    do {
+        timer->accumulator -= timer->interval;
+    } while (timer->accumulator >= timer->interval);
+    return result;
+}
+
 /* The recording is the frame's key state overrides (count, then the dik and the state of every pressed key), the
  * key events (count, then dik and whether the event is a press), the mouse buttons (count, then a byte each) and
  * the twelve bytes of the three motion floats. */

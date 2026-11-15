@@ -139,6 +139,10 @@ struct CInput {                              /* CSingleton<CInput> (0x7CC bytes)
  * keyboard poll) through it, and it returns EAX untouched when the mouse is not acquired. */
 unsigned PollMouse(CInput *input, unsigned previous);   /* 0x46CB50 */
 
+/* The frame slot of the input's update part (vtable 0x60CC20 slot 1, entered with the part - CInput + 4 - in ECX):
+ * outside the recording / playback modes it polls the devices, otherwise it only runs the fixed-step timer. */
+unsigned UpdateInputFrame(CUpdatePart *updater, float dt);   /* 0x46D030 */
+
 static_assert(sizeof(CInput) == 0x7CC, "CInput is 0x7CC bytes");
 #ifdef DECOMP_DEBUG_LOG
 extern "C" void DebugLog(const char *text);  /* main.cpp: a line in decomp_debug.log next to the exe */
