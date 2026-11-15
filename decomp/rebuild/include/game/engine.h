@@ -178,9 +178,20 @@ struct CEngine {
     void *musicManager;                      /* +04 NSound::MusicManager */
     void *unitSoundManager;                  /* +08 */
     void *ambientSoundManager;               /* +0C NSound::AmbientSoundManager */
-    char pad10[0x40 - 0x10];
+    char pad10[0x1C - 0x10];
+    float savedTreeNear;                     /* +1C tree range saved by SaveTreeDist (TreeDistanceUp/Down: +2C..) */
+    float savedTreeNearShift;                /* +20 */
+    float savedTreeFar;                      /* +24 */
+    float savedTreeStep;                     /* +28 */
+    float treeNear;                          /* +2C near fade end of the trees */
+    float treeNearShift;                     /* +30 */
+    float treeFar;                           /* +34 far visible end */
+    float treeStep;                          /* +38 "TreeVisibleDelta" */
+    char pad3C[4];
     double gamma;                            /* +40 */
-    char pad48[0x54 - 0x48];
+    char pad48[0x4C - 0x48];                 /* +48 StaticInit clears this int */
+    int unknown4C;                           /* +4C */
+    int texQuality;                          /* +50 the script's "TexQuality" option (0x44D477; GetTexQuality) */
     CConfig *config;                         /* +54 */
     char pad58[0x5C - 0x58];
     CScene *scene;                           /* +5C current scene */
@@ -218,6 +229,8 @@ struct CEngine {
     void Render();                           /* 0x44E480 */
 };
 static_assert(sizeof(CEngine) == 0xD8, "CEngine is 0xD8 bytes");
+static_assert(__builtin_offsetof(CEngine, treeNear) == 0x2C, "CEngine::treeNear");
+static_assert(__builtin_offsetof(CEngine, texQuality) == 0x50, "CEngine::texQuality");
 static_assert(__builtin_offsetof(CEngine, state) == 0xAC, "CEngine::state");
 static_assert(__builtin_offsetof(CEngine, credits) == 0xB1, "CEngine::credits");
 static_assert(__builtin_offsetof(CInput, keys) == 0x660, "CInput::keys");

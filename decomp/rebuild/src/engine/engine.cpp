@@ -2,6 +2,7 @@
 #include "game/common.h"
 #include "game/globals.h"
 #include "game/engine.h"
+#include "game/lua.h"
 
 #if DECOMP_GAME_ATTT
 /* Valkyrie has no Miles sound system: its SetActive only pauses the timer (not decompiled for it yet). */
@@ -689,6 +690,74 @@ int LuaExitGame(void *L)
     engine->unknownB0 = false;
     engine->credits = credits;
     engine->state = 3;
+    return 0;
+}
+
+ORIG_FN(004030A0, void, (void *L, float value));          /* lua_pushnumber */
+ORIG_DATA(0060826C);                                      /* the temporary nScript::Object's vftable */
+ORIG_DATA(00607CB8);                                      /* nScript::Object::vftable */
+ORIG_THISCALL(00422000, void, (void *self));              /* nScript::Object::~Object */
+
+/* The empty nScript::Object every "get" function builds before pushing its value and destroys afterwards; the
+ * stacks are scratch, but the destructor runs on the object, as in the original. */
+struct NLuaTempObject {
+    void *vftable;                                       /* +00 */
+    void *child;                                         /* +04 */
+    int built;                                           /* +08 */
+};
+
+/* "GetGammaCoef()": the script's gamma option, 3 - the engine's gamma (CancelGamma stores 3 - the option back). */
+DECOMP(0044B3E0)
+int LuaGetGammaCoef()
+{
+    CEngine *engine = CEngine::Instance();
+    NLuaTempObject object;
+    object.vftable = d_0060826C;
+    object.child = nullptr;
+    object.built = 0;
+    float gamma = (float)engine->gamma;
+    ORIG_CALL(004030A0)(g_luaState, (float)(3.0 - (double)gamma));
+    object.built = 1;
+    object.vftable = d_00607CB8;
+    ORIG_CALL(00422000)(&object);
+    return 1;
+}
+
+/* "GetTexQuality()": the texture-quality option the options table stores into the engine (0x44D477). */
+DECOMP(0044B510)
+int LuaGetTexQuality()
+{
+    CEngine *engine = CEngine::Instance();
+    NLuaTempObject object;
+    object.vftable = d_0060826C;
+    object.child = nullptr;
+    object.built = 0;
+    ORIG_CALL(004030A0)(g_luaState, (float)engine->texQuality);
+    object.built = 1;
+    object.vftable = d_00607CB8;
+    ORIG_CALL(00422000)(&object);
+    return 1;
+}
+
+/* "SaveTreeDist()": keeps the tree range the scripts just set (+2C..+38) in the saved copy at +1C..+28 (the end
+ * of a battle's options restores it from there).  With a world level the original first picks the level's own
+ * distances out of worldLevel+78 -> +68 -> [0] +58..+64 and then overwrites them - they do not survive. */
+DECOMP(0044B610)
+int LuaSaveTreeDist()
+{
+    CEngine *engine = CEngine::Instance();
+    char *level = (char *)engine->worldLevel;
+    if (level && *(char **)(level + 0x78)) {
+        char *first = **(char ***)(*(char **)(level + 0x78) + 0x68);
+        engine->savedTreeNear = *(float *)(first + 0x58);
+        engine->savedTreeNearShift = *(float *)(first + 0x5C);
+        engine->savedTreeFar = *(float *)(first + 0x60);
+        engine->savedTreeStep = *(float *)(first + 0x64);
+    }
+    engine->savedTreeNear = engine->treeNear;
+    engine->savedTreeNearShift = engine->treeNearShift;
+    engine->savedTreeFar = engine->treeFar;
+    engine->savedTreeStep = engine->treeStep;
     return 0;
 }
 

@@ -139,6 +139,7 @@ def run(h):
     finally:
         for a, old in saved:
             h.uc.mem_write(a, old)
+            h.uc.ctl_remove_cache(a, a + len(old))
         h.uc.mem_write(0x006CA8E0, lis)
     return diffs
 
