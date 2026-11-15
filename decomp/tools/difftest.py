@@ -161,6 +161,11 @@ class Harness:
         self.heap_ptr = p + n
         if data is not None:
             self.uc.mem_write(p, bytes(data))
+            if n:
+                # The heap is reused by later tests: a stub executed here stays in the translation cache, and
+                # a test that allocates its own stub at the same address without this flush would run the old
+                # one (a stale `ret 4` in place of `ret` showed up as an esp difference).
+                self.uc.ctl_remove_cache(p, p + n)
         return p
 
     # --- C runtime
