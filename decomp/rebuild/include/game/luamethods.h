@@ -52,6 +52,8 @@ void FillLuaToolTipMethods(const void *methods); /* 0x56A030 */
 void FillLuaMessageMethods(const void *methods); /* 0x56A090 */
 void FillLuaNpcListMethods(const void *methods); /* 0x56A0F0 */
 void FillLuaEnemyArmyMethods(const void *methods); /* 0x56A150 */
+void FillLuaUnitSoundManagerMethods(const void *methods); /* 0x4EDEF0 */
+void FillLuaMusicManagerMethods(const void *methods); /* 0x47D470 */
 
 void InitLuaParticleSystemMethods(); /* 0x56A1B0 */
 void InitLuaRenderObjectMethods(); /* 0x56A300 */
@@ -74,3 +76,5 @@ void InitLuaItemIconMethods(); /* 0x56B8C0 */
 void InitLuaAttackSphereMethods(); /* 0x56B9A0 */
 void InitLuaEnemyArmyMethods(); /* 0x56BB50 */
 void InitLuaChooseHeroRotatorMethods(); /* 0x56F5E0 */
+void InitLuaUnitSoundManagerMethods(); /* 0x4EE1C0 */
+void InitLuaMusicManagerMethods(); /* 0x47DB60 */

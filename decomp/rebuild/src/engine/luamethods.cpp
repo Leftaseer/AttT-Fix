@@ -32,6 +32,8 @@ ORIG_DATA(00568B30);
 ORIG_DATA(00568DA0);
 ORIG_DATA(00568F30);
 ORIG_DATA(00569280);
+ORIG_DATA(004ED7D0);
+ORIG_DATA(0047D1C0);
 ORIG_DATA(008D0FE8);
 ORIG_DATA(008D1000);
 ORIG_DATA(008D0FCC);
@@ -414,9 +416,25 @@ ORIG_DATA(0061CCE4);
 ORIG_DATA(0058CD70);
 ORIG_DATA(0061CCCC);
 ORIG_DATA(0056AF50);
+ORIG_DATA(006CA83C);
+ORIG_DATA(006C2A30);
+ORIG_DATA(004EE040);
+ORIG_DATA(006082BC);
+ORIG_DATA(004ED630);
+ORIG_DATA(00612C18);
+ORIG_DATA(00531F70);
+ORIG_DATA(006CA214);
+ORIG_DATA(006C1470);
+ORIG_DATA(0047D7D0);
+ORIG_DATA(006082C8);
+ORIG_DATA(0047D4D0);
+ORIG_DATA(0047D0B0);
+ORIG_DATA(0060F188);
+ORIG_DATA(0047CFC0);
+ORIG_DATA(0047CE50);
 
 
-/* 0x569670..0x56A150: the walker of a method table: for every named entry, push the name, the entry as
+/* The walkers (0x4EDEF0, 0x47D470 and 0x569670..0x56A150): for a method table, for every named entry, push the name, the entry as
  * light userdata and the closure with the entry as its upvalue, then set them into the table on top of the
  * stack.  The 0x56A0F0 walker reads 8-byte {name; data} entries. */
 template <class Entry>
@@ -603,6 +621,18 @@ DECOMP(0056A150)
 void FillLuaEnemyArmyMethods(const void *methods)
 {
     FillLuaMethods((const LuaNamedMethod *)methods, (const void *)d_00569280);
+}
+
+DECOMP(004EDEF0)
+void FillLuaUnitSoundManagerMethods(const void *methods)
+{
+    FillLuaMethods((const LuaNamedMethod *)methods, (const void *)d_004ED7D0);
+}
+
+DECOMP(0047D470)
+void FillLuaMusicManagerMethods(const void *methods)
+{
+    FillLuaMethods((const LuaNamedMethod *)methods, (const void *)d_0047D1C0);
 }
 
 
@@ -1206,4 +1236,38 @@ void InitLuaChooseHeroRotatorMethods()
     }
     InitLuaGuiElementMethods();
     FillLuaChooseHeroRotatorMethods((const void *)d_006C7690);
+}
+
+DECOMP(004EE1C0)
+void InitLuaUnitSoundManagerMethods()
+{
+    if ((ORIG_VAR(006CA83C, unsigned) & 1) == 0) {
+        ORIG_VAR(006CA83C, unsigned) |= 1;
+        LuaNamedMethod *methods = (LuaNamedMethod *)d_006C2A30;
+        methods[0].function = (const void *)d_004EE040; /* "SetVolume" */
+        methods[1].name = (const char *)d_006082BC; /* "GetVolume" */
+        methods[1].function = (const void *)d_004ED630;
+        methods[2].name = (const char *)d_00612C18; /* "PlayVolumeMusic" */
+        methods[2].function = (const void *)d_00531F70;
+    }
+    FillLuaUnitSoundManagerMethods((const void *)d_006C2A30);
+}
+
+DECOMP(0047DB60)
+void InitLuaMusicManagerMethods()
+{
+    if ((ORIG_VAR(006CA214, unsigned) & 1) == 0) {
+        ORIG_VAR(006CA214, unsigned) |= 1;
+        LuaNamedMethod *methods = (LuaNamedMethod *)d_006C1470;
+        methods[0].function = (const void *)d_0047D7D0; /* "SetState" */
+        methods[1].name = (const char *)d_006082C8; /* "SetVolume" */
+        methods[1].function = (const void *)d_0047D4D0;
+        methods[2].name = (const char *)d_006082BC; /* "GetVolume" */
+        methods[2].function = (const void *)d_0047D0B0;
+        methods[3].name = (const char *)d_0060F188; /* "SetNumFramesForFade" */
+        methods[3].function = (const void *)d_0047CFC0;
+        methods[4].name = (const char *)d_0060F180; /* "Update" */
+        methods[4].function = (const void *)d_0047CE50;
+    }
+    FillLuaMusicManagerMethods((const void *)d_006C1470);
 }

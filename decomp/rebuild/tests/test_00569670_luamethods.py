@@ -39,6 +39,8 @@ INIT_CASES = [
     (0x0056B9A0, 0x006C75C0, 0x008D1064, 80),  # AttackSphere
     (0x0056BB50, 0x006C7610, 0x008D1098, 128),  # EnemyArmy
     (0x0056F5E0, 0x006C7690, 0x008D109C, 80),  # ChooseHeroRotator
+    (0x004EE1C0, 0x006C2A30, 0x006CA83C, 64),  # UnitSoundManager
+    (0x0047DB60, 0x006C1470, 0x006CA214, 96),  # MusicManager
 ]
 
 WALKER_CASES = [
@@ -71,6 +73,8 @@ WALKER_CASES = [
     (0x0056A090, 16),
     (0x0056A0F0, 8),
     (0x0056A150, 16),
+    (0x004EDEF0, 16),
+    (0x0047D470, 16),
 ]
 
 
@@ -777,6 +781,50 @@ def test_walker_0056A150(h):
     return _check_fields(h, state, methods, 16)
 
 
+def test_walker_004EDEF0(h):
+    state = _state(h)
+    if not _table_top(h, state):
+        return ['no table']
+    name1 = h.alloc(6, b'Alpha\0')
+    name2 = h.alloc(5, b'Beta\0')
+    size = 3 * 16
+    methods = h.alloc(size, bytes(size))
+    if 16 == 16:
+        h.uc.mem_write(methods, struct.pack('<IIII', name1, 0, 0x0054A680, 0))
+        h.uc.mem_write(methods + 16, struct.pack('<IIII', name2, 0, 0x00562DA0, 0))
+    else:
+        h.uc.mem_write(methods, struct.pack('<II', name1, 0x0054A680))
+        h.uc.mem_write(methods + 8, struct.pack('<II', name2, 0x00562DA0))
+    diffs = h.compare(0x004EDEF0, args=(methods,), ret=None)
+    if diffs:
+        return diffs
+    _table_top(h, state)
+    _call(h, 0x004EDEF0, args=(methods,))
+    return _check_fields(h, state, methods, 16)
+
+
+def test_walker_0047D470(h):
+    state = _state(h)
+    if not _table_top(h, state):
+        return ['no table']
+    name1 = h.alloc(6, b'Alpha\0')
+    name2 = h.alloc(5, b'Beta\0')
+    size = 3 * 16
+    methods = h.alloc(size, bytes(size))
+    if 16 == 16:
+        h.uc.mem_write(methods, struct.pack('<IIII', name1, 0, 0x0054A680, 0))
+        h.uc.mem_write(methods + 16, struct.pack('<IIII', name2, 0, 0x00562DA0, 0))
+    else:
+        h.uc.mem_write(methods, struct.pack('<II', name1, 0x0054A680))
+        h.uc.mem_write(methods + 8, struct.pack('<II', name2, 0x00562DA0))
+    diffs = h.compare(0x0047D470, args=(methods,), ret=None)
+    if diffs:
+        return diffs
+    _table_top(h, state)
+    _call(h, 0x0047D470, args=(methods,))
+    return _check_fields(h, state, methods, 16)
+
+
 def test_init_0056A1B0(h):
     state = _state(h)
     if not _table_top(h, state):
@@ -1048,5 +1096,31 @@ def test_init_0056F5E0(h):
     _table_top(h, state)
     _call(h, 0x0056F5E0)
     return _check_fields(h, state, 0x006C7690, 16)
+
+
+def test_init_004EE1C0(h):
+    state = _state(h)
+    if not _table_top(h, state):
+        return ['no table']
+    _reset_class_table(h, 0x006C2A30, 0x006CA83C, 64)
+    diffs = h.compare(0x004EE1C0, ret=None)
+    if diffs:
+        return diffs
+    _table_top(h, state)
+    _call(h, 0x004EE1C0)
+    return _check_fields(h, state, 0x006C2A30, 16)
+
+
+def test_init_0047DB60(h):
+    state = _state(h)
+    if not _table_top(h, state):
+        return ['no table']
+    _reset_class_table(h, 0x006C1470, 0x006CA214, 96)
+    diffs = h.compare(0x0047DB60, ret=None)
+    if diffs:
+        return diffs
+    _table_top(h, state)
+    _call(h, 0x0047DB60)
+    return _check_fields(h, state, 0x006C1470, 16)
 
 
