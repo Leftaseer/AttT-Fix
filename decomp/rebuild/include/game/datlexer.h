@@ -37,6 +37,14 @@ static_assert(sizeof(DatScannerBuffer) == 0x28, "DatScannerBuffer is 0x28 bytes"
 DatScannerBuffer *DatLexerCreateBuffer(FILE *file, int size);       /* 0x470020 */
 void DatLexerInitBuffer(DatScannerBuffer *buf, FILE *file);          /* 0x46FEE0 */
 void DatLexerFlushBuffer(DatScannerBuffer *buf);                     /* 0x46FD30 */
+void DatLexerLoadBufferState();                                      /* 0x46FD00 */
+void DatLexerSwitchBuffer(DatScannerBuffer *buf);                    /* 0x46FE30 */
+void DatLexerDeleteBuffer(DatScannerBuffer *buf);                    /* 0x46FEA0 */
+DatScannerBuffer *DatLexerScanBuffer(char *base, unsigned size);     /* 0x46FF30 */
+DatScannerBuffer *DatLexerScanBytes(const char *bytes, int count);   /* 0x46FFB0 */
+DatScannerBuffer *DatLexerScanString(const char *text);              /* 0x470080 */
+void DatLexerCopyWord();                                             /* 0x46FDF0 */
+void DatLexerScanNumber();                                           /* 0x46FE10 */
 char *DatLexerRestart(FILE *file);                                   /* 0x4700B0 */
 int DatLexerGetNextBuffer();                                         /* 0x470150 */
 unsigned DatLexerInput();                                            /* 0x4702C0 */

@@ -37,6 +37,9 @@ ORIG_DATA(006CA280); /* the CGameFile the scanner reads */
 
 /* messages and the fprintf format of the original */
 ORIG_DATA(0060E438); /* "%s\n" */
+ORIG_DATA(0060E43C); /* out of dynamic memory in yy_scan_buffer() */
+ORIG_DATA(0060E468); /* bad buffer in yy_scan_bytes() */
+ORIG_DATA(0060E488); /* out of dynamic memory in yy_scan_bytes() */
 ORIG_DATA(0060E4B4); /* out of dynamic memory in yy_create_buffer() */
 ORIG_DATA(0060E4E0); /* fatal error - scanner input buffer overflow */
 ORIG_DATA(0060E50C); /* fatal flex scanner internal error--end of buffer missed */
@@ -46,6 +49,7 @@ ORIG_DATA(0060E570); /* fatal flex scanner internal error--no action found */
 
 extern "C" __declspec(dllimport) void *__cdecl malloc(size_t size);
 extern "C" __declspec(dllimport) void *__cdecl realloc(void *p, size_t size);
+extern "C" __declspec(dllimport) void __cdecl free(void *p);
 extern "C" __declspec(dllimport) double __cdecl atof(const char *s);
 extern "C" __declspec(dllimport) void __cdecl exit(int code);
 extern "C" __declspec(dllimport) int __cdecl printf(const char *format, ...);
@@ -135,13 +139,41 @@ void DatLexerFlushBuffer(DatScannerBuffer *buf)
     buf->status = 0;
     buf->bufPos = buf->chBuf;
     buf->atBol = 1;
-    if (buf == CurrentBuffer()) {
-        CharactersRead() = buf->nChars;
-        TokenText() = buf->bufPos;
-        InputFile() = buf->input;
-        HoldCharacter() = (unsigned char)*TokenText();
-        CurrentPosition() = TokenText();
+    if (buf == CurrentBuffer())
+        DatLexerLoadBufferState();
+}
+
+/* 0x46FD00: the scanner's globals take the state of the current buffer (flex's yy_load_buffer_state). */
+DECOMP(0046FD00)
+void DatLexerLoadBufferState()
+{
+    DatScannerBuffer *buf = CurrentBuffer();
+    CharactersRead() = buf->nChars;
+    TokenText() = buf->bufPos;
+    InputFile() = buf->input;
+    HoldCharacter() = (unsigned char)*TokenText();
+    CurrentPosition() = TokenText();
+}
+
+/* 0x46FDF0: the word token's text, copied into the text buffer (the scanner's own copy of it). */
+DECOMP(0046FDF0)
+void DatLexerCopyWord()
+{
+    char *src = TokenText();
+    char *dst = d_006C9068;
+    for (;;) {
+        char c = *src++;
+        *dst++ = c;
+        if (c == 0)
+            break;
     }
+}
+
+/* 0x46FE10: the value of the number token. */
+DECOMP(0046FE10)
+void DatLexerScanNumber()
+{
+    TokenValue() = (float)atof(TokenText());
 }
 
 DECOMP(0046FEE0)
@@ -186,12 +218,94 @@ char *DatLexerRestart(FILE *file)
         buf->interactive = _isatty(_fileno(file)) > 0;
         buf = CurrentBuffer();
     }
-    TokenText() = buf->bufPos;
-    CharactersRead() = buf->nChars;
-    InputFile() = buf->input;
-    CurrentPosition() = TokenText();
-    HoldCharacter() = (unsigned char)*TokenText();
+    DatLexerLoadBufferState();
     return TokenText();
+}
+
+/* 0x46FE30: make buf the current buffer, saving the read position of the old one first.  The switch on the end
+ * of the file is remembered for the scanner's restart. */
+DECOMP(0046FE30)
+void DatLexerSwitchBuffer(DatScannerBuffer *buf)
+{
+    DatScannerBuffer *previous = CurrentBuffer();
+    if (previous == buf)
+        return;
+    if (previous != nullptr) {
+        *CurrentPosition() = (char)HoldCharacter();
+        previous->bufPos = CurrentPosition();
+        previous->nChars = CharactersRead();
+    }
+    CharactersRead() = buf->nChars;
+    TokenText() = buf->bufPos;
+    InputFile() = buf->input;
+    CurrentBuffer() = buf;
+    HoldCharacter() = (unsigned char)*TokenText();
+    CurrentPosition() = TokenText();
+    DidSwitchOnEof() = 1;
+}
+
+/* 0x46FEA0: the buffer and, when the buffer owns it, its character memory. */
+DECOMP(0046FEA0)
+void DatLexerDeleteBuffer(DatScannerBuffer *buf)
+{
+    if (buf == nullptr)
+        return;
+    if (buf == CurrentBuffer())
+        CurrentBuffer() = nullptr;
+    if (buf->ownBuffer != 0)
+        free(buf->chBuf);
+    free(buf);
+}
+
+/* 0x46FF30: a buffer over caller memory, which has to end with two NULs and is not freed with the buffer. */
+DECOMP(0046FF30)
+DatScannerBuffer *DatLexerScanBuffer(char *base, unsigned size)
+{
+    if (size < 2 || base[size - 2] != 0 || base[size - 1] != 0)
+        return nullptr;
+    DatScannerBuffer *buf = (DatScannerBuffer *)malloc(sizeof(DatScannerBuffer));
+    if (buf == nullptr)
+        DatLexerFatalError(ORIG_STR(0060E43C));
+    buf->bufSize = (int)size - 2;
+    buf->chBuf = base;
+    buf->bufPos = base;
+    buf->ownBuffer = 0;
+    buf->input = nullptr;
+    buf->nChars = (int)size - 2;
+    buf->interactive = 0;
+    buf->atBol = 1;
+    buf->fillBuffer = 0;
+    buf->status = 0;
+    DatLexerSwitchBuffer(buf);
+    return buf;
+}
+
+/* 0x46FFB0: a buffer over a copy of bytes. */
+DECOMP(0046FFB0)
+DatScannerBuffer *DatLexerScanBytes(const char *bytes, int count)
+{
+    char *memory = (char *)malloc((unsigned)count + 2);
+    if (memory == nullptr)
+        DatLexerFatalError(ORIG_STR(0060E488));
+    for (int i = 0; i < count; i++)
+        memory[i] = bytes[i];
+    memory[count] = 0;
+    memory[count + 1] = 0;
+    DatScannerBuffer *buf = DatLexerScanBuffer(memory, (unsigned)count + 2);
+    if (buf == nullptr)
+        DatLexerFatalError(ORIG_STR(0060E468));
+    buf->ownBuffer = 1;
+    return buf;
+}
+
+/* 0x470080: a buffer over a copy of a NUL-terminated text. */
+DECOMP(00470080)
+DatScannerBuffer *DatLexerScanString(const char *text)
+{
+    int length = 0;
+    while (text[length] != 0)
+        length++;
+    return DatLexerScanBytes(text, length);
 }
 
 /* Refills the buffer: the matched text is moved to its start, more characters are read through the game file
@@ -451,19 +565,11 @@ find_action:
             return 0x102;
         case 2:
             return 0x103;
-        case 3: {
-            char *src = TokenText();
-            char *dst = d_006C9068;
-            for (;;) {
-                char c = *src++;
-                *dst++ = c;
-                if (c == 0)
-                    break;
-            }
+        case 3:
+            DatLexerCopyWord();
             return 0x104;
-        }
         case 4:
-            TokenValue() = (float)atof(TokenText());
+            DatLexerScanNumber();
             return 0x105;
         case 5: {
             /* a quoted string: its characters up to the closing quote, without whitespace */
