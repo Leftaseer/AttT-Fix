@@ -12,7 +12,7 @@ ORIG_DATA(0060CC94); /* iTrigger::vftable */
 ORIG_DATA(0060CCC0); /* LuaTrigger::vftable */
 ORIG_DATA(006C0F90); /* metatable of the trigger userdata */
 ORIG_DATA(006C905C); /* the trigger list (set by 0x53A6A0) */
-ORIG_DATA(008D0990); /* the trigger module's table: its "new" field is 0x568300 */
+ORIG_DATA(008D0990); /* the trigger class name the registrar is given */
 ORIG_DATA(00562F60); /* the module's "__gc" */
 ORIG_DATA(00563020); /* the module's "__eq" */
 ORIG_DATA(00563150); /* the module's "delete" */
