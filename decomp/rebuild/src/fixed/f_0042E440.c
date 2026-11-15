@@ -1,6 +1,7 @@
-/* 0x0042E440: a thrown projectile's constructor (owner arg 1, model index arg 2, arg 3 for the owner's pose, speed
- * arg 4, trail arg 5): the 3D object base "Arrow" (0x004AD180), its vtable, an empty mesh list (+0x1C4), a flat arc
- * (+0x254, 0x0042DC20), the constants +0x2CC / +0x2D0, the speed +0x2BC and owner +0x2C4; the owner's model parts
+/* 0x0042E440: a thrown projectile's constructor (model owner arg 1, model index arg 2, arg 3 for the owner's pose,
+ * the launching entity arg 4, trail arg 5): the 3D object base "Arrow" (0x004AD180), its vtable, an empty mesh list
+ * (+0x1C4), a flat arc (+0x254, 0x0042DC20), the constants +0x2CC / +0x2D0, the launcher +0x2BC (its +0x168
+ * transform and +0x2D0 pose index drive the flight) and the model owner +0x2C4; the owner's model parts
  * (+0x1DC, 0x004B6450 of them) give their mesh of index arg 2 (made visible, +0x24 cleared) to the list (push_back
  * inline, 0x00487860 when full); the first mesh's pose (0x0042DA70 with the owner's +0x1EC and arg 3) scaled by
  * 0x00608A70 (D3DXMatrixScaling, D3DXMatrixMultiply) is its matrix (+0x1D4); not flying (+0x2C0), time 0 (+0x2D4);
@@ -25,7 +26,7 @@ DECOMP_C void (__thiscall *imp_00607324)(void *, const char *) __asm__("__imp_??
 DECOMP_C void (__thiscall *imp_00607330)(void *) __asm__("__imp_??1?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@XZ");
 
 DECOMP(0042E440)
-void *__thiscall f_0042E440(void *this, char *owner, int model, void *pose, unsigned int speed, void *trail)
+void *__thiscall f_0042E440(void *this, char *owner, int model, void *pose, void *launcher, void *trail)
 {
     char *s = (char *)this, *parts, *mesh, *v = s + 0x1c4;
     unsigned int str[7], k, ms[16], r[16];
@@ -40,7 +41,7 @@ void *__thiscall f_0042E440(void *this, char *owner, int model, void *pose, unsi
     *(int *)(v + 0xc) = 0;
     sub_0042DC20(s + 0x254, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
     *(unsigned int *)(s + 0x2cc) = *(unsigned int *)d_00608C24;
-    *(unsigned int *)(s + 0x2bc) = speed;
+    *(void **)(s + 0x2bc) = launcher;
     *(unsigned int *)(s + 0x2d0) = *(unsigned int *)d_00608C20;
     *(char **)(s + 0x2c4) = owner;
     parts = owner + 0x1dc;
