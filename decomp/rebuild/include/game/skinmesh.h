@@ -118,6 +118,11 @@ static_assert(sizeof(CSkinAnimationManager) == 0x54, "CSkinAnimationManager is 0
 static_assert(__builtin_offsetof(CSkinAnimationManager, models) == 0x04, "CSkinAnimationManager::models");
 static_assert(__builtin_offsetof(CSkinAnimationManager, animations) == 0x2C, "CSkinAnimationManager::animations");
 
+/* 0x4C01B0 fills the vtable and the two empty maps; 0x4C0EE0 builds it once and keeps it in the global
+ * 0x6CA490 (the objects count themselves in 0x6CA48C). */
+CSkinAnimationManager *__thiscall InitSkinAnimationManager(CSkinAnimationManager *self); /* 0x4C01B0 */
+void *__cdecl GetSkinAnimationManager();                                                 /* 0x4C0EE0 */
+
 /* the effect object 0x448F10 hands out (0x6CAA28 holds one): 0x447A50 builds it with its file name at +04 */
 struct Effect {
     void *vftable;        /* +00 */

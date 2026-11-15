@@ -20,6 +20,8 @@ ORIG_DATA(006C7C90); /* the cp1251 lowercasing table {0..255}: A-Z and the Cyril
 ORIG_DATA(0069916C); /* CGameException _ThrowInfo */
 
 /* the exe imports operator new (?2) but implements new[]/?_U itself as a jmp to it; delete[] is imported */
+ORIG_FN(005E3EAE, void *, (unsigned int size)); /* operator new, through the original thunk: the compiler would
+                                                 * drop the null check after a direct call (new never returns null) */
 ORIG_FN(005E3B10, void *, (unsigned int size)); /* operator new[] */
 inline void *operator new(unsigned int, void *p) { return p; }
 
@@ -635,7 +637,7 @@ DECOMP(0044ABE0)
 CFileSystem *CFileSystem::Instance()
 {
     if (!g_fileSystemInstance) {
-        void *memory = operator new(sizeof(CFileSystem));
+        void *memory = sub_005E3EAE(sizeof(CFileSystem));
         g_fileSystemInstance = memory ? new (memory) CFileSystem() : nullptr;
         if (!g_fileSystemInstance)
             ThrowGameException(ORIG_STR(00607BC8), ORIG_STR(00607E98), 16);

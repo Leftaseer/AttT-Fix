@@ -326,6 +326,43 @@ def test_file_system_instance(h):
     return None
 
 
+def _run_original(h, entry, args=(), regs=None):
+    """call the original body the rebuilt entry jumps over (the jump is five bytes)"""
+    original = bytes(h.orig.read(entry, 5))
+    rebuilt = bytes(h.uc.mem_read(entry, 5))
+    h.uc.mem_write(entry, original)
+    try:
+        return h.call(entry, args=args, regs=regs)
+    finally:
+        h.uc.mem_write(entry, rebuilt)
+
+
+def test_file_system_instance_without_memory(h):
+    """operator new failing throws through CGameException and leaves the singleton unset."""
+    saved = bytes(h.uc.mem_read(0x006C8C28, 4))
+    old = h.crt_new
+
+    def fail_new():
+        h._ret(0)
+
+    h.crt_new = fail_new
+    try:
+        h.uc.mem_write(0x006C8C28, bytes(4))
+        original = _run_original(h, 0x0044ABE0)
+        if original['fault'] != 'threw':
+            return ['the original did not throw: %r' % original['fault']]
+        h.uc.mem_write(0x006C8C28, bytes(4))
+        res = h.call(0x0044ABE0)
+        if res['fault'] != 'threw':
+            return ['the replacement did not throw: %r' % res['fault']]
+        if _u32(h, 0x006C8C28):
+            return ['the getter stored %08X' % _u32(h, 0x006C8C28)]
+        return None
+    finally:
+        h.crt_new = old
+        h.uc.mem_write(0x006C8C28, saved)
+
+
 def _check_initial_map(h, mapobj, sentinel, allocator):
     if _u32(h, mapobj) & 0xFF != allocator:
         return ['allocator byte %02X, want %02X' % (_u32(h, mapobj) & 0xFF, allocator)]

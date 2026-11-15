@@ -41,10 +41,15 @@ ORIG_THISCALL(00475720, void *, (void *self, CGameFile *file));       /* matrix 
 
 ORIG_DATA(00611258); /* "Castle01GateBar.skm", compared with the lowered model name */
 ORIG_DATA(0061126C); /* "Не правильное имя анимации!!!" (cp1251) */
+ORIG_DATA(00611254); /* CSkinAnimationManager::vftable */
+ORIG_DATA(00607BAC); /* "e:\\prog\\att1\\Singleton.h" */
+ORIG_DATA(00607BC8); /* the manager creation failure message (cp1251) */
 
 extern "C" __declspec(dllimport) int __cdecl msvc_atoi(const char *s) __asm__("_atoi");
 
 ORIG_THISCALL(00422D80, void, (FsHashMap *map, FsStringNode **node, const std::string *key)); /* FindName */
+ORIG_THISCALL(004BFC30, void *, (FsHashMap *self, const unsigned char *alloc, unsigned int unused)); /* models ctor */
+ORIG_THISCALL(004BE3C0, void *, (FsHashMap *self, const unsigned char *alloc, unsigned int unused)); /* clips ctor */
 ORIG_THISCALL(00434AB0, void, (StringVector *self, const std::string *item)); /* vector<string>::push_back */
 ORIG_THISCALL(004BEE20, SkinMeshVector *, (CSkinAnimationManager *self, SkinMeshVector *out,
                                            const std::string *name, int frames, MeshDrawTable *drawTable));
@@ -56,6 +61,9 @@ ORIG_THISCALL(004BE990, void, (SkinModelRecord *self));
 ORIG_THISCALL(004C00E0, SkinModelRecord *, (FsHashMap *map, const std::string *key)); /* the model's slot */
 ORIG_THISCALL(004BD930, void *, (void *self, const std::string *name)); /* the animation clip */
 ORIG_THISCALL(005542E0, void **, (FsHashMap *map, const std::string *key)); /* the map's value slot */
+ORIG_FN(005E3EAE, void *, (unsigned int size)); /* operator new, called through the original thunk so that the
+                                                 * compiler keeps the null checks (it assumes `operator new`
+                                                 * itself never returns null) */
 ORIG_THISCALL(00487860, void, (SkinSubObjectVector *self, SkinSubObject **position, unsigned count,
                                SkinSubObject **value));
 
@@ -467,7 +475,7 @@ void __thiscall LoadSkinModel(CSkinAnimationManager *self, const std::string *na
     FsStringNode *clipNode;
     sub_00422D80(&self->animations, &clipNode, &animationName);
     if (clipNode == (FsStringNode *)self->animations.sentinel) {
-        void *memory = operator new(0x38);
+        void *memory = sub_005E3EAE(0x38);
         void *clip = memory ? sub_004BD930(memory, &animationName) : nullptr;
         *animation = clip;
         *sub_005542E0(&self->animations, &animationName) = clip;
@@ -476,4 +484,35 @@ void __thiscall LoadSkinModel(CSkinAnimationManager *self, const std::string *na
     }
 
     DestroyStringVector(&parts, 0);
+}
+
+/* 0x4C01B0: the vtable and the two empty string maps - the loaded models and the animation clips.  Both map
+ * constructors only read the byte behind their first argument, so one dummy byte serves them both (the
+ * original passes an uninitialized one). */
+DECOMP(004C01B0)
+CSkinAnimationManager *__thiscall InitSkinAnimationManager(CSkinAnimationManager *self)
+{
+    unsigned char empty = 0;
+    self->vftable = d_00611254;
+    sub_004BFC30(&self->models, &empty, 0);
+    sub_004BE3C0(&self->animations, &empty, 0);
+    return self;
+}
+
+/* 0x4C0EE0: the singleton getter - the manager is built on the first call and kept in the global 0x6CA490.
+ * A failed allocation throws instead of returning null. */
+DECOMP(004C0EE0)
+void *__cdecl GetSkinAnimationManager()
+{
+    CSkinAnimationManager *manager = *(CSkinAnimationManager **)d_006CA490;
+    if (manager == nullptr) {
+        CSkinAnimationManager *memory = (CSkinAnimationManager *)sub_005E3EAE(0x54);
+        manager = memory ? InitSkinAnimationManager(memory) : nullptr;
+        *(CSkinAnimationManager **)d_006CA490 = manager;
+        if (manager == nullptr) {
+            CGameException e(std::string(ORIG_STR(00607BC8)), ORIG_STR(00607BAC), 0x10);
+            _CxxThrowException(&e, d_0069916C);
+        }
+    }
+    return manager;
 }
