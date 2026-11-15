@@ -1,5 +1,7 @@
 # Differential tests for rebuild/src/engine/input.cpp: CInput state resets on random objects.
 
+from unicorn.x86_const import UC_X86_REG_ECX
+
 def make_input(h):
     obj = h.alloc(0x7CC, bytes(random.getrandbits(8) for _ in range(0x7CC)))
     nkeys, nbtn = random.randint(0, 40), random.randint(0, 8)
@@ -217,3 +219,149 @@ def test_input_load_playback(h):
 
 def test_input_load_playback_missing_file(h):
     return _check_loader(h, False, b'')
+
+
+# ---- the recorded-frame player (0x46C6E0) and recorder (0x46D0E0) ---------------------------------
+# A frame is the key-state overrides (count, then dik and state per pressed key), the key events (count, then dik
+# and the press flag), the mouse buttons (count, then a byte each) and the twelve bytes of the three motion floats.
+# The device polls the recorder runs first are no-ops while the object is not acquired (0x7C7 / 0x7C8 clear).
+
+PLAYER = 0x0046C6E0
+RECORDER = 0x0046D0E0
+
+
+def _frame_object(h, playback, size, cursor, keys, buttons):
+    obj = h.alloc(0x7CC, b'\xff' * 0x7CC)
+    for offset in range(0x008, 0x7CC, 4):
+        h.uc.mem_write(obj + offset, bytes(4))
+    h.uc.mem_write(obj + 0x660, struct.pack('<II', keys, 0))
+    h.uc.mem_write(obj + 0x66C, struct.pack('<II', buttons, 0))
+    h.uc.mem_write(obj + 0x650, b'\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c')
+    h.uc.mem_write(obj + 0x678, struct.pack('<III', playback, size, cursor))
+    return obj
+
+
+def _playback_case(h):
+    stream = (bytes([2, 0x10, 0x80, 0x20, 0x00])          # two key-state overrides
+              + bytes([2, 0x41, 1, 0x42, 2])              # two key events; any nonzero press is a press
+              + bytes([1, 3])                             # one mouse button
+              + struct.pack('<fff', 1.5, -2.25, 3.75))    # the motion
+    buffer = h.alloc(len(stream) + 8, stream + bytes(8))
+    keys = h.alloc(8, b'\x11' * 8)
+    buttons = h.alloc(8, b'\x22' * 8)
+    obj = _frame_object(h, buffer, 0, 0, keys, buttons)
+    return obj, buffer, keys, buttons, stream
+
+
+def test_input_playback_frame(h):
+    obj, buffer, keys, buttons, stream = _playback_case(h)
+    diffs = h.compare(PLAYER, regs={UC_X86_REG_ECX: obj}, ret=None)
+    if diffs:
+        return diffs
+    res = h.call(PLAYER, regs={UC_X86_REG_ECX: obj})
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    key_state = h.uc.mem_read(obj + 0x48, 0x100)
+    problems = []
+    if key_state[0x10] != 0x80 or key_state[0x20] != 0 or key_state[0] != 0 or key_state[0xFF] != 0:
+        problems.append('key state is not the cleared one with the overrides')
+    if struct.unpack('<I', h.uc.mem_read(obj + 0x664, 4))[0] != 2:
+        problems.append('key count %d' % _loader_u32(h, obj + 0x664))
+    if bytes(h.uc.mem_read(keys, 4)) != b'\x41\x01\x42\x01':
+        problems.append('key events %r' % bytes(h.uc.mem_read(keys, 4)))
+    if _loader_u32(h, obj + 0x670) != 1:
+        problems.append('button count %d' % _loader_u32(h, obj + 0x670))
+    if struct.unpack('<I', h.uc.mem_read(buttons, 4))[0] != 3:
+        problems.append('button %d' % struct.unpack('<I', h.uc.mem_read(buttons, 4))[0])
+    if struct.unpack('<fff', h.uc.mem_read(obj + 0x650, 12)) != (1.5, -2.25, 3.75):
+        problems.append('motion %r' % (h.uc.mem_read(obj + 0x650, 12),))
+    if _loader_u32(h, obj + 0x680) != len(stream):
+        problems.append('cursor %d, want %d' % (_loader_u32(h, obj + 0x680), len(stream)))
+    return problems
+
+
+def _record_case(h):
+    obj, _, keys, buttons, _ = _playback_case(h)
+    buffer = h.alloc(64, bytes(64))
+    key_state = bytearray(0x100)
+    key_state[0x07] = 0x80
+    key_state[0x10] = 0x90
+    key_state[0xFF] = 0x85
+    key_state[0x20] = 0x7F                                # not held: not recorded
+    h.uc.mem_write(obj + 0x48, bytes(key_state))
+    h.uc.mem_write(keys, bytes([0x41, 1, 0x42, 0]))
+    h.uc.mem_write(obj + 0x664, struct.pack('<I', 2))
+    h.uc.mem_write(buttons, struct.pack('<II', 5, 0x107))
+    h.uc.mem_write(obj + 0x670, struct.pack('<I', 2))
+    h.uc.mem_write(obj + 0x650, struct.pack('<fff', 1.5, -2.25, 3.75))
+    h.uc.mem_write(obj + 0x678, struct.pack('<III', buffer, 0, 0))
+    return obj, buffer
+
+
+def test_input_record_frame(h):
+    obj, buffer = _record_case(h)
+    diffs = h.compare(RECORDER, regs={UC_X86_REG_ECX: obj}, ret=None)
+    if diffs:
+        return diffs
+    res = h.call(RECORDER, regs={UC_X86_REG_ECX: obj})
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    want = (bytes([3, 0x07, 0x80, 0x10, 0x90, 0xFF, 0x85])
+            + bytes([2, 0x41, 1, 0x42, 0])
+            + bytes([2, 5, 7])
+            + struct.pack('<fff', 1.5, -2.25, 3.75))
+    size = _loader_u32(h, obj + 0x67C)
+    if size != len(want):
+        return ['size %d, want %d' % (size, len(want))]
+    got = bytes(h.uc.mem_read(buffer, len(want)))
+    if got != want:
+        return ['recording %r, want %r' % (got, want)]
+    return []
+
+
+def test_input_playback_frame_sparse(h):
+    stream = bytes(3) + struct.pack('<fff', -0.5, 0.25, 7.0)
+    buffer = h.alloc(len(stream) + 8, stream + bytes(8))
+    keys = h.alloc(8, b'\x11' * 8)
+    buttons = h.alloc(8, b'\x22' * 8)
+    obj = _frame_object(h, buffer, 0, 0, keys, buttons)
+    diffs = h.compare(PLAYER, regs={UC_X86_REG_ECX: obj}, ret=None)
+    if diffs:
+        return diffs
+    res = h.call(PLAYER, regs={UC_X86_REG_ECX: obj})
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    problems = []
+    if bytes(h.uc.mem_read(obj + 0x48, 0x100)) != bytes(0x100):
+        problems.append('key state not cleared')
+    if _loader_u32(h, obj + 0x664) or _loader_u32(h, obj + 0x670):
+        problems.append('counts %d / %d' % (_loader_u32(h, obj + 0x664), _loader_u32(h, obj + 0x670)))
+    if struct.unpack('<fff', h.uc.mem_read(obj + 0x650, 12)) != (-0.5, 0.25, 7.0):
+        problems.append('motion %r' % (h.uc.mem_read(obj + 0x650, 12),))
+    if _loader_u32(h, obj + 0x680) != len(stream):
+        problems.append('cursor %d, want %d' % (_loader_u32(h, obj + 0x680), len(stream)))
+    return problems
+
+
+def test_input_record_frame_empty(h):
+    obj, _, keys, buttons, _ = _playback_case(h)
+    buffer = h.alloc(64, bytes(64))
+    h.uc.mem_write(obj + 0x48, bytes(0x100))
+    h.uc.mem_write(obj + 0x664, struct.pack('<I', 0))
+    h.uc.mem_write(obj + 0x670, struct.pack('<I', 0))
+    h.uc.mem_write(obj + 0x650, struct.pack('<fff', 0.0, 0.0, 0.0))
+    h.uc.mem_write(obj + 0x678, struct.pack('<III', buffer, 0, 0))
+    diffs = h.compare(RECORDER, regs={UC_X86_REG_ECX: obj}, ret=None)
+    if diffs:
+        return diffs
+    res = h.call(RECORDER, regs={UC_X86_REG_ECX: obj})
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    want = bytes(3) + bytes(12)
+    size = _loader_u32(h, obj + 0x67C)
+    if size != len(want):
+        return ['size %d, want %d' % (size, len(want))]
+    got = bytes(h.uc.mem_read(buffer, len(want)))
+    if got != want:
+        return ['recording %r, want %r' % (got, want)]
+    return []
