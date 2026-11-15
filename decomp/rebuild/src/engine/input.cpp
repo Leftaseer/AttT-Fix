@@ -3,6 +3,7 @@
 #include "game/common.h"
 #include "game/engine.h"
 #include "game/gamefile.h"
+#include "game/lua.h"
 
 ORIG_DATA(0060C79C);                                                       /* "input.dat" */
 ORIG_THISCALL(00459290, CGameFile *, (CGameFile *self, const std::string *name, int noLoad));
@@ -26,6 +27,10 @@ ORIG_DATA(006C904C);                                                       /* ..
 ORIG_DATA(006C9054);                                                       /* ... mouse motion */
 ORIG_DATA(006C9058);                                                       /* ... the next one being sent to */
 ORIG_FN(0044A3F0, unsigned, (void *listeners, unsigned previous, void *info));   /* sends an event to its listeners */
+ORIG_FN(004030A0, void, (void *L, float value));                           /* lua_pushnumber */
+ORIG_DATA(0060826C);                                                       /* an event's script-argument list */
+ORIG_DATA(00607CB8);                                                       /* the list's base-class vtable */
+ORIG_THISCALL(00422000, void, (void *self));                               /* ~Object of the list */
 
 typedef long (__stdcall *device_getdata)(void *dev, unsigned size, void *data, unsigned *count, unsigned flags);
 typedef long (__stdcall *device_acquire)(void *dev);
@@ -256,6 +261,63 @@ unsigned PollMouse(CInput *input, unsigned previous)
         }
     }
     return eax;
+}
+
+/* The event infos as their script conversion sees them: a move carries x, y and the wheel offset, a key event the
+ * DIK code.  Their first virtual hands the event to a script listener: the fields are pushed on the script stack
+ * and the 0x0C-byte argument list at the caller's out address records how many values the listener owns (the list
+ * keeps the vtable 0x0060826C until the destructor switches it to the base 0x00607CB8 and drops it).  The temporary
+ * list the conversion builds follows the same idiom as the Lua bindings' NLuaTempObject in engine.cpp. */
+struct ScriptArgumentList {
+    void *vftable; /* +00 */
+    void *spare;   /* +04 */
+    int count;     /* +08 */
+};
+
+struct MoveEventInfo {
+    void *vftable; /* +00 0x0060C798 */
+    float x;       /* +04 */
+    float y;       /* +08 */
+    float wheel;   /* +0C */
+};
+
+struct KeyEventInfo {
+    void *vftable;      /* +00 0x0060CA1C */
+    unsigned char dik;  /* +04 */
+};
+
+/* 0x46EB10: "evMoveInfo" to the script (vtable slot 0): x, y and the wheel offset. */
+DECOMP(0046EB10)
+ScriptArgumentList *__thiscall MoveEventScriptArguments(const MoveEventInfo *info, ScriptArgumentList *arguments)
+{
+    ScriptArgumentList temporary = { d_0060826C, nullptr, 0 };
+    ORIG_CALL(004030A0)(g_luaState, info->x);
+    temporary.count = 1;
+    ORIG_CALL(004030A0)(g_luaState, info->y);
+    temporary.count = 2;
+    ORIG_CALL(004030A0)(g_luaState, info->wheel);
+    temporary.count = 3;
+    arguments->spare = nullptr;
+    arguments->vftable = d_0060826C;
+    arguments->count = 3;
+    temporary.vftable = d_00607CB8;
+    ORIG_CALL(00422000)(&temporary);
+    return arguments;
+}
+
+/* 0x46EC30: "evKeyInfo" to the script (vtable slot 0): the DIK code. */
+DECOMP(0046EC30)
+ScriptArgumentList *__thiscall KeyEventScriptArguments(const KeyEventInfo *info, ScriptArgumentList *arguments)
+{
+    ScriptArgumentList temporary = { d_0060826C, nullptr, 0 };
+    ORIG_CALL(004030A0)(g_luaState, (float)info->dik);
+    temporary.count = 1;
+    arguments->spare = nullptr;
+    arguments->vftable = d_0060826C;
+    arguments->count = 1;
+    temporary.vftable = d_00607CB8;
+    ORIG_CALL(00422000)(&temporary);
+    return arguments;
 }
 
 /* 0x46D030: the input's update part (CInput + 4, vtable 0x60CC20 slot 1).  Mode 0 polls the devices and returns
