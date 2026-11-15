@@ -289,11 +289,25 @@ unsigned UpdateInputFrame(CUpdatePart *updater, float dt)
     return result;
 }
 
+/* The tick slot of the input part: mode 1 appends the current frame to the recording, mode 2 replays a recorded
+ * frame; any other mode does nothing and yields the unused mode - 2.  The recorder and the player return 1, which
+ * the caller sees as the result. */
+DECOMP(0046EC00)
+unsigned InputFrameTick(CUpdatePart *updater)
+{
+    CInput *input = (CInput *)((char *)updater - __builtin_offsetof(CInput, updater));
+    if (input->mode == 1)
+        return input->RecordFrame();
+    if (input->mode != 2)
+        return input->mode - 2;
+    return input->PlaybackFrame();
+}
+
 /* The recording is the frame's key state overrides (count, then the dik and the state of every pressed key), the
  * key events (count, then dik and whether the event is a press), the mouse buttons (count, then a byte each) and
  * the twelve bytes of the three motion floats. */
 DECOMP(0046D0E0)
-void CInput::RecordFrame()
+unsigned CInput::RecordFrame()
 {
     PollMouse(this, PollKeyboard());
 
@@ -325,12 +339,13 @@ void CInput::RecordFrame()
         data[cursor++] = motion[i];
 
     playbackSize = cursor;
+    return 1;      /* the original leaves 1 in EAX (a true result) */
 }
 
 /* Replays one frame from the same layout: the key state is cleared and then overridden, the key events and the
  * mouse buttons are restored with their counts and the motion bytes go back into the three floats. */
 DECOMP(0046C6E0)
-void CInput::PlaybackFrame()
+unsigned CInput::PlaybackFrame()
 {
     __builtin_memset(keyState, 0, sizeof(keyState));
 
@@ -358,6 +373,7 @@ void CInput::PlaybackFrame()
         motion[i] = data[cursor++];
 
     playbackCursor = cursor;
+    return 1;      /* the original leaves 1 in EAX (a true result) */
 }
 
 DECOMP(0046CEB0)

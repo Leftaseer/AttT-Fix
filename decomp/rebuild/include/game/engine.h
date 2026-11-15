@@ -127,8 +127,8 @@ struct CInput {                              /* CSingleton<CInput> (0x7CC bytes)
 
     static CInput *Instance();               /* 0x4215D0 */
     void LoadPlayback();                     /* 0x46B4F0 */
-    void PlaybackFrame();                    /* 0x46C6E0 */
-    void RecordFrame();                      /* 0x46D0E0 */
+    unsigned PlaybackFrame();                /* 0x46C6E0: replays one frame, returns 1 */
+    unsigned RecordFrame();                  /* 0x46D0E0: appends one frame, returns 1 */
     unsigned PollKeyboard();                 /* 0x46C980 */
     void ResetMouse();                       /* 0x46CEB0 */
     void ResetKeys();                        /* 0x46CEF0 */
@@ -142,6 +142,11 @@ unsigned PollMouse(CInput *input, unsigned previous);   /* 0x46CB50 */
 /* The frame slot of the input's update part (vtable 0x60CC20 slot 1, entered with the part - CInput + 4 - in ECX):
  * outside the recording / playback modes it polls the devices, otherwise it only runs the fixed-step timer. */
 unsigned UpdateInputFrame(CUpdatePart *updater, float dt);   /* 0x46D030 */
+
+/* The tick slot (5) of the same vtable: one step of the playback (mode 1) or of the recording (mode 2); in the
+ * other modes nothing happens and the value is the unused mode - 2.  The replay and the recording leave 1 in
+ * EAX, which is passed through. */
+unsigned InputFrameTick(CUpdatePart *updater);               /* 0x46EC00 */
 
 static_assert(sizeof(CInput) == 0x7CC, "CInput is 0x7CC bytes");
 #ifdef DECOMP_DEBUG_LOG

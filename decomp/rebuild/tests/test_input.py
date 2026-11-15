@@ -862,3 +862,82 @@ def test_input_update_frame_other_mode(h):
         if struct.unpack('<fff', h.uc.mem_read(obj + 0x650, 12)) != (1.5, -2.5, 3.5):
             problems.append('mode %d: the motion was dropped' % mode)
     return problems
+
+# ---- the tick slot of the input part (0x46EC00) -------------------------------------------------------------------
+# Mode 1 appends the frame to the recording, mode 2 replays a recorded frame; both return 1.  Any other mode
+# changes nothing and returns mode - 2 (a large unsigned value for the unused modes 0 and 3).
+
+STEP = 0x0046EC00
+
+
+def _step_call(h, obj):
+    return {UC_X86_REG_ECX: obj + 4}
+
+
+def test_input_frame_tick_playback(h):
+    obj, buffer, keys, buttons, stream = _playback_case(h)
+    h.uc.mem_write(obj + 0x674, struct.pack('<I', 2))
+    regs = _step_call(h, obj)
+    diffs = h.compare(STEP, regs=regs, ret='eax')
+    if diffs:
+        return diffs
+    res = h.call(STEP, regs=regs)
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    problems = []
+    if res['eax'] != 1:
+        problems.append('eax %08X, want 1' % res['eax'])
+    if _loader_u32(h, obj + 0x680) != len(stream):
+        problems.append('cursor %d, want %d' % (_loader_u32(h, obj + 0x680), len(stream)))
+    key_state = h.uc.mem_read(obj + 0x48, 0x100)
+    if key_state[0x10] != 0x80 or key_state[0x20] != 0:
+        problems.append('key state is not the replayed one')
+    if bytes(h.uc.mem_read(keys, 4)) != b'\x41\x01\x42\x01':
+        problems.append('key events %r' % bytes(h.uc.mem_read(keys, 4)))
+    if struct.unpack('<fff', h.uc.mem_read(obj + 0x650, 12)) != (1.5, -2.25, 3.75):
+        problems.append('motion %r' % (h.uc.mem_read(obj + 0x650, 12),))
+    return problems
+
+
+def test_input_frame_tick_record(h):
+    obj, buffer = _record_case(h)
+    h.uc.mem_write(obj + 0x674, struct.pack('<I', 1))
+    regs = _step_call(h, obj)
+    diffs = h.compare(STEP, regs=regs, ret='eax')
+    if diffs:
+        return diffs
+    res = h.call(STEP, regs=regs)
+    if res['fault']:
+        return ['replacement faulted: %s' % res['fault']]
+    want = (bytes([3, 0x07, 0x80, 0x10, 0x90, 0xFF, 0x85])
+            + bytes([2, 0x41, 1, 0x42, 0])
+            + bytes([2, 5, 7])
+            + struct.pack('<fff', 1.5, -2.25, 3.75))
+    problems = []
+    if res['eax'] != 1:
+        problems.append('eax %08X, want 1' % res['eax'])
+    size = _loader_u32(h, obj + 0x67C)
+    if size != len(want):
+        problems.append('size %d, want %d' % (size, len(want)))
+    elif bytes(h.uc.mem_read(buffer, len(want))) != want:
+        problems.append('recording %r' % bytes(h.uc.mem_read(buffer, len(want))))
+    return problems
+
+
+def test_input_frame_tick_other_mode(h):
+    problems = []
+    for mode in (0, 3, 5):
+        obj, _, _, _, _ = _playback_case(h)
+        h.uc.mem_write(obj + 0x674, struct.pack('<I', mode))
+        regs = _step_call(h, obj)
+        diffs = h.compare(STEP, regs=regs, ret='eax')
+        if diffs:
+            return diffs
+        res = h.call(STEP, regs=regs)
+        if res['fault']:
+            return ['replacement faulted: %s' % res['fault']]
+        if res['eax'] != (mode - 2) & 0xFFFFFFFF:
+            problems.append('mode %d: eax %08X' % (mode, res['eax']))
+        if _loader_u32(h, obj + 0x680):
+            problems.append('mode %d: the cursor moved' % mode)
+    return problems
