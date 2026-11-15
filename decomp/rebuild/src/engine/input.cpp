@@ -7,6 +7,10 @@
 ORIG_DATA(0060C79C);                                                       /* "input.dat" */
 ORIG_THISCALL(00459290, CGameFile *, (CGameFile *self, const std::string *name, int noLoad));
 ORIG_FN(005E3B10, void *, (unsigned int size));                             /* operator new[] */
+ORIG_DATA(006C8684);                                                       /* CSingleton<CInput>::m_instance */
+ORIG_DATA(00607BC8);                                                       /* "Ошибка при создании m_instance в CSingleton" */
+ORIG_DATA(00607BAC);                                                       /* "e:\\prog\\att1\\singleton.h" */
+ORIG_THISCALL(0046F300, void *, (void *self));                             /* CInput::CInput */
 ORIG_DATA(0060AC14);                                                       /* nEvent::NullInfo::vftable */
 ORIG_DATA(0060C798);                                                       /* evMoveInfo::vftable */
 ORIG_DATA(0060CA1C);                                                       /* evKeyInfo::vftable */
@@ -33,6 +37,21 @@ typedef long (__stdcall *device_acquire)(void *dev);
 static bool InEditor()
 {
     return (*(char **)d_006C88D8)[0x40] != 0;
+}
+
+/* The singleton accessor: the input object is built on the first request and a failed allocation throws the
+ * CSingleton error instead of returning null. */
+DECOMP(004215D0)
+CInput *CInput::Instance()
+{
+    CInput *&instance = *(CInput **)d_006C8684;
+    if (!instance) {
+        void *memory = operator new(sizeof(CInput));
+        instance = memory ? (CInput *)ORIG_CALL(0046F300)(memory) : nullptr;
+        if (!instance)
+            ThrowGameException(ORIG_STR(00607BC8), ORIG_STR(00607BAC), 16);
+    }
+    return instance;
 }
 
 /* Reads the whole input.dat: the size, then that many bytes into a fresh buffer.  A missing file leaves the input
