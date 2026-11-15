@@ -44,6 +44,25 @@ void CEngine::ApplyGamma()
     dev->SetRenderState((D3DRENDERSTATETYPE)194, FALSE);
 }
 
+/* The cursor singleton, built the first time it is asked for (the game's own pointer, not the Windows one). */
+ORIG_DATA(006C8688);                                                       /* CSingleton<CCursor>::m_instance */
+ORIG_DATA(00607BC8);                                                       /* "Ошибка при создании m_instance в CSingleton" */
+ORIG_DATA(00607BAC);                                                       /* "e:\\prog\\att1\\Singleton.h" */
+ORIG_THISCALL(00443E80, void *, (void *self));                             /* CCursor::CCursor */
+
+DECOMP(00421680)
+CCursor *CCursor::Instance()
+{
+    CCursor *&instance = *(CCursor **)d_006C8688;
+    if (!instance) {
+        void *memory = operator new(sizeof(CCursor));
+        instance = memory ? (CCursor *)ORIG_CALL(00443E80)(memory) : nullptr;
+        if (!instance)
+            ThrowGameException(ORIG_STR(00607BC8), ORIG_STR(00607BAC), 16);
+    }
+    return instance;
+}
+
 /* Window messages go to the current scene first.  Mouse messages get the position of the game's own cursor
  * (it moves by DirectInput, not by the Windows cursor).  A message the scene used resets the input state. */
 static bool IsMouseMessage(UINT msg)

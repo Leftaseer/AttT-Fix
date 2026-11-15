@@ -161,9 +161,11 @@ void StartProfiler();                        /* profile.cpp (DECOMP_PROFILE): wh
 
 struct CCursor {                             /* CSingleton<CCursor> (0x284 bytes) */
     void **vftable;
+    char pad04[0x284 - 4];                   /* the cursor's state and the update part at +224 (vtable 0x60A344) */
     static CCursor *Instance();              /* 0x421680 */
     const float *ScreenPos() { return ((const float *(__thiscall *)(CCursor *))vftable[34])(this); }
 };
+static_assert(sizeof(CCursor) == 0x284, "CCursor is 0x284 bytes");
 
 struct CUpdateRoot {                         /* g_updateRoot */
     void Update(float dt);                   /* 0x4DEED0 */
