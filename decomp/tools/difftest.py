@@ -34,7 +34,7 @@ STACK_SIZE = 0x00100000
 TEB = 0x7FFD0000
 SSE2_AVAILABLE = 0x008D18C0   # AttT's __sse2_available, set by __cpu_features_init before main
 IMPORT_STRING_LIMIT = 0x10000
-PRINTF_SPEC = re.compile(rb'%(?:[%scp]|[0-9]{0,3}[diuxXo])')
+PRINTF_SPEC = re.compile(rb'%(?:[%scp]|[0-9]{0,3}[diuxXo]|[0-9]{0,3}\.\d{1,9}[fF])')
 
 
 class Unsupported(Exception):
@@ -526,6 +526,7 @@ class Harness:
                 continue
             if not args:
                 raise Unsupported('null argument list')
+            at = args
             value, = struct.unpack('<I', self.uc.mem_read(args, 4))
             args += 4
             if code == ord('s'):
@@ -534,6 +535,10 @@ class Harness:
                 out.extend(b'%08X' % value)
             elif code == ord('c'):
                 out.append(value & 0xff)
+            elif code in b'fF':
+                # an x87 double of the caller's argument area (8 bytes, laid out back to back)
+                out.extend(spec[0] % struct.unpack('<d', self.uc.mem_read(at, 8))[0])
+                args += 4
             else:
                 if code in b'di' and value >= 0x80000000:
                     value -= 0x100000000
