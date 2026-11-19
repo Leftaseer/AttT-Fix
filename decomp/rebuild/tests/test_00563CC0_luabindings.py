@@ -84,9 +84,12 @@ def test_binding_tables(h):
 
     saved = []
     for va in CTORS:
-        for addr in (va, h.to_rebuilt(va)):
+        # a translated constructor has its own entry (the rebuilt code calls the compiled body directly)
+        for addr in {va, h.to_rebuilt(va), h.symbols.get('_f_%08X' % va)} - {None}:
             saved.append((addr, bytes(h.uc.mem_read(addr, len(CTOR_STUB)))))
             h.uc.mem_write(addr, CTOR_STUB)
+            # a previous test may have run the relinked entry: drop its translation or Unicorn replays it
+            h.uc.ctl_remove_cache(addr, addr + len(CTOR_STUB))
     try:
         for entry, slot, methods in CASES:
             h.uc.mem_write(slot, struct.pack('<I', collector))
@@ -113,4 +116,5 @@ def test_binding_tables(h):
     finally:
         for addr, data in saved:
             h.uc.mem_write(addr, data)
+            h.uc.ctl_remove_cache(addr, addr + len(data))
     return None
