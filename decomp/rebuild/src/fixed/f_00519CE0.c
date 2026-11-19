@@ -29,7 +29,7 @@ void __thiscall f_00519CE0(char *this)
     imp_00607330(name);
     *(unsigned int *)(this + 0x110) = 4;
     state = *(void **)(this + 0x38);
-    sub_0046CF30((char *)state + 0x80);
+    sub_0046CF30(*(void **)((char *)state + 0x80));
     *(unsigned int *)((char *)state + 0xac) = 5;
     sub_004220A0(value);
 }

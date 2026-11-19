@@ -69,8 +69,10 @@ def test_child_render_setup(h):
         log = h.alloc(0x70, bytes(0x70))
         obj = h.alloc(0x220, bytes(0x220))
         state = h.alloc(0xb0, bytes(0xb0))
+        render = h.alloc(0x40, bytes(0x40))
         child = h.alloc(0x194, bytes(0x194))
         h.uc.mem_write(obj + 0x38, _dword(state))
+        h.uc.mem_write(state + 0x80, _dword(render))
 
         configure = _stub(h, _log_ecx(log, 0x3c) + _arg(4, log + 0x40) + _arg(8, log + 0x44) +
                           b'\xFF\x05' + _dword(log + 0x4c) + _arg(0x0c, log + 0x48) + b'\xC2\x0C\x00')
@@ -108,7 +110,7 @@ def test_child_render_setup(h):
                     (0x28, 1, 'value setter flag'), (0x2c, 1, 'value setter calls'),
                     (0x34, 0x0061405C, 'name literal'), (0x38, 1, 'name constructor calls'),
                     (0x3c, child, 'virtual self'), (0x48, 1, 'virtual flag'), (0x4c, 1, 'virtual calls'),
-                    (0x54, 1, 'name destructor calls'), (0x58, state + 0x80, 'state update self'),
+                    (0x54, 1, 'name destructor calls'), (0x58, render, 'state update self'),
                     (0x5c, 1, 'state update calls'), (0x64, 1, 'value destructor calls'))
         for offset, want, name in expected:
             got = _u32(h, log + offset)
