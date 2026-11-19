@@ -187,7 +187,8 @@ callees; they are not end-to-end correctness or branch-coverage claims.
 
 Earlier full replacement checkpoint: 10,266 of 18,591 functions replaced (9,734 generated-function addresses plus 532 engine/Lua
 replacements). Original section addresses and PE timestamp are preserved; relink verification checks 4,604,704
-bytes and 86,576 pointers with zero mismatches. The current differential suite has 31 passing tests.
+bytes and 86,576 pointers with zero mismatches. At that checkpoint the differential suite had 31 passing tests
+(the current numbers are in [TRANSLATION_STATUS.md](TRANSLATION_STATUS.md)).
 
 **Verification correction (2026-11-02):** a Unicorn instruction-cache bug caused earlier comparisons to execute
 the original function twice. All earlier passing difftest/autoverify claims, including the former full-sweep
@@ -231,6 +232,11 @@ GHIDRA=/opt/ghidra_11.4.2_PUBLIC WORK=/tmp/attt-work LUA_SRC=/path/lua-5.1.2/src
    таблицы Lua, маскированные байты, строки, граф вызовов, порядок в коде).
 
 ## Состояние и дальнейшая работа
+
+**Current milestone (v0.3, 2026-11-19):** 10,460 replaced functions, 73 rejected functions still
+without a source translation, 1,020 passing differential tests; the relink reports zero mismatches.
+Coverage, the remaining reject list and what blocks them are in
+[TRANSLATION_STATUS.md](TRANSLATION_STATUS.md).
 
 Готово: инструменты и конвейер анализа, имена (≈3 300 на игру), регистровые соглашения, структуры классов,
 сырая декомпиляция всех функций, пересборка exe с заменой функций для обеих игр.
