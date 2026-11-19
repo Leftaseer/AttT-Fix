@@ -7,7 +7,8 @@
  * animation (+0x1C) is placed centred on the screen with the scaled size (0x004CA820; the free x and y are
  * truncated to ints before halving) and played with the settings {27, 13, 32} for 100 (0x004F7640).  The element
  * is released through its vtable +0 with 1, the volume restored (the saved volume 0x6CA494 follows each of the
- * two calls) and the by-value name destroyed. */
+ * two calls) and the by-value name destroyed.  The name goes to 0x004F7430 as a copy built by the MSVCP80 string
+ * copy constructor, and that callee destroys the copy. */
 /* @conv - 0 */
 #include "auto_pre.h"
 
@@ -15,6 +16,7 @@ typedef struct { unsigned int words[7]; } Str_004F7780;                   /* std
 
 DECOMP_C float (__stdcall *imp_0060786C)(void *) __asm__("__imp__AIL_digital_master_volume_level@4");
 DECOMP_C void (__stdcall *imp_00607868)(void *driver, float volume) __asm__("__imp__AIL_set_digital_master_volume_level@8");
+DECOMP_C void (__thiscall *imp_00607334)(void *, const void *) __asm__("__imp_??0?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@ABV01@@Z");
 DECOMP_C void (__thiscall *imp_00607330)(void *) __asm__("__imp_??1?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@QAE@XZ");
 DECOMP_C void *__cdecl sub_00421680(void);
 DECOMP_C void *__cdecl sub_005E3EAE(unsigned int size);                   /* operator new */
@@ -33,6 +35,7 @@ void __cdecl f_004F7780(Str_004F7780 name, unsigned int screenW, unsigned int sc
     int settings[3];
     char *elem, *player;
     float old1, old2, vw, vh, rw, rh, scale, sw, sh;
+    Str_004F7780 copy;
 
     old1 = imp_0060786C(*(void **)d_006CA498);
     old2 = imp_0060786C(*(void **)d_006CA498);
@@ -45,8 +48,10 @@ void __cdecl f_004F7780(Str_004F7780 name, unsigned int screenW, unsigned int sc
     settings[1] = 0x0d;
     settings[2] = 0x20;
     elem = (char *)sub_005E3EAE(0x34);
-    if (elem)
-        elem = (char *)sub_004F7430(elem, name, 0);
+    if (elem) {
+        imp_00607334(&copy, &name);
+        elem = (char *)sub_004F7430(elem, copy, 0);
+    }
     player = elem + 4;
     vw = (float)sub_00430DC0(player);
     vh = (float)sub_00430DD0(player);
